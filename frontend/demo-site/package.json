@@ -1,0 +1,19 @@
+{
+  "name": "sdk-demo-site",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 17081",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 18081"
+  },
+  "dependencies": {
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "vite": "^5.4.19"
+  }
+}
+
