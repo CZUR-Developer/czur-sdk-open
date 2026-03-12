@@ -1,3 +1,6 @@
+// Copyright (c) 2026 CZUR Tech. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 #include "sdk_app.h"
 
 #include <iostream>

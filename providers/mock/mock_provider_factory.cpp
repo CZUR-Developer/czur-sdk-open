@@ -1,3 +1,6 @@
+// Copyright (c) 2026 CZUR Tech. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 #include "mock_provider_factory.h"
 
 #include <memory>
