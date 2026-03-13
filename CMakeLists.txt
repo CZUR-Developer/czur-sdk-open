@@ -1,3 +1,32 @@
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+set(SDK_OPEN_THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
+set(SDK_OPEN_CPP_HTTPLIB_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/cpp-httplib")
+set(SDK_OPEN_WEBSOCKETPP_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/websocketpp")
+set(SDK_OPEN_ASIO_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/asio/asio/include")
+
+if(NOT EXISTS "${SDK_OPEN_CPP_HTTPLIB_DIR}/httplib.h")
+    message(FATAL_ERROR "Missing third_party/cpp-httplib/httplib.h")
+endif()
+if(NOT EXISTS "${SDK_OPEN_WEBSOCKETPP_DIR}/websocketpp/server.hpp")
+    message(FATAL_ERROR "Missing third_party/websocketpp/websocketpp/server.hpp")
+endif()
+if(NOT EXISTS "${SDK_OPEN_ASIO_DIR}/asio.hpp")
+    message(FATAL_ERROR "Missing third_party/asio/asio/include/asio.hpp")
+endif()
+
+add_library(sdk_open_third_party INTERFACE)
+target_include_directories(sdk_open_third_party INTERFACE
+    "${SDK_OPEN_CPP_HTTPLIB_DIR}"
+    "${SDK_OPEN_WEBSOCKETPP_DIR}"
+    "${SDK_OPEN_ASIO_DIR}"
+)
+target_compile_definitions(sdk_open_third_party INTERFACE
+    ASIO_STANDALONE
+)
+
 add_library(sdk_open_interfaces INTERFACE)
 target_include_directories(sdk_open_interfaces INTERFACE
     "${CMAKE_CURRENT_SOURCE_DIR}/interfaces"
@@ -16,7 +45,10 @@ target_include_directories(sdk_open_runtime PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/runtime"
     "${CMAKE_CURRENT_SOURCE_DIR}/interfaces"
 )
-target_link_libraries(sdk_open_runtime PUBLIC sdk_open_interfaces)
+target_link_libraries(sdk_open_runtime PUBLIC
+    sdk_open_interfaces
+    sdk_open_third_party
+)
 target_link_libraries(sdk_open_runtime PUBLIC pthread)
 
 add_library(sdk_mock_providers STATIC

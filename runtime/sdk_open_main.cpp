@@ -42,6 +42,14 @@ void ApplyEnvPortOverride(const char* env_key, int& target_port) {
     }
 }
 
+void ApplyEnvStringOverride(const char* env_key, std::string& target_value) {
+    const char* val = std::getenv(env_key);
+    if (val == nullptr) {
+        return;
+    }
+    target_value = val;
+}
+
 int main(int argc, char* argv[]) {
     std::string config_path;
     if (argc > 1 && argv[1] != nullptr) {
@@ -54,6 +62,7 @@ int main(int argc, char* argv[]) {
     ApplyEnvPortOverride("SDK_DEMO_HTTP_PORT", config.demo_http_port);
     ApplyEnvPortOverride("SDK_COMMAND_WS_PORT", config.command_ws_port);
     ApplyEnvPortOverride("SDK_VIDEO_WS_PORT", config.video_ws_port);
+    ApplyEnvStringOverride("SDK_AUTH_TOKEN", config.auth_token);
     editor::sdk::ProviderBundle providers = editor::sdk::mock::CreateProviderBundle();
 
     std::cout << "[sdk_open_app] provider mode: mock" << std::endl;

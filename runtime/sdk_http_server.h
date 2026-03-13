@@ -4,34 +4,46 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
+#include <memory>
 #include <string>
 #include <thread>
+
+namespace httplib {
+class Server;
+}
 
 namespace editor {
 namespace sdk {
 
 class SdkHttpServer {
 public:
+    using StatusJsonSupplier = std::function<std::string()>;
+
     SdkHttpServer(const std::string& site_name,
                   const std::string& host,
                   int port,
-                  const std::string& document_root);
+                  const std::string& document_root,
+                  const std::string& auth_token);
+    ~SdkHttpServer();
+
+    void EnableStatusApi(StatusJsonSupplier supplier);
     bool Start();
     void Stop();
 
 private:
-    void ServeLoop();
-    void HandleClient(int client_fd);
-    std::string ResolveRequestPath(const std::string& request_path) const;
-    static bool SendAll(int fd, const char* data, size_t size);
-    static std::string GuessContentType(const std::string& path);
+    bool IsAuthorized(const std::string& authorization) const;
+    bool ConfigureRoutes();
 
     std::string site_name_;
     std::string host_;
     int port_;
     std::string document_root_;
+    std::string auth_token_;
+    bool status_api_enabled_;
+    StatusJsonSupplier status_supplier_;
     std::atomic<bool> running_;
-    int server_fd_;
+    std::unique_ptr<httplib::Server> server_;
     std::thread server_thread_;
 };
 

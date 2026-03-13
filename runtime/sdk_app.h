@@ -4,6 +4,8 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
+#include <string>
 
 #include "sdk_config.h"
 #include "sdk_http_server.h"
@@ -22,6 +24,10 @@ public:
     bool IsRunning() const;
 
 private:
+    std::string BuildStatusJson() const;
+    std::string BuildCapabilitiesJson() const;
+    uint64_t UptimeSeconds() const;
+
     SdkConfig config_;
     ProviderBundle providers_;
     SdkHttpServer admin_http_server_;
@@ -29,8 +35,8 @@ private:
     SdkWsCommandServer command_ws_server_;
     SdkWsVideoServer video_ws_server_;
     std::atomic<bool> running_;
+    std::chrono::steady_clock::time_point start_time_;
 };
 
 } // namespace sdk
 } // namespace editor
-
