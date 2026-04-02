@@ -9,6 +9,8 @@
 #include <memory>
 #include <string>
 
+#include "sdk_json_utils.h"
+
 namespace editor {
 namespace sdk {
 
@@ -20,7 +22,7 @@ public:
         uint64_t request_count = 0;
     };
 
-    using JsonSupplier = std::function<std::string()>;
+    using JsonSupplier = std::function<Json()>;
 
     SdkWsCommandServer(const std::string& host, int port, const std::string& auth_token);
     ~SdkWsCommandServer();

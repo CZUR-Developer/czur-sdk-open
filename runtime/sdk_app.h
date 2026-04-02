@@ -9,6 +9,7 @@
 
 #include "sdk_config.h"
 #include "sdk_http_server.h"
+#include "sdk_json_utils.h"
 #include "sdk_provider_bundle.h"
 #include "sdk_ws_command_server.h"
 #include "sdk_ws_video_server.h"
@@ -24,8 +25,8 @@ public:
     bool IsRunning() const;
 
 private:
-    std::string BuildStatusJson() const;
-    std::string BuildCapabilitiesJson() const;
+    Json BuildStatusJson() const;
+    Json BuildCapabilitiesJson() const;
     uint64_t UptimeSeconds() const;
 
     SdkConfig config_;

@@ -10,13 +10,10 @@
 
 #include <iostream>
 #include <mutex>
-#include <regex>
 #include <set>
-#include <sstream>
 #include <string>
 #include <thread>
 #include <utility>
-#include <vector>
 
 namespace editor {
 namespace sdk {
@@ -27,40 +24,6 @@ using WsServer = websocketpp::server<websocketpp::config::asio>;
 using ConnectionHdl = websocketpp::connection_hdl;
 using MessagePtr = WsServer::message_ptr;
 using ErrorCode = websocketpp::lib::error_code;
-
-std::string EscapeJson(const std::string& input) {
-    std::string out;
-    out.reserve(input.size() + 8);
-    for (char c : input) {
-        switch (c) {
-            case '\"': out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            default: out.push_back(c); break;
-        }
-    }
-    return out;
-}
-
-std::string BuildResponse(const std::string& id, int code, const std::string& message, const std::string& data_json) {
-    std::ostringstream os;
-    os << "{\"id\":\"" << EscapeJson(id)
-       << "\",\"code\":" << code
-       << ",\"message\":\"" << EscapeJson(message)
-       << "\",\"data\":" << data_json << "}";
-    return os.str();
-}
-
-std::string ExtractJsonStringField(const std::string& payload, const std::string& field_name) {
-    const std::regex pattern("\"" + field_name + "\"\\s*:\\s*\"([^\"]*)\"");
-    std::smatch match;
-    if (std::regex_search(payload, match, pattern) && match.size() == 2) {
-        return match[1].str();
-    }
-    return "";
-}
 
 std::string QueryValue(const std::string& query, const std::string& key) {
     size_t pos = 0;
@@ -77,6 +40,14 @@ std::string QueryValue(const std::string& query, const std::string& key) {
             break;
         }
         pos = amp_pos + 1;
+    }
+    return "";
+}
+
+std::string GetOptionalStringField(const Json& obj, const char* key) {
+    const auto it = obj.find(key);
+    if (it != obj.end() && it->is_string()) {
+        return it->get<std::string>();
     }
     return "";
 }
@@ -153,37 +124,45 @@ bool SdkWsCommandServer::Start() {
     server.set_message_handler([this](ConnectionHdl hdl, MessagePtr msg) {
         impl_->request_count.fetch_add(1);
         if (msg->get_opcode() != websocketpp::frame::opcode::text) {
-            const std::string bad_resp = BuildResponse("", 400, "text message required", "{}");
+            const std::string bad_resp = DumpJson(BuildWsResponse("", 400, "text message required"));
             ErrorCode ec;
             impl_->server.send(hdl, bad_resp, websocketpp::frame::opcode::text, ec);
             return;
         }
 
         const std::string payload = msg->get_payload();
-        const std::string req_id = ExtractJsonStringField(payload, "id");
-        const std::string method = ExtractJsonStringField(payload, "method");
-        if (method.empty()) {
-            const std::string bad_resp = BuildResponse(req_id, 400, "missing method", "{}");
+        Json request;
+        if (!TryParseJson(payload, &request) || !request.is_object()) {
+            const std::string bad_resp = DumpJson(BuildWsResponse("", 400, "invalid json"));
             ErrorCode ec;
             impl_->server.send(hdl, bad_resp, websocketpp::frame::opcode::text, ec);
             return;
         }
 
-        std::string data_json = "{}";
+        const std::string req_id = GetOptionalStringField(request, "id");
+        const std::string method = GetOptionalStringField(request, "method");
+        if (method.empty()) {
+            const std::string bad_resp = DumpJson(BuildWsResponse(req_id, 400, "missing method"));
+            ErrorCode ec;
+            impl_->server.send(hdl, bad_resp, websocketpp::frame::opcode::text, ec);
+            return;
+        }
+
+        Json data_json = Json::object();
         int code = 0;
         std::string message = "ok";
         if (method == "ping") {
-            data_json = "{\"pong\":true}";
+            data_json = Json{{"pong", true}};
         } else if (method == "getStatus") {
-            data_json = status_json_supplier_ ? status_json_supplier_() : "{}";
+            data_json = status_json_supplier_ ? status_json_supplier_() : Json::object();
         } else if (method == "listCapabilities") {
-            data_json = capabilities_json_supplier_ ? capabilities_json_supplier_() : "{}";
+            data_json = capabilities_json_supplier_ ? capabilities_json_supplier_() : Json::object();
         } else {
             code = 404;
             message = "unknown method";
         }
 
-        const std::string resp = BuildResponse(req_id, code, message, data_json);
+        const std::string resp = DumpJson(BuildWsResponse(req_id, code, message, data_json));
         ErrorCode ec;
         impl_->server.send(hdl, resp, websocketpp::frame::opcode::text, ec);
     });

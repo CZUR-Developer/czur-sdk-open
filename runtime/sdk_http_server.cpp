@@ -15,8 +15,8 @@ namespace {
 
 const char* kJsonContentType = "application/json; charset=utf-8";
 
-std::string BuildUnauthorizedJson() {
-    return "{\"code\":401,\"message\":\"unauthorized\"}";
+Json BuildUnauthorizedJson() {
+    return BuildErrorBody(401, "unauthorized");
 }
 
 } // namespace
@@ -60,13 +60,13 @@ bool SdkHttpServer::ConfigureRoutes() {
         server_->Get("/api/status", [this](const httplib::Request& req, httplib::Response& res) {
             if (!IsAuthorized(req.get_header_value("Authorization"))) {
                 res.status = 401;
-                res.set_content(BuildUnauthorizedJson(), kJsonContentType);
+                res.set_content(DumpJson(BuildUnauthorizedJson()), kJsonContentType);
                 return;
             }
-            const std::string body = status_supplier_ ? status_supplier_() : "{}";
+            const Json body = status_supplier_ ? status_supplier_() : Json::object();
             res.status = 200;
             res.set_header("Cache-Control", "no-store");
-            res.set_content(body, kJsonContentType);
+            res.set_content(DumpJson(body), kJsonContentType);
         });
     }
 

@@ -10,12 +10,12 @@
 
 #include <iostream>
 #include <mutex>
-#include <regex>
 #include <set>
-#include <sstream>
 #include <string>
 #include <thread>
 #include <utility>
+
+#include "sdk_json_utils.h"
 
 namespace editor {
 namespace sdk {
@@ -26,31 +26,6 @@ using WsServer = websocketpp::server<websocketpp::config::asio>;
 using ConnectionHdl = websocketpp::connection_hdl;
 using MessagePtr = WsServer::message_ptr;
 using ErrorCode = websocketpp::lib::error_code;
-
-std::string EscapeJson(const std::string& input) {
-    std::string out;
-    out.reserve(input.size() + 8);
-    for (char c : input) {
-        switch (c) {
-            case '\"': out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            default: out.push_back(c); break;
-        }
-    }
-    return out;
-}
-
-std::string ExtractJsonStringField(const std::string& payload, const std::string& field_name) {
-    const std::regex pattern("\"" + field_name + "\"\\s*:\\s*\"([^\"]*)\"");
-    std::smatch match;
-    if (std::regex_search(payload, match, pattern) && match.size() == 2) {
-        return match[1].str();
-    }
-    return "";
-}
 
 std::string QueryValue(const std::string& query, const std::string& key) {
     size_t pos = 0;
@@ -141,22 +116,46 @@ bool SdkWsVideoServer::Start() {
 
             const uint64_t frame_no = impl_->binary_frames.load();
             if (frame_no % 30 == 0) {
-                std::ostringstream event;
-                event << "{\"event\":\"videoStats\",\"frames\":" << frame_no
-                      << ",\"bytes\":" << impl_->binary_bytes.load() << "}";
+                Json event = {
+                    {"event", "videoStats"},
+                    {"frames", frame_no},
+                    {"bytes", impl_->binary_bytes.load()},
+                };
                 ErrorCode ec;
-                impl_->server.send(hdl, event.str(), websocketpp::frame::opcode::text, ec);
+                impl_->server.send(hdl, DumpJson(event), websocketpp::frame::opcode::text, ec);
             }
             return;
         }
 
         const std::string payload = msg->get_payload();
-        const std::string type = ExtractJsonStringField(payload, "type");
         std::string response;
+        Json request;
+        if (!TryParseJson(payload, &request) || !request.is_object()) {
+            response = DumpJson(Json{
+                {"event", "error"},
+                {"message", "invalid json"},
+            });
+            ErrorCode ec;
+            impl_->server.send(hdl, response, websocketpp::frame::opcode::text, ec);
+            return;
+        }
+
+        std::string type;
+        const auto it = request.find("type");
+        if (it != request.end() && it->is_string()) {
+            type = it->get<std::string>();
+        }
+
         if (type == "start" || type == "stop" || type == "setFormat") {
-            response = "{\"event\":\"controlAck\",\"type\":\"" + EscapeJson(type) + "\"}";
+            response = DumpJson(Json{
+                {"event", "controlAck"},
+                {"type", type},
+            });
         } else {
-            response = "{\"event\":\"error\",\"message\":\"unknown control type\"}";
+            response = DumpJson(Json{
+                {"event", "error"},
+                {"message", "unknown control type"},
+            });
         }
         ErrorCode ec;
         impl_->server.send(hdl, response, websocketpp::frame::opcode::text, ec);

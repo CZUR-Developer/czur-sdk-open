@@ -6,6 +6,7 @@ set(SDK_OPEN_THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
 set(SDK_OPEN_CPP_HTTPLIB_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/cpp-httplib")
 set(SDK_OPEN_WEBSOCKETPP_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/websocketpp")
 set(SDK_OPEN_ASIO_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/asio/asio/include")
+set(SDK_OPEN_NLOHMANN_JSON_DIR "${SDK_OPEN_THIRD_PARTY_DIR}")
 
 if(NOT EXISTS "${SDK_OPEN_CPP_HTTPLIB_DIR}/httplib.h")
     message(FATAL_ERROR "Missing third_party/cpp-httplib/httplib.h")
@@ -16,12 +17,16 @@ endif()
 if(NOT EXISTS "${SDK_OPEN_ASIO_DIR}/asio.hpp")
     message(FATAL_ERROR "Missing third_party/asio/asio/include/asio.hpp")
 endif()
+if(NOT EXISTS "${SDK_OPEN_NLOHMANN_JSON_DIR}/nlohmann/json.hpp")
+    message(FATAL_ERROR "Missing third_party/nlohmann/json.hpp")
+endif()
 
 add_library(sdk_open_third_party INTERFACE)
 target_include_directories(sdk_open_third_party INTERFACE
     "${SDK_OPEN_CPP_HTTPLIB_DIR}"
     "${SDK_OPEN_WEBSOCKETPP_DIR}"
     "${SDK_OPEN_ASIO_DIR}"
+    "${SDK_OPEN_NLOHMANN_JSON_DIR}"
 )
 target_compile_definitions(sdk_open_third_party INTERFACE
     ASIO_STANDALONE
@@ -35,6 +40,7 @@ target_include_directories(sdk_open_interfaces INTERFACE
 set(SDK_OPEN_RUNTIME_SRCS
     runtime/sdk_app.cpp
     runtime/sdk_http_server.cpp
+    runtime/sdk_json_utils.cpp
     runtime/sdk_ws_command_server.cpp
     runtime/sdk_ws_video_server.cpp
     runtime/sdk_config.cpp

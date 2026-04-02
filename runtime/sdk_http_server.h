@@ -9,6 +9,8 @@
 #include <string>
 #include <thread>
 
+#include "sdk_json_utils.h"
+
 namespace httplib {
 class Server;
 }
@@ -18,7 +20,7 @@ namespace sdk {
 
 class SdkHttpServer {
 public:
-    using StatusJsonSupplier = std::function<std::string()>;
+    using StatusJsonSupplier = std::function<Json()>;
 
     SdkHttpServer(const std::string& site_name,
                   const std::string& host,
