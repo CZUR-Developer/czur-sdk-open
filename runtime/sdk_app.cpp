@@ -12,6 +12,7 @@ namespace sdk {
 SdkApp::SdkApp(const SdkConfig& config, ProviderBundle providers)
     : config_(config),
       providers_(std::move(providers)),
+      command_dispatcher_(new SdkCommandDispatcher(config_, providers_)),
       admin_http_server_(
           "admin-site", config_.bind_host, config_.admin_http_port, config_.web_root + "/admin", config_.auth_token),
       demo_http_server_(
@@ -21,6 +22,8 @@ SdkApp::SdkApp(const SdkConfig& config, ProviderBundle providers)
       running_(false),
       start_time_(std::chrono::steady_clock::now()) {
     admin_http_server_.EnableStatusApi([this]() { return BuildStatusJson(); });
+    command_dispatcher_->SetStatusSupplier([this]() { return BuildStatusJson(); });
+    command_ws_server_.SetRequestHandler([this](const Json& request) { return command_dispatcher_->Dispatch(request); });
     command_ws_server_.SetStatusJsonSupplier([this]() { return BuildStatusJson(); });
     command_ws_server_.SetCapabilitiesJsonSupplier([this]() { return BuildCapabilitiesJson(); });
 }
@@ -61,6 +64,9 @@ bool SdkApp::Start() {
     }
     if (providers_.ofd_provider) {
         std::cout << "[sdk_app] ofd provider: " << providers_.ofd_provider->ProviderName() << std::endl;
+    }
+    if (providers_.auth_provider) {
+        std::cout << "[sdk_app] auth provider: " << providers_.auth_provider->ProviderName() << std::endl;
     }
 
     start_time_ = std::chrono::steady_clock::now();
@@ -116,6 +122,7 @@ Json SdkApp::BuildStatusJson() const {
              {"graphic", providers_.graphic_provider ? providers_.graphic_provider->ProviderName() : ""},
              {"ocr", providers_.ocr_provider ? providers_.ocr_provider->ProviderName() : ""},
              {"ofd", providers_.ofd_provider ? providers_.ofd_provider->ProviderName() : ""},
+             {"auth", providers_.auth_provider ? providers_.auth_provider->ProviderName() : ""},
          }},
         {"ws",
          {
@@ -137,28 +144,7 @@ Json SdkApp::BuildStatusJson() const {
 }
 
 Json SdkApp::BuildCapabilitiesJson() const {
-    Json modules = Json::array();
-    if (providers_.device_provider) {
-        modules.push_back("device");
-    }
-    if (providers_.graphic_provider) {
-        modules.push_back("graphic");
-    }
-    if (providers_.ocr_provider) {
-        modules.push_back("ocr");
-    }
-    if (providers_.ofd_provider) {
-        modules.push_back("ofd");
-    }
-
-    Json command_methods = Json::array({"ping", "getStatus", "listCapabilities"});
-    Json video_control_types = Json::array({"start", "stop", "setFormat"});
-
-    return Json{
-        {"modules", std::move(modules)},
-        {"commandMethods", std::move(command_methods)},
-        {"videoControlTypes", std::move(video_control_types)},
-    };
+    return command_dispatcher_ ? command_dispatcher_->BuildCapabilitiesJson() : Json::object();
 }
 
 } // namespace sdk

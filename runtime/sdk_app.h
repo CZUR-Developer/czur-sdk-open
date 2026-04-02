@@ -5,8 +5,10 @@
 
 #include <atomic>
 #include <chrono>
+#include <memory>
 #include <string>
 
+#include "sdk_command_dispatcher.h"
 #include "sdk_config.h"
 #include "sdk_http_server.h"
 #include "sdk_json_utils.h"
@@ -31,6 +33,7 @@ private:
 
     SdkConfig config_;
     ProviderBundle providers_;
+    std::unique_ptr<SdkCommandDispatcher> command_dispatcher_;
     SdkHttpServer admin_http_server_;
     SdkHttpServer demo_http_server_;
     SdkWsCommandServer command_ws_server_;

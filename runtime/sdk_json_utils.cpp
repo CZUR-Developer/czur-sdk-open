@@ -3,6 +3,7 @@
 
 #include "sdk_json_utils.h"
 
+#include <ctime>
 #include <utility>
 
 namespace editor {
@@ -32,6 +33,10 @@ bool TryParseJson(std::string_view payload, Json* out, std::string* err) {
     return true;
 }
 
+Json BuildErrorBody(SdkStatusCode code, const std::string& message, const Json& data) {
+    return BuildErrorBody(ToCode(code), message, data);
+}
+
 Json BuildErrorBody(int code, const std::string& message, const Json& data) {
     return Json{
         {"code", code},
@@ -40,10 +45,20 @@ Json BuildErrorBody(int code, const std::string& message, const Json& data) {
     };
 }
 
+Json BuildWsResponse(const std::string& request_id, SdkStatusCode code, const std::string& message, const Json& data) {
+    return BuildWsResponse(request_id, ToCode(code), message, data);
+}
+
 Json BuildWsResponse(const std::string& request_id, int code, const std::string& message, const Json& data) {
     Json response = BuildErrorBody(code, message, data);
+    response["request_id"] = request_id;
     response["id"] = request_id;
+    response["ts"] = static_cast<std::int64_t>(std::time(nullptr));
     return response;
+}
+
+Json BuildWsEvent(const std::string& event, const Json& payload, SdkStatusCode code, const std::string& message) {
+    return BuildWsEvent(event, payload, ToCode(code), message);
 }
 
 Json BuildWsEvent(const std::string& event, const Json& payload, int code, const std::string& message) {
@@ -52,6 +67,7 @@ Json BuildWsEvent(const std::string& event, const Json& payload, int code, const
         {"code", code},
         {"message", message},
         {"payload", payload},
+        {"ts", static_cast<std::int64_t>(std::time(nullptr))},
     };
 }
 

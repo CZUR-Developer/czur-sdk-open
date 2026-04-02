@@ -77,6 +77,10 @@ SdkWsCommandServer::~SdkWsCommandServer() {
     Stop();
 }
 
+void SdkWsCommandServer::SetRequestHandler(RequestHandler handler) {
+    request_handler_ = std::move(handler);
+}
+
 void SdkWsCommandServer::SetStatusJsonSupplier(JsonSupplier supplier) {
     status_json_supplier_ = std::move(supplier);
 }
@@ -124,7 +128,8 @@ bool SdkWsCommandServer::Start() {
     server.set_message_handler([this](ConnectionHdl hdl, MessagePtr msg) {
         impl_->request_count.fetch_add(1);
         if (msg->get_opcode() != websocketpp::frame::opcode::text) {
-            const std::string bad_resp = DumpJson(BuildWsResponse("", 400, "text message required"));
+            const std::string bad_resp =
+                DumpJson(BuildWsResponse("", SdkStatusCode::InvalidRequest, "text message required"));
             ErrorCode ec;
             impl_->server.send(hdl, bad_resp, websocketpp::frame::opcode::text, ec);
             return;
@@ -133,36 +138,50 @@ bool SdkWsCommandServer::Start() {
         const std::string payload = msg->get_payload();
         Json request;
         if (!TryParseJson(payload, &request) || !request.is_object()) {
-            const std::string bad_resp = DumpJson(BuildWsResponse("", 400, "invalid json"));
+            const std::string bad_resp = DumpJson(BuildWsResponse("", SdkStatusCode::InvalidRequest, "invalid json"));
             ErrorCode ec;
             impl_->server.send(hdl, bad_resp, websocketpp::frame::opcode::text, ec);
             return;
         }
 
-        const std::string req_id = GetOptionalStringField(request, "id");
-        const std::string method = GetOptionalStringField(request, "method");
-        if (method.empty()) {
-            const std::string bad_resp = DumpJson(BuildWsResponse(req_id, 400, "missing method"));
-            ErrorCode ec;
-            impl_->server.send(hdl, bad_resp, websocketpp::frame::opcode::text, ec);
-            return;
-        }
-
-        Json data_json = Json::object();
-        int code = 0;
-        std::string message = "ok";
-        if (method == "ping") {
-            data_json = Json{{"pong", true}};
-        } else if (method == "getStatus") {
-            data_json = status_json_supplier_ ? status_json_supplier_() : Json::object();
-        } else if (method == "listCapabilities") {
-            data_json = capabilities_json_supplier_ ? capabilities_json_supplier_() : Json::object();
+        Json response;
+        if (request_handler_) {
+            response = request_handler_(request);
         } else {
-            code = 404;
-            message = "unknown method";
+            const std::string req_id = GetOptionalStringField(request, "request_id").empty()
+                                           ? GetOptionalStringField(request, "id")
+                                           : GetOptionalStringField(request, "request_id");
+            const std::string method = GetOptionalStringField(request, "method");
+            if (method.empty()) {
+                response = BuildWsResponse(req_id, SdkStatusCode::InvalidMethod, "missing method");
+            } else {
+                Json data_json = Json::object();
+                SdkStatusCode code = SdkStatusCode::Ok;
+                std::string message = "ok";
+                if (method == "ping") {
+                    data_json = Json{{"pong", true}};
+                } else if (method == "getStatus") {
+                    data_json = status_json_supplier_ ? status_json_supplier_() : Json::object();
+                } else if (method == "listCapabilities") {
+                    data_json = capabilities_json_supplier_ ? capabilities_json_supplier_() : Json::object();
+                } else {
+                    code = SdkStatusCode::UnsupportedMethod;
+                    message = "unsupported method";
+                }
+                response = BuildWsResponse(req_id, code, message, data_json);
+            }
         }
 
-        const std::string resp = DumpJson(BuildWsResponse(req_id, code, message, data_json));
+        int response_code = ToCode(SdkStatusCode::InternalError);
+        const auto code_it = response.find("code");
+        if (code_it != response.end() && code_it->is_number_integer()) {
+            response_code = code_it->get<int>();
+        }
+        if (IsAuthStatusCode(response_code)) {
+            impl_->auth_failed.fetch_add(1);
+        }
+
+        const std::string resp = DumpJson(response);
         ErrorCode ec;
         impl_->server.send(hdl, resp, websocketpp::frame::opcode::text, ec);
     });

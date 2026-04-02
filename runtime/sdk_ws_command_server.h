@@ -23,10 +23,12 @@ public:
     };
 
     using JsonSupplier = std::function<Json()>;
+    using RequestHandler = std::function<Json(const Json&)>;
 
     SdkWsCommandServer(const std::string& host, int port, const std::string& auth_token);
     ~SdkWsCommandServer();
 
+    void SetRequestHandler(RequestHandler handler);
     void SetStatusJsonSupplier(JsonSupplier supplier);
     void SetCapabilitiesJsonSupplier(JsonSupplier supplier);
     bool Start();
@@ -40,6 +42,7 @@ private:
     int port_;
     std::string auth_token_;
     std::atomic<bool> running_;
+    RequestHandler request_handler_;
     JsonSupplier status_json_supplier_;
     JsonSupplier capabilities_json_supplier_;
     std::unique_ptr<Impl> impl_;

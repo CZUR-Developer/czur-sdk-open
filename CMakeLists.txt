@@ -39,6 +39,7 @@ target_include_directories(sdk_open_interfaces INTERFACE
 
 set(SDK_OPEN_RUNTIME_SRCS
     runtime/sdk_app.cpp
+    runtime/sdk_command_dispatcher.cpp
     runtime/sdk_http_server.cpp
     runtime/sdk_json_utils.cpp
     runtime/sdk_ws_command_server.cpp

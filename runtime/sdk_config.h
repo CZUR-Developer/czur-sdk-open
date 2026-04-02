@@ -15,7 +15,7 @@ struct SdkConfig {
     int command_ws_port = 17090;
     int video_ws_port = 17091;
     std::string web_root = "web";
-    std::string auth_token = "dev-token";
+    std::string auth_token;
 
     static SdkConfig FromFile(const std::string& path);
 };

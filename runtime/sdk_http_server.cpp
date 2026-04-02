@@ -16,7 +16,7 @@ namespace {
 const char* kJsonContentType = "application/json; charset=utf-8";
 
 Json BuildUnauthorizedJson() {
-    return BuildErrorBody(401, "unauthorized");
+    return BuildErrorBody(SdkStatusCode::AuthRequired, "unauthorized");
 }
 
 } // namespace
@@ -59,12 +59,12 @@ bool SdkHttpServer::ConfigureRoutes() {
     if (status_api_enabled_) {
         server_->Get("/api/status", [this](const httplib::Request& req, httplib::Response& res) {
             if (!IsAuthorized(req.get_header_value("Authorization"))) {
-                res.status = 401;
+                res.status = ToHttpStatus(SdkHttpStatus::Unauthorized);
                 res.set_content(DumpJson(BuildUnauthorizedJson()), kJsonContentType);
                 return;
             }
             const Json body = status_supplier_ ? status_supplier_() : Json::object();
-            res.status = 200;
+            res.status = ToHttpStatus(SdkHttpStatus::Ok);
             res.set_header("Cache-Control", "no-store");
             res.set_content(DumpJson(body), kJsonContentType);
         });
@@ -77,7 +77,7 @@ bool SdkHttpServer::ConfigureRoutes() {
     }
 
     server_->set_error_handler([](const httplib::Request&, httplib::Response& res) {
-        if (res.status == 404) {
+        if (res.status == ToHttpStatus(SdkHttpStatus::NotFound)) {
             res.set_content("Not Found", "text/plain; charset=utf-8");
         }
     });
