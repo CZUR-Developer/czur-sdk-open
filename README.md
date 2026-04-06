@@ -176,4 +176,6 @@ Device control, capture, image processing, OCR, and file processing directions a
 ## Documentation
 
 - Chinese version: [README_ZH.md](./README_ZH.md)
+- Public error codes: [doc/ERROR_CODES.md](./doc/ERROR_CODES.md)
+- Chinese error codes: [doc/ERROR_CODES_ZH.md](./doc/ERROR_CODES_ZH.md)
 - Contribution guide: [CONTRIBUTING.md](./CONTRIBUTING.md)

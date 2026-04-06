@@ -176,4 +176,6 @@ curl -H "Authorization: Bearer <token>" http://127.0.0.1:17080/api/status
 ## 文档
 
 - 英文版本：[README.md](./README.md)
+- 英文错误码文档：[doc/ERROR_CODES.md](./doc/ERROR_CODES.md)
+- 中文错误码文档：[doc/ERROR_CODES_ZH.md](./doc/ERROR_CODES_ZH.md)
 - 贡献说明：[CONTRIBUTING.md](./CONTRIBUTING.md)
