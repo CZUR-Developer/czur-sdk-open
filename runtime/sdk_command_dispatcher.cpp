@@ -59,23 +59,45 @@ const char* ToDeviceScopeString(SdkDeviceScopePolicy device_scope) {
     }
 }
 
+SdkMethodDescriptor MakeMethodDescriptor(const std::string& method,
+                                         SdkAuthScope auth_scope,
+                                         SdkDeviceScopePolicy device_scope,
+                                         const std::string& status,
+                                         const std::string& summary,
+                                         const std::vector<std::string>& legacy_aliases) {
+    SdkMethodDescriptor descriptor;
+    descriptor.method = method;
+    descriptor.auth_scope = auth_scope;
+    descriptor.device_scope = device_scope;
+    descriptor.status = status;
+    descriptor.summary = summary;
+    descriptor.legacy_aliases = legacy_aliases;
+    return descriptor;
+}
+
 } // namespace
 
 SdkCommandDispatcher::SdkCommandDispatcher(const SdkConfig& config, const ProviderBundle& providers)
     : config_(config),
       providers_(providers) {
-    method_descriptors_.push_back({"system.ping", SdkAuthScope::Anonymous, SdkDeviceScopePolicy::None, "ga",
-                                   "SDK 存活探测", {"ping"}});
-    method_descriptors_.push_back({"system.info", SdkAuthScope::Anonymous, SdkDeviceScopePolicy::None, "ga",
-                                   "返回运行状态、端口和 provider 信息", {"getStatus"}});
-    method_descriptors_.push_back({"system.capabilities", SdkAuthScope::Anonymous, SdkDeviceScopePolicy::None, "ga",
-                                   "返回当前开放 method 清单", {"listCapabilities"}});
-    method_descriptors_.push_back({"auth.validate", SdkAuthScope::Authenticated, SdkDeviceScopePolicy::None, "ga",
-                                   "校验 ApiKey 并返回授权上下文", {}});
-    method_descriptors_.push_back({"auth.refresh", SdkAuthScope::Authenticated, SdkDeviceScopePolicy::None, "beta",
-                                   "校验 ApiKey 并签发短期 session key", {}});
-    method_descriptors_.push_back({"auth.get_context", SdkAuthScope::Authenticated, SdkDeviceScopePolicy::None, "beta",
-                                   "使用 session key 或 ApiKey 查询授权上下文", {}});
+    method_descriptors_.push_back(MakeMethodDescriptor(
+        "system.ping", SdkAuthScope::Anonymous, SdkDeviceScopePolicy::None, "ga", "SDK 存活探测",
+        std::vector<std::string>(1, "ping")));
+    method_descriptors_.push_back(MakeMethodDescriptor(
+        "system.info", SdkAuthScope::Anonymous, SdkDeviceScopePolicy::None, "ga", "返回运行状态、端口和 provider 信息",
+        std::vector<std::string>(1, "getStatus")));
+    method_descriptors_.push_back(MakeMethodDescriptor(
+        "system.capabilities", SdkAuthScope::Anonymous, SdkDeviceScopePolicy::None, "ga", "返回当前开放 method 清单",
+        std::vector<std::string>(1, "listCapabilities")));
+    method_descriptors_.push_back(MakeMethodDescriptor(
+        "auth.validate", SdkAuthScope::Authenticated, SdkDeviceScopePolicy::None, "ga", "校验 ApiKey 并返回授权上下文",
+        std::vector<std::string>()));
+    method_descriptors_.push_back(MakeMethodDescriptor(
+        "auth.refresh", SdkAuthScope::Authenticated, SdkDeviceScopePolicy::None, "beta",
+        "校验 ApiKey 并签发短期 session key", std::vector<std::string>()));
+    method_descriptors_.push_back(MakeMethodDescriptor(
+        "auth.get_context", SdkAuthScope::Authenticated, SdkDeviceScopePolicy::None, "beta",
+        "使用 session key 或 ApiKey 查询授权上下文", std::vector<std::string>()));
 }
 
 void SdkCommandDispatcher::SetStatusSupplier(StatusSupplier supplier) {
@@ -200,7 +222,10 @@ Json SdkCommandDispatcher::HandleAuthValidate(const SdkCommandRequest& request) 
         return BuildWsResponse(request.request_id, SdkStatusCode::AuthRequired, "auth required");
     }
 
-    const AuthValidateResult result = providers_.auth_provider->ValidateApiKey({api_key, NowTs()});
+    AuthValidateRequest validate_request;
+    validate_request.api_key = api_key;
+    validate_request.now_ts = NowTs();
+    const AuthValidateResult result = providers_.auth_provider->ValidateApiKey(validate_request);
     if (!IsOkStatusCode(result.code)) {
         return BuildWsResponse(request.request_id, result.code, result.message);
     }
@@ -218,7 +243,10 @@ Json SdkCommandDispatcher::HandleAuthRefresh(const SdkCommandRequest& request) c
         return BuildWsResponse(request.request_id, SdkStatusCode::AuthRequired, "auth required");
     }
 
-    const AuthRefreshResult result = providers_.auth_provider->RefreshSession({api_key, NowTs()});
+    AuthRefreshRequest refresh_request;
+    refresh_request.api_key = api_key;
+    refresh_request.now_ts = NowTs();
+    const AuthRefreshResult result = providers_.auth_provider->RefreshSession(refresh_request);
     if (!IsOkStatusCode(result.code)) {
         return BuildWsResponse(request.request_id, result.code, result.message);
     }
@@ -245,7 +273,11 @@ Json SdkCommandDispatcher::HandleAuthGetContext(const SdkCommandRequest& request
         return BuildWsResponse(request.request_id, SdkStatusCode::AuthRequired, "auth required");
     }
 
-    const AuthContextResult result = providers_.auth_provider->GetAuthContext({api_key, session_token, NowTs()});
+    AuthLookupRequest lookup_request;
+    lookup_request.api_key = api_key;
+    lookup_request.session_token = session_token;
+    lookup_request.now_ts = NowTs();
+    const AuthContextResult result = providers_.auth_provider->GetAuthContext(lookup_request);
     if (!IsOkStatusCode(result.code)) {
         return BuildWsResponse(request.request_id, result.code, result.message);
     }

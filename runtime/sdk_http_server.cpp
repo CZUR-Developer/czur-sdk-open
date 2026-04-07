@@ -89,7 +89,7 @@ bool SdkHttpServer::Start() {
         return true;
     }
 
-    server_ = std::make_unique<httplib::Server>();
+    server_.reset(new httplib::Server());
     if (!ConfigureRoutes()) {
         server_.reset();
         return false;

@@ -60,7 +60,15 @@ public:
         result.auth_context.account_type_code = AccountTypeCode(SdkAccountType::SvipPlus);
         result.auth_context.auth_scene = "plugin";
         result.auth_context.license_mode = "offline_api_key";
-        result.auth_context.device_scope = {{4660, 22136}, {4660, 22137}};
+        result.auth_context.device_scope.clear();
+        SdkDeviceGrant first_device;
+        first_device.vid = 4660;
+        first_device.pid = 22136;
+        result.auth_context.device_scope.push_back(first_device);
+        SdkDeviceGrant second_device;
+        second_device.vid = 4660;
+        second_device.pid = 22137;
+        result.auth_context.device_scope.push_back(second_device);
         result.auth_context.expires_at = 0;
         result.auth_context.capabilities = {
             "system.ping",
@@ -87,7 +95,10 @@ public:
 
     AuthRefreshResult RefreshSession(const AuthRefreshRequest& request) override {
         AuthRefreshResult result;
-        AuthValidateResult validate = ValidateApiKey({request.api_key, request.now_ts});
+        AuthValidateRequest validate_request;
+        validate_request.api_key = request.api_key;
+        validate_request.now_ts = request.now_ts;
+        AuthValidateResult validate = ValidateApiKey(validate_request);
         if (!IsOkStatusCode(validate.code)) {
             result.code = validate.code;
             result.message = validate.message;

@@ -13,7 +13,7 @@ std::string DumpJson(const Json& value) {
     return value.dump();
 }
 
-bool TryParseJson(std::string_view payload, Json* out, std::string* err) {
+bool TryParseJson(const std::string& payload, Json* out, std::string* err) {
     if (out == nullptr) {
         if (err != nullptr) {
             *err = "output json is null";

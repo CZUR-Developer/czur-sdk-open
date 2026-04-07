@@ -4,7 +4,6 @@
 #pragma once
 
 #include <string>
-#include <string_view>
 
 #include <nlohmann/json.hpp>
 
@@ -16,7 +15,7 @@ namespace sdk {
 using Json = nlohmann::json;
 
 std::string DumpJson(const Json& value);
-bool TryParseJson(std::string_view payload, Json* out, std::string* err = nullptr);
+bool TryParseJson(const std::string& payload, Json* out, std::string* err = nullptr);
 Json BuildErrorBody(SdkStatusCode code, const std::string& message, const Json& data = Json::object());
 Json BuildErrorBody(int code, const std::string& message, const Json& data = Json::object());
 Json BuildWsResponse(const std::string& request_id,

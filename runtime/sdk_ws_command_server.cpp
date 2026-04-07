@@ -115,7 +115,7 @@ bool SdkWsCommandServer::Start() {
         return true;
     }
 
-    impl_ = std::make_unique<Impl>();
+    impl_.reset(new Impl());
     WsServer& server = impl_->server;
     server.clear_access_channels(websocketpp::log::alevel::all);
     server.clear_error_channels(websocketpp::log::elevel::all);

@@ -77,7 +77,10 @@ SdkApp::SdkApp(const SdkConfig& config, ProviderBundle providers)
         }
 
         const std::int64_t now_ts = static_cast<std::int64_t>(std::time(nullptr));
-        const AuthValidateResult validate = providers_.auth_provider->ValidateApiKey({api_key, now_ts});
+        AuthValidateRequest validate_request;
+        validate_request.api_key = api_key;
+        validate_request.now_ts = now_ts;
+        const AuthValidateResult validate = providers_.auth_provider->ValidateApiKey(validate_request);
         result.authorized = IsOkStatusCode(validate.code);
         result.code = validate.code;
         result.message = validate.message;
