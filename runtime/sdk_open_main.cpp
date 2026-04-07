@@ -1,8 +1,8 @@
 // Copyright (c) 2026 CZUR Tech. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-#include <iostream>
 #include <string>
+#include <iostream>
 #include <utility>
 #include <unistd.h>
 #include <limits.h>
@@ -15,6 +15,7 @@
 #endif
 #include "sdk_app.h"
 #include "sdk_config.h"
+#include "sdk_logger.h"
 
 namespace {
 
@@ -60,6 +61,7 @@ int main(int argc, char* argv[]) {
         config_path = argv[1];
     }
 
+    editor::sdk::InitializeSdkOpenLogger();
     editor::sdk::SdkConfig config = editor::sdk::SdkConfig::FromFile(config_path);
     config.web_root = GetExecutableDir() + "/web";
     ApplyEnvPortOverride("SDK_ADMIN_HTTP_PORT", config.admin_http_port);
@@ -70,18 +72,18 @@ int main(int argc, char* argv[]) {
 
 #ifdef SDK_USE_PRIVATE_PROVIDER
     editor::sdk::ProviderBundle providers = editor::sdk::private_impl::CreateProviderBundle();
-    std::cout << "[sdk_open_app] provider mode: private" << std::endl;
+    SDK_OPEN_LOG_INFO("[sdk_open_app] provider mode: private");
 #else
     editor::sdk::ProviderBundle providers = editor::sdk::mock::CreateProviderBundle();
-    std::cout << "[sdk_open_app] provider mode: mock" << std::endl;
+    SDK_OPEN_LOG_INFO("[sdk_open_app] provider mode: mock");
 #endif
     editor::sdk::SdkApp app(config, std::move(providers));
     if (!app.Start()) {
-        std::cerr << "[sdk_open_app] failed to start" << std::endl;
+        SDK_OPEN_LOG_ERROR("[sdk_open_app] failed to start");
         return 1;
     }
 
-    std::cout << "[sdk_open_app] running. press Enter to exit..." << std::endl;
+    SDK_OPEN_LOG_INFO("[sdk_open_app] running. press Enter to exit...");
     std::string line;
     std::getline(std::cin, line);
     app.Stop();

@@ -8,12 +8,13 @@
 
 #include <asio/ip/address.hpp>
 
-#include <iostream>
 #include <mutex>
 #include <set>
 #include <string>
 #include <thread>
 #include <utility>
+
+#include "sdk_logger.h"
 
 namespace editor {
 namespace sdk {
@@ -128,43 +129,35 @@ bool SdkWsCommandServer::Start() {
         const std::string resource = con->get_uri()->get_resource();
         const std::string query = con->get_uri()->get_query();
         const std::string api_key = QueryValue(query, "api_key");
-        std::cout << "[sdk_ws_command_server] handshake validate start"
-                  << ", remote=" << remote
-                  << ", resource=" << resource
-                  << ", has_api_key=" << (!api_key.empty() ? "true" : "false")
-                  << ", api_key=" << MaskApiKey(api_key)
-                  << std::endl;
+        SDK_OPEN_LOG_INFO("[sdk_ws_command_server] handshake validate start, remote={}, resource={}, has_api_key={}, api_key={}",
+                          remote,
+                          resource,
+                          !api_key.empty() ? "true" : "false",
+                          MaskApiKey(api_key));
         if (!connection_auth_handler_) {
             impl_->auth_failed.fetch_add(1);
-            std::cerr << "[sdk_ws_command_server] handshake validate failed"
-                      << ", remote=" << remote
-                      << ", reason=provider_not_ready"
-                      << std::endl;
+            SDK_OPEN_LOG_WARN("[sdk_ws_command_server] handshake validate failed, remote={}, reason=provider_not_ready",
+                              remote);
             con->set_status(websocketpp::http::status_code::service_unavailable);
             con->set_body(DumpJson(BuildErrorBody(SdkStatusCode::ProviderNotReady, "provider not ready")));
             return false;
         }
 
         const ConnectionAuthResult auth_result = connection_auth_handler_(api_key);
-        std::cout << "[sdk_ws_command_server] handshake validate result"
-                  << ", remote=" << remote
-                  << ", authorized=" << (auth_result.authorized ? "true" : "false")
-                  << ", code=" << auth_result.code
-                  << ", message=" << auth_result.message
-                  << std::endl;
+        SDK_OPEN_LOG_INFO("[sdk_ws_command_server] handshake validate result, remote={}, authorized={}, code={}, message={}",
+                          remote,
+                          auth_result.authorized ? "true" : "false",
+                          auth_result.code,
+                          auth_result.message);
         if (auth_result.authorized) {
-            std::cout << "[sdk_ws_command_server] handshake accepted"
-                      << ", remote=" << remote
-                      << std::endl;
+            SDK_OPEN_LOG_INFO("[sdk_ws_command_server] handshake accepted, remote={}", remote);
             return true;
         }
         impl_->auth_failed.fetch_add(1);
-        std::cerr << "[sdk_ws_command_server] handshake rejected"
-                  << ", remote=" << remote
-                  << ", http_status=401"
-                  << ", code=" << auth_result.code
-                  << ", message=" << auth_result.message
-                  << std::endl;
+        SDK_OPEN_LOG_WARN("[sdk_ws_command_server] handshake rejected, remote={}, http_status=401, code={}, message={}",
+                          remote,
+                          auth_result.code,
+                          auth_result.message);
         con->set_status(websocketpp::http::status_code::unauthorized);
         con->set_body(DumpJson(BuildErrorBody(auth_result.code, auth_result.message)));
         return false;
@@ -174,20 +167,18 @@ bool SdkWsCommandServer::Start() {
         std::lock_guard<std::mutex> lock(impl_->connections_mu);
         impl_->connections.insert(hdl);
         impl_->active_connections.store(static_cast<uint64_t>(impl_->connections.size()));
-        std::cout << "[sdk_ws_command_server] connection opened"
-                  << ", remote=" << SafeRemoteEndpoint(impl_->server, hdl)
-                  << ", active_connections=" << impl_->active_connections.load()
-                  << std::endl;
+        SDK_OPEN_LOG_INFO("[sdk_ws_command_server] connection opened, remote={}, active_connections={}",
+                          SafeRemoteEndpoint(impl_->server, hdl),
+                          impl_->active_connections.load());
     });
 
     server.set_close_handler([this](ConnectionHdl hdl) {
         std::lock_guard<std::mutex> lock(impl_->connections_mu);
         impl_->connections.erase(hdl);
         impl_->active_connections.store(static_cast<uint64_t>(impl_->connections.size()));
-        std::cout << "[sdk_ws_command_server] connection closed"
-                  << ", remote=" << SafeRemoteEndpoint(impl_->server, hdl)
-                  << ", active_connections=" << impl_->active_connections.load()
-                  << std::endl;
+        SDK_OPEN_LOG_INFO("[sdk_ws_command_server] connection closed, remote={}, active_connections={}",
+                          SafeRemoteEndpoint(impl_->server, hdl),
+                          impl_->active_connections.load());
     });
 
     server.set_message_handler([this](ConnectionHdl hdl, MessagePtr msg) {
@@ -254,7 +245,7 @@ bool SdkWsCommandServer::Start() {
     ErrorCode ec;
     const auto addr = asio::ip::make_address(host_, ec);
     if (ec) {
-        std::cerr << "[sdk_ws_command_server] invalid host: " << host_ << ", err=" << ec.message() << std::endl;
+        SDK_OPEN_LOG_ERROR("[sdk_ws_command_server] invalid host: {}, err={}", host_, ec.message());
         impl_.reset();
         return false;
     }
@@ -262,13 +253,13 @@ bool SdkWsCommandServer::Start() {
     asio::ip::tcp::endpoint endpoint(addr, static_cast<uint16_t>(port_));
     server.listen(endpoint, ec);
     if (ec) {
-        std::cerr << "[sdk_ws_command_server] listen failed: " << ec.message() << std::endl;
+        SDK_OPEN_LOG_ERROR("[sdk_ws_command_server] listen failed: {}", ec.message());
         impl_.reset();
         return false;
     }
     server.start_accept(ec);
     if (ec) {
-        std::cerr << "[sdk_ws_command_server] start_accept failed: " << ec.message() << std::endl;
+        SDK_OPEN_LOG_ERROR("[sdk_ws_command_server] start_accept failed: {}", ec.message());
         impl_.reset();
         return false;
     }
@@ -279,7 +270,7 @@ bool SdkWsCommandServer::Start() {
         running_.store(false);
     });
 
-    std::cout << "[sdk_ws_command_server] listening on ws://" << host_ << ":" << port_ << std::endl;
+    SDK_OPEN_LOG_INFO("[sdk_ws_command_server] listening on ws://{}:{}", host_, port_);
     return true;
 }
 
@@ -305,7 +296,7 @@ void SdkWsCommandServer::Stop() {
         impl_->io_thread.join();
     }
     impl_.reset();
-    std::cout << "[sdk_ws_command_server] stopped" << std::endl;
+    SDK_OPEN_LOG_INFO("[sdk_ws_command_server] stopped");
 }
 
 SdkWsCommandServer::Stats SdkWsCommandServer::GetStats() const {

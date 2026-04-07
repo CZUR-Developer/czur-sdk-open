@@ -8,7 +8,6 @@
 
 #include <asio/ip/address.hpp>
 
-#include <iostream>
 #include <mutex>
 #include <set>
 #include <string>
@@ -16,6 +15,7 @@
 #include <utility>
 
 #include "sdk_json_utils.h"
+#include "sdk_logger.h"
 
 namespace editor {
 namespace sdk {
@@ -164,7 +164,7 @@ bool SdkWsVideoServer::Start() {
     ErrorCode ec;
     const auto addr = asio::ip::make_address(host_, ec);
     if (ec) {
-        std::cerr << "[sdk_ws_video_server] invalid host: " << host_ << ", err=" << ec.message() << std::endl;
+        SDK_OPEN_LOG_ERROR("[sdk_ws_video_server] invalid host: {}, err={}", host_, ec.message());
         impl_.reset();
         return false;
     }
@@ -172,13 +172,13 @@ bool SdkWsVideoServer::Start() {
     asio::ip::tcp::endpoint endpoint(addr, static_cast<uint16_t>(port_));
     server.listen(endpoint, ec);
     if (ec) {
-        std::cerr << "[sdk_ws_video_server] listen failed: " << ec.message() << std::endl;
+        SDK_OPEN_LOG_ERROR("[sdk_ws_video_server] listen failed: {}", ec.message());
         impl_.reset();
         return false;
     }
     server.start_accept(ec);
     if (ec) {
-        std::cerr << "[sdk_ws_video_server] start_accept failed: " << ec.message() << std::endl;
+        SDK_OPEN_LOG_ERROR("[sdk_ws_video_server] start_accept failed: {}", ec.message());
         impl_.reset();
         return false;
     }
@@ -189,7 +189,7 @@ bool SdkWsVideoServer::Start() {
         running_.store(false);
     });
 
-    std::cout << "[sdk_ws_video_server] listening on ws://" << host_ << ":" << port_ << std::endl;
+    SDK_OPEN_LOG_INFO("[sdk_ws_video_server] listening on ws://{}:{}", host_, port_);
     return true;
 }
 
@@ -215,7 +215,7 @@ void SdkWsVideoServer::Stop() {
         impl_->io_thread.join();
     }
     impl_.reset();
-    std::cout << "[sdk_ws_video_server] stopped" << std::endl;
+    SDK_OPEN_LOG_INFO("[sdk_ws_video_server] stopped");
 }
 
 SdkWsVideoServer::Stats SdkWsVideoServer::GetStats() const {

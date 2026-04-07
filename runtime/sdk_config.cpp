@@ -4,7 +4,8 @@
 #include "sdk_config.h"
 
 #include <fstream>
-#include <iostream>
+
+#include "sdk_logger.h"
 
 namespace editor {
 namespace sdk {
@@ -17,16 +18,14 @@ SdkConfig SdkConfig::FromFile(const std::string& path) {
 
     std::ifstream input(path);
     if (!input.is_open()) {
-        std::cerr << "[sdk_config] cannot open config file: " << path
-                  << ", fallback to defaults" << std::endl;
+        SDK_OPEN_LOG_WARN("[sdk_config] cannot open config file: {}, fallback to defaults", path);
         return config;
     }
 
     // Skeleton parser placeholder: keeping default values for now.
-    std::cout << "[sdk_config] loaded config skeleton from: " << path << std::endl;
+    SDK_OPEN_LOG_INFO("[sdk_config] loaded config skeleton from: {}", path);
     return config;
 }
 
 } // namespace sdk
 } // namespace editor
-

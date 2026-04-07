@@ -9,6 +9,7 @@ set(SDK_OPEN_CPP_HTTPLIB_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/cpp-httplib")
 set(SDK_OPEN_WEBSOCKETPP_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/websocketpp")
 set(SDK_OPEN_ASIO_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/asio/asio/include")
 set(SDK_OPEN_NLOHMANN_JSON_DIR "${SDK_OPEN_THIRD_PARTY_DIR}")
+set(SDK_OPEN_SPDLOG_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/spdlog")
 
 if(NOT EXISTS "${SDK_OPEN_CPP_HTTPLIB_DIR}/httplib.h")
     message(FATAL_ERROR "Missing third_party/cpp-httplib/httplib.h")
@@ -22,9 +23,13 @@ endif()
 if(NOT EXISTS "${SDK_OPEN_NLOHMANN_JSON_DIR}/nlohmann/json.hpp")
     message(FATAL_ERROR "Missing third_party/nlohmann/json.hpp")
 endif()
+if(NOT EXISTS "${SDK_OPEN_SPDLOG_DIR}/spdlog.h")
+    message(FATAL_ERROR "Missing third_party/spdlog/spdlog.h")
+endif()
 
 add_library(sdk_open_third_party INTERFACE)
-target_include_directories(sdk_open_third_party INTERFACE
+target_include_directories(sdk_open_third_party BEFORE INTERFACE
+    "${SDK_OPEN_THIRD_PARTY_DIR}"
     "${SDK_OPEN_CPP_HTTPLIB_DIR}"
     "${SDK_OPEN_WEBSOCKETPP_DIR}"
     "${SDK_OPEN_ASIO_DIR}"
@@ -49,6 +54,17 @@ set(SDK_OPEN_RUNTIME_SRCS
     runtime/sdk_config.cpp
 )
 
+add_library(sdk_open_logging STATIC
+    runtime/sdk_logger.cpp
+)
+target_include_directories(sdk_open_logging PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/runtime"
+)
+target_link_libraries(sdk_open_logging PUBLIC
+    sdk_open_third_party
+)
+target_link_libraries(sdk_open_logging PUBLIC pthread)
+
 add_library(sdk_open_runtime STATIC ${SDK_OPEN_RUNTIME_SRCS})
 target_include_directories(sdk_open_runtime PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/runtime"
@@ -59,6 +75,7 @@ target_compile_definitions(sdk_open_runtime PUBLIC
 )
 target_link_libraries(sdk_open_runtime PUBLIC
     sdk_open_interfaces
+    sdk_open_logging
     sdk_open_third_party
 )
 target_link_libraries(sdk_open_runtime PUBLIC pthread)
@@ -70,7 +87,10 @@ target_include_directories(sdk_mock_providers PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/providers/mock"
     "${CMAKE_CURRENT_SOURCE_DIR}/interfaces"
 )
-target_link_libraries(sdk_mock_providers PUBLIC sdk_open_interfaces)
+target_link_libraries(sdk_mock_providers PUBLIC
+    sdk_open_interfaces
+    sdk_open_logging
+)
 
 add_executable(sdk_open_app
     runtime/sdk_open_main.cpp

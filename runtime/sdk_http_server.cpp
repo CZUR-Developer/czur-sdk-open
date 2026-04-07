@@ -5,8 +5,9 @@
 
 #include <httplib.h>
 
-#include <iostream>
 #include <utility>
+
+#include "sdk_logger.h"
 
 namespace editor {
 namespace sdk {
@@ -71,8 +72,7 @@ bool SdkHttpServer::ConfigureRoutes() {
     }
 
     if (!server_->set_mount_point("/", document_root_)) {
-        std::cerr << "[sdk_http_server] " << site_name_
-                  << " set_mount_point failed, root=" << document_root_ << std::endl;
+        SDK_OPEN_LOG_ERROR("[sdk_http_server] {} set_mount_point failed, root={}", site_name_, document_root_);
         return false;
     }
 
@@ -97,7 +97,7 @@ bool SdkHttpServer::Start() {
 
     const int bound_port = server_->bind_to_port(host_, port_);
     if (bound_port < 0) {
-        std::cerr << "[sdk_http_server] " << site_name_ << " bind failed: " << host_ << ":" << port_ << std::endl;
+        SDK_OPEN_LOG_ERROR("[sdk_http_server] {} bind failed: {}:{}", site_name_, host_, port_);
         server_.reset();
         return false;
     }
@@ -106,15 +106,17 @@ bool SdkHttpServer::Start() {
     server_thread_ = std::thread([this]() {
         if (!server_->listen_after_bind()) {
             if (running_.load()) {
-                std::cerr << "[sdk_http_server] " << site_name_ << " listen failed" << std::endl;
+                SDK_OPEN_LOG_ERROR("[sdk_http_server] {} listen failed", site_name_);
             }
         }
         running_.store(false);
     });
 
-    std::cout << "[sdk_http_server] " << site_name_
-              << " listening on http://" << host_ << ":" << port_
-              << ", root=" << document_root_ << std::endl;
+    SDK_OPEN_LOG_INFO("[sdk_http_server] {} listening on http://{}:{}, root={}",
+                      site_name_,
+                      host_,
+                      port_,
+                      document_root_);
     return true;
 }
 
@@ -129,7 +131,7 @@ void SdkHttpServer::Stop() {
         server_thread_.join();
     }
     server_.reset();
-    std::cout << "[sdk_http_server] " << site_name_ << " stopped" << std::endl;
+    SDK_OPEN_LOG_INFO("[sdk_http_server] {} stopped", site_name_);
 }
 
 } // namespace sdk

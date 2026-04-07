@@ -4,8 +4,9 @@
 #include "sdk_app.h"
 
 #include <ctime>
-#include <iostream>
 #include <utility>
+
+#include "sdk_logger.h"
 
 namespace editor {
 namespace sdk {
@@ -50,29 +51,26 @@ SdkApp::SdkApp(const SdkConfig& config, ProviderBundle providers)
     command_ws_server_.SetConnectionAuthHandler([this](const std::string& api_key) {
         SdkWsCommandServer::ConnectionAuthResult result;
         const std::string provider_name = providers_.auth_provider ? providers_.auth_provider->ProviderName() : "<none>";
-        std::cout << "[sdk_app] command ws auth validate begin"
-                  << ", provider=" << provider_name
-                  << ", api_key=" << MaskApiKey(api_key)
-                  << ", now_ts=" << static_cast<std::int64_t>(std::time(nullptr))
-                  << std::endl;
+        SDK_OPEN_LOG_INFO("[sdk_app] command ws auth validate begin, provider={}, api_key={}, now_ts={}",
+                          provider_name,
+                          MaskApiKey(api_key),
+                          static_cast<std::int64_t>(std::time(nullptr)));
         if (!providers_.auth_provider) {
             result.code = ToCode(SdkStatusCode::ProviderNotReady);
             result.message = "provider not ready";
-            std::cerr << "[sdk_app] command ws auth validate failed"
-                      << ", provider=" << provider_name
-                      << ", code=" << result.code
-                      << ", message=" << result.message
-                      << std::endl;
+            SDK_OPEN_LOG_WARN("[sdk_app] command ws auth validate failed, provider={}, code={}, message={}",
+                              provider_name,
+                              result.code,
+                              result.message);
             return result;
         }
         if (api_key.empty()) {
             result.code = ToCode(SdkStatusCode::AuthRequired);
             result.message = "api key required";
-            std::cerr << "[sdk_app] command ws auth validate failed"
-                      << ", provider=" << provider_name
-                      << ", code=" << result.code
-                      << ", message=" << result.message
-                      << std::endl;
+            SDK_OPEN_LOG_WARN("[sdk_app] command ws auth validate failed, provider={}, code={}, message={}",
+                              provider_name,
+                              result.code,
+                              result.message);
             return result;
         }
 
@@ -84,12 +82,11 @@ SdkApp::SdkApp(const SdkConfig& config, ProviderBundle providers)
         result.authorized = IsOkStatusCode(validate.code);
         result.code = validate.code;
         result.message = validate.message;
-        std::cout << "[sdk_app] command ws auth validate result"
-                  << ", provider=" << provider_name
-                  << ", authorized=" << (result.authorized ? "true" : "false")
-                  << ", code=" << result.code
-                  << ", message=" << result.message
-                  << std::endl;
+        SDK_OPEN_LOG_INFO("[sdk_app] command ws auth validate result, provider={}, authorized={}, code={}, message={}",
+                          provider_name,
+                          result.authorized ? "true" : "false",
+                          result.code,
+                          result.message);
         return result;
     });
     command_ws_server_.SetRequestHandler([this](const Json& request) { return command_dispatcher_->Dispatch(request); });
@@ -102,7 +99,7 @@ bool SdkApp::Start() {
         return true;
     }
 
-    std::cout << "[sdk_app] starting..." << std::endl;
+    SDK_OPEN_LOG_INFO("[sdk_app] starting...");
     if (kSdkOpenHttpServerEnabled) {
         if (!admin_http_server_.Start()) {
             return false;
@@ -112,7 +109,7 @@ bool SdkApp::Start() {
             return false;
         }
     } else {
-        std::cout << "[sdk_app] embedded http server disabled by SDK_OPEN_ENABLE_HTTP_SERVER=0" << std::endl;
+        SDK_OPEN_LOG_INFO("[sdk_app] embedded http server disabled by SDK_OPEN_ENABLE_HTTP_SERVER=0");
     }
     if (!command_ws_server_.Start()) {
         if (kSdkOpenHttpServerEnabled) {
@@ -131,24 +128,24 @@ bool SdkApp::Start() {
     }
 
     if (providers_.device_provider) {
-        std::cout << "[sdk_app] device provider: " << providers_.device_provider->ProviderName() << std::endl;
+        SDK_OPEN_LOG_INFO("[sdk_app] device provider: {}", providers_.device_provider->ProviderName());
     }
     if (providers_.graphic_provider) {
-        std::cout << "[sdk_app] graphic provider: " << providers_.graphic_provider->ProviderName() << std::endl;
+        SDK_OPEN_LOG_INFO("[sdk_app] graphic provider: {}", providers_.graphic_provider->ProviderName());
     }
     if (providers_.ocr_provider) {
-        std::cout << "[sdk_app] ocr provider: " << providers_.ocr_provider->ProviderName() << std::endl;
+        SDK_OPEN_LOG_INFO("[sdk_app] ocr provider: {}", providers_.ocr_provider->ProviderName());
     }
     if (providers_.ofd_provider) {
-        std::cout << "[sdk_app] ofd provider: " << providers_.ofd_provider->ProviderName() << std::endl;
+        SDK_OPEN_LOG_INFO("[sdk_app] ofd provider: {}", providers_.ofd_provider->ProviderName());
     }
     if (providers_.auth_provider) {
-        std::cout << "[sdk_app] auth provider: " << providers_.auth_provider->ProviderName() << std::endl;
+        SDK_OPEN_LOG_INFO("[sdk_app] auth provider: {}", providers_.auth_provider->ProviderName());
     }
 
     start_time_ = std::chrono::steady_clock::now();
     running_.store(true);
-    std::cout << "[sdk_app] started" << std::endl;
+    SDK_OPEN_LOG_INFO("[sdk_app] started");
     return true;
 }
 
@@ -157,7 +154,7 @@ void SdkApp::Stop() {
         return;
     }
 
-    std::cout << "[sdk_app] stopping..." << std::endl;
+    SDK_OPEN_LOG_INFO("[sdk_app] stopping...");
     video_ws_server_.Stop();
     command_ws_server_.Stop();
     if (kSdkOpenHttpServerEnabled) {
@@ -165,7 +162,7 @@ void SdkApp::Stop() {
         admin_http_server_.Stop();
     }
     running_.store(false);
-    std::cout << "[sdk_app] stopped" << std::endl;
+    SDK_OPEN_LOG_INFO("[sdk_app] stopped");
 }
 
 bool SdkApp::IsRunning() const {
