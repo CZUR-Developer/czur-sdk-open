@@ -27,6 +27,20 @@ Json GetOptionalObjectField(const Json& obj, const char* key) {
     return Json::object();
 }
 
+std::vector<std::string> GetOptionalStringArrayField(const Json& obj, const char* key) {
+    std::vector<std::string> values;
+    const auto it = obj.find(key);
+    if (it == obj.end() || !it->is_array()) {
+        return values;
+    }
+    for (Json::const_iterator value_it = it->begin(); value_it != it->end(); ++value_it) {
+        if (value_it->is_string()) {
+            values.push_back(value_it->get<std::string>());
+        }
+    }
+    return values;
+}
+
 std::string GetSessionCredential(const Json& auth) {
     const std::string session_key = GetOptionalStringField(auth, "session_key");
     if (!session_key.empty()) {
@@ -98,6 +112,33 @@ SdkCommandDispatcher::SdkCommandDispatcher(const SdkConfig& config, const Provid
     method_descriptors_.push_back(MakeMethodDescriptor(
         "auth.get_context", SdkAuthScope::Authenticated, SdkDeviceScopePolicy::None, "beta",
         "使用 session key 或 ApiKey 查询授权上下文", std::vector<std::string>()));
+    method_descriptors_.push_back(MakeMethodDescriptor(
+        "device.list", SdkAuthScope::Entitled, SdkDeviceScopePolicy::AllBoundDevices, "beta", "列出当前可访问的设备",
+        std::vector<std::string>()));
+    method_descriptors_.push_back(MakeMethodDescriptor(
+        "device.get", SdkAuthScope::Entitled, SdkDeviceScopePolicy::TargetDevice, "beta", "查询指定设备的占位信息",
+        std::vector<std::string>()));
+    method_descriptors_.push_back(MakeMethodDescriptor(
+        "device.open", SdkAuthScope::Entitled, SdkDeviceScopePolicy::TargetDevice, "beta", "打开指定设备的占位指令",
+        std::vector<std::string>()));
+    method_descriptors_.push_back(MakeMethodDescriptor(
+        "capture.take", SdkAuthScope::Entitled, SdkDeviceScopePolicy::TargetDevice, "beta", "执行采集占位指令",
+        std::vector<std::string>()));
+    method_descriptors_.push_back(MakeMethodDescriptor(
+        "capture.take_base64", SdkAuthScope::Entitled, SdkDeviceScopePolicy::TargetDevice, "alpha",
+        "执行 Base64 采集占位指令", std::vector<std::string>()));
+    method_descriptors_.push_back(MakeMethodDescriptor(
+        "image.process", SdkAuthScope::Entitled, SdkDeviceScopePolicy::None, "beta", "调用图像处理 provider",
+        std::vector<std::string>()));
+    method_descriptors_.push_back(MakeMethodDescriptor(
+        "ocr.recognize", SdkAuthScope::Entitled, SdkDeviceScopePolicy::None, "beta", "提交 OCR 识别任务",
+        std::vector<std::string>()));
+    method_descriptors_.push_back(MakeMethodDescriptor(
+        "file.convert", SdkAuthScope::Entitled, SdkDeviceScopePolicy::None, "beta", "调用文件转换占位适配",
+        std::vector<std::string>()));
+    method_descriptors_.push_back(MakeMethodDescriptor(
+        "recognition.barcode", SdkAuthScope::Entitled, SdkDeviceScopePolicy::None, "alpha", "执行条码识别占位指令",
+        std::vector<std::string>()));
 }
 
 void SdkCommandDispatcher::SetStatusSupplier(StatusSupplier supplier) {
@@ -126,6 +167,14 @@ Json SdkCommandDispatcher::Dispatch(const Json& request_json) {
     if (request.method.empty()) {
         return BuildWsResponse(request.request_id, SdkStatusCode::UnsupportedMethod, "unsupported method");
     }
+    const SdkMethodDescriptor* descriptor = FindMethodDescriptor(request.method);
+    if (descriptor != nullptr && MethodRequiresSession(*descriptor)) {
+        AuthContext auth_context;
+        Json failure_response;
+        if (!EnsureMethodAuthorized(request, *descriptor, &auth_context, &failure_response)) {
+            return failure_response;
+        }
+    }
 
     if (request.method == "system.ping") {
         return HandleSystemPing(request);
@@ -145,6 +194,33 @@ Json SdkCommandDispatcher::Dispatch(const Json& request_json) {
     if (request.method == "auth.get_context") {
         return HandleAuthGetContext(request);
     }
+    if (request.method == "device.list") {
+        return HandleDeviceList(request);
+    }
+    if (request.method == "device.get") {
+        return HandleDeviceGet(request);
+    }
+    if (request.method == "device.open") {
+        return HandleDeviceOpen(request);
+    }
+    if (request.method == "capture.take") {
+        return HandleCaptureTake(request, false);
+    }
+    if (request.method == "capture.take_base64") {
+        return HandleCaptureTake(request, true);
+    }
+    if (request.method == "image.process") {
+        return HandleImageProcess(request);
+    }
+    if (request.method == "ocr.recognize") {
+        return HandleOcrRecognize(request);
+    }
+    if (request.method == "file.convert") {
+        return HandleFileConvert(request);
+    }
+    if (request.method == "recognition.barcode") {
+        return HandleRecognitionBarcode(request);
+    }
 
     return BuildWsResponse(request.request_id, SdkStatusCode::UnsupportedMethod, "unsupported method");
 }
@@ -158,15 +234,17 @@ Json SdkCommandDispatcher::BuildCapabilitiesJson() const {
     Json modules = Json::array({"system", "auth"});
     if (providers_.device_provider) {
         modules.push_back("device");
+        modules.push_back("capture");
     }
     if (providers_.graphic_provider) {
-        modules.push_back("graphic");
+        modules.push_back("image");
     }
     if (providers_.ocr_provider) {
         modules.push_back("ocr");
+        modules.push_back("recognition");
     }
     if (providers_.ofd_provider) {
-        modules.push_back("ofd");
+        modules.push_back("file");
     }
 
     return Json{
@@ -183,6 +261,66 @@ const SdkMethodDescriptor* SdkCommandDispatcher::FindMethodDescriptor(const std:
         }
     }
     return nullptr;
+}
+
+bool SdkCommandDispatcher::MethodRequiresSession(const SdkMethodDescriptor& descriptor) const {
+    return descriptor.auth_scope == SdkAuthScope::Entitled;
+}
+
+bool SdkCommandDispatcher::EnsureMethodAuthorized(const SdkCommandRequest& request,
+                                                  const SdkMethodDescriptor& descriptor,
+                                                  AuthContext* auth_context,
+                                                  Json* failure_response) const {
+    if (!providers_.auth_provider) {
+        if (failure_response != nullptr) {
+            *failure_response =
+                BuildWsResponse(request.request_id, SdkStatusCode::ProviderNotReady, "provider not ready");
+        }
+        return false;
+    }
+
+    const std::string session_token = GetSessionCredential(request.auth);
+    if (session_token.empty()) {
+        if (failure_response != nullptr) {
+            *failure_response =
+                BuildWsResponse(request.request_id, SdkStatusCode::AuthRequired, "session key required");
+        }
+        return false;
+    }
+
+    SessionValidateRequest validate_request;
+    validate_request.session_token = session_token;
+    validate_request.now_ts = NowTs();
+    const SessionValidateResult validate_result = providers_.auth_provider->ValidateSession(validate_request);
+    if (!IsOkStatusCode(validate_result.code)) {
+        if (failure_response != nullptr) {
+            *failure_response = BuildWsResponse(request.request_id, validate_result.code, validate_result.message);
+        }
+        return false;
+    }
+    if (!HasCapability(validate_result.auth_context, descriptor.method)) {
+        if (failure_response != nullptr) {
+            *failure_response =
+                BuildWsResponse(request.request_id, SdkStatusCode::CapabilityNotAllowed, "capability not allowed");
+        }
+        return false;
+    }
+
+    if (auth_context != nullptr) {
+        *auth_context = validate_result.auth_context;
+    }
+    return true;
+}
+
+bool SdkCommandDispatcher::HasCapability(const AuthContext& auth_context, const std::string& capability) const {
+    for (std::vector<std::string>::const_iterator it = auth_context.capabilities.begin();
+         it != auth_context.capabilities.end();
+         ++it) {
+        if (*it == capability) {
+            return true;
+        }
+    }
+    return false;
 }
 
 std::string SdkCommandDispatcher::ResolveMethod(const std::string& method) const {
@@ -291,6 +429,167 @@ Json SdkCommandDispatcher::HandleAuthGetContext(const SdkCommandRequest& request
             {"via_api_key", result.via_api_key},
             {"auth_context", BuildAuthContextJson(result.auth_context)},
         });
+}
+
+Json SdkCommandDispatcher::HandleDeviceList(const SdkCommandRequest& request) const {
+    if (!providers_.device_provider) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::ProviderNotReady, "provider not ready");
+    }
+
+    const std::vector<std::string> devices = providers_.device_provider->ListDevices();
+    Json device_json = Json::array();
+    for (std::vector<std::string>::const_iterator it = devices.begin(); it != devices.end(); ++it) {
+        device_json.push_back(*it);
+    }
+    return BuildWsResponse(
+        request.request_id, SdkStatusCode::Ok, "ok", Json{{"devices", device_json}, {"count", devices.size()}});
+}
+
+Json SdkCommandDispatcher::HandleDeviceGet(const SdkCommandRequest& request) const {
+    if (!providers_.device_provider) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::ProviderNotReady, "provider not ready");
+    }
+
+    const std::string device_id = GetOptionalStringField(request.params, "device_id");
+    if (device_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "device_id required");
+    }
+
+    const std::vector<std::string> devices = providers_.device_provider->ListDevices();
+    bool matched = false;
+    for (std::vector<std::string>::const_iterator it = devices.begin(); it != devices.end(); ++it) {
+        if (*it == device_id) {
+            matched = true;
+            break;
+        }
+    }
+    if (!matched) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::ProviderCallFailed, "device not found");
+    }
+
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"device_id", device_id}, {"state", "available"}, {"provider", providers_.device_provider->ProviderName()}});
+}
+
+Json SdkCommandDispatcher::HandleDeviceOpen(const SdkCommandRequest& request) const {
+    if (!providers_.device_provider) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::ProviderNotReady, "provider not ready");
+    }
+
+    const std::string device_id = GetOptionalStringField(request.params, "device_id");
+    if (device_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "device_id required");
+    }
+
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"device_id", device_id},
+                                {"opened", true},
+                                {"provider", providers_.device_provider->ProviderName()},
+                                {"note", "sdk_open exposes a placeholder device.open adapter in this build"}});
+}
+
+Json SdkCommandDispatcher::HandleCaptureTake(const SdkCommandRequest& request, bool include_base64) const {
+    const std::string device_id = GetOptionalStringField(request.params, "device_id");
+    if (device_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "device_id required");
+    }
+
+    Json data{
+        {"device_id", device_id},
+        {"captured", true},
+        {"content_type", include_base64 ? "image/base64" : "image/file"},
+        {"note", "sdk_open capture adapter is a session-gated placeholder in this build"},
+    };
+    if (include_base64) {
+        data["payload"] = "c2RrX29wZW5fY2FwdHVyZV9wbGFjZWhvbGRlcg==";
+    }
+    return BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", data);
+}
+
+Json SdkCommandDispatcher::HandleImageProcess(const SdkCommandRequest& request) const {
+    if (!providers_.graphic_provider) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::ProviderNotReady, "provider not ready");
+    }
+
+    const std::string input_path = GetOptionalStringField(request.params, "input_path");
+    const std::string output_path = GetOptionalStringField(request.params, "output_path");
+    if (input_path.empty() || output_path.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "input_path and output_path required");
+    }
+
+    const bool ok = providers_.graphic_provider->ProcessSampleTask(input_path, output_path);
+    if (!ok) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::ProviderCallFailed, "graphic provider call failed");
+    }
+
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"input_path", input_path},
+                                {"output_path", output_path},
+                                {"processed", true},
+                                {"provider", providers_.graphic_provider->ProviderName()}});
+}
+
+Json SdkCommandDispatcher::HandleOcrRecognize(const SdkCommandRequest& request) const {
+    if (!providers_.ocr_provider) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::ProviderNotReady, "provider not ready");
+    }
+
+    const std::vector<std::string> input_files = GetOptionalStringArrayField(request.params, "input_files");
+    const std::string output_path = GetOptionalStringField(request.params, "output_path");
+    if (input_files.empty() || output_path.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "input_files and output_path required");
+    }
+
+    const std::string task_id = providers_.ocr_provider->SubmitTask(input_files, output_path);
+    if (task_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::ProviderCallFailed, "ocr provider call failed");
+    }
+
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"task_id", task_id},
+                                {"input_count", input_files.size()},
+                                {"output_path", output_path},
+                                {"provider", providers_.ocr_provider->ProviderName()}});
+}
+
+Json SdkCommandDispatcher::HandleFileConvert(const SdkCommandRequest& request) const {
+    if (!providers_.ofd_provider) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::ProviderNotReady, "provider not ready");
+    }
+
+    const std::string input_path = GetOptionalStringField(request.params, "input_path");
+    const std::string output_path = GetOptionalStringField(request.params, "output_path");
+    if (input_path.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "input_path required");
+    }
+
+    const bool ok = providers_.ofd_provider->OpenDocument(input_path);
+    if (!ok) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::ProviderCallFailed, "file provider call failed");
+    }
+
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"input_path", input_path},
+                                {"output_path", output_path},
+                                {"accepted", true},
+                                {"provider", providers_.ofd_provider->ProviderName()},
+                                {"note", "current sdk_open file.convert uses the open-document provider adapter"}});
+}
+
+Json SdkCommandDispatcher::HandleRecognitionBarcode(const SdkCommandRequest& request) const {
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::ProviderCallFailed,
+                           "barcode recognition provider not implemented");
 }
 
 Json SdkCommandDispatcher::BuildAuthContextJson(const AuthContext& auth_context) const {

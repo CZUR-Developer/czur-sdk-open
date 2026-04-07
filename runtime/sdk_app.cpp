@@ -30,6 +30,36 @@ std::string MaskApiKey(const std::string& api_key) {
            " (len=" + std::to_string(api_key.size()) + ")";
 }
 
+Json BuildAuthContextJson(const AuthContext& auth_context) {
+    Json device_scope = Json::array();
+    for (std::vector<SdkDeviceGrant>::const_iterator it = auth_context.device_scope.begin();
+         it != auth_context.device_scope.end();
+         ++it) {
+        device_scope.push_back(Json{
+            {"vid", it->vid},
+            {"pid", it->pid},
+        });
+    }
+
+    Json capabilities = Json::array();
+    for (std::vector<std::string>::const_iterator it = auth_context.capabilities.begin();
+         it != auth_context.capabilities.end();
+         ++it) {
+        capabilities.push_back(*it);
+    }
+
+    return Json{
+        {"is_valid", auth_context.is_valid},
+        {"account_type", ToAccountTypeString(auth_context.account_type)},
+        {"account_type_code", auth_context.account_type_code},
+        {"auth_scene", auth_context.auth_scene},
+        {"license_mode", auth_context.license_mode},
+        {"device_scope", device_scope},
+        {"expires_at", auth_context.expires_at},
+        {"capabilities", capabilities},
+    };
+}
+
 } // namespace
 
 SdkApp::SdkApp(const SdkConfig& config, ProviderBundle providers)
@@ -75,13 +105,16 @@ SdkApp::SdkApp(const SdkConfig& config, ProviderBundle providers)
         }
 
         const std::int64_t now_ts = static_cast<std::int64_t>(std::time(nullptr));
-        AuthValidateRequest validate_request;
-        validate_request.api_key = api_key;
-        validate_request.now_ts = now_ts;
-        const AuthValidateResult validate = providers_.auth_provider->ValidateApiKey(validate_request);
-        result.authorized = IsOkStatusCode(validate.code);
-        result.code = validate.code;
-        result.message = validate.message;
+        AuthRefreshRequest refresh_request;
+        refresh_request.api_key = api_key;
+        refresh_request.now_ts = now_ts;
+        const AuthRefreshResult refresh = providers_.auth_provider->RefreshSession(refresh_request);
+        result.authorized = IsOkStatusCode(refresh.code);
+        result.code = refresh.code;
+        result.message = refresh.message;
+        result.session_key = refresh.session_token;
+        result.expires_in = refresh.expires_in;
+        result.auth_context = BuildAuthContextJson(refresh.auth_context);
         SDK_OPEN_LOG_INFO("[sdk_app] command ws auth validate result, provider={}, authorized={}, code={}, message={}",
                           provider_name,
                           result.authorized ? "true" : "false",

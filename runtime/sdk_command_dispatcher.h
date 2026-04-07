@@ -56,6 +56,12 @@ public:
     Json BuildCapabilitiesJson() const;
 
 private:
+    bool MethodRequiresSession(const SdkMethodDescriptor& descriptor) const;
+    bool EnsureMethodAuthorized(const SdkCommandRequest& request,
+                                const SdkMethodDescriptor& descriptor,
+                                AuthContext* auth_context,
+                                Json* failure_response) const;
+    bool HasCapability(const AuthContext& auth_context, const std::string& capability) const;
     const SdkMethodDescriptor* FindMethodDescriptor(const std::string& method) const;
     std::string ResolveMethod(const std::string& method) const;
     Json HandleSystemPing(const SdkCommandRequest& request) const;
@@ -64,6 +70,14 @@ private:
     Json HandleAuthValidate(const SdkCommandRequest& request) const;
     Json HandleAuthRefresh(const SdkCommandRequest& request) const;
     Json HandleAuthGetContext(const SdkCommandRequest& request) const;
+    Json HandleDeviceList(const SdkCommandRequest& request) const;
+    Json HandleDeviceGet(const SdkCommandRequest& request) const;
+    Json HandleDeviceOpen(const SdkCommandRequest& request) const;
+    Json HandleCaptureTake(const SdkCommandRequest& request, bool include_base64) const;
+    Json HandleImageProcess(const SdkCommandRequest& request) const;
+    Json HandleOcrRecognize(const SdkCommandRequest& request) const;
+    Json HandleFileConvert(const SdkCommandRequest& request) const;
+    Json HandleRecognitionBarcode(const SdkCommandRequest& request) const;
     Json BuildAuthContextJson(const AuthContext& auth_context) const;
     Json BuildMethodDescriptorJson(const SdkMethodDescriptor& descriptor) const;
     std::int64_t NowTs() const;

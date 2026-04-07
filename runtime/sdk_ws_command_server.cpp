@@ -8,6 +8,7 @@
 
 #include <asio/ip/address.hpp>
 
+#include <map>
 #include <mutex>
 #include <set>
 #include <string>
@@ -76,9 +77,16 @@ std::string SafeRemoteEndpoint(WsServer& server, ConnectionHdl hdl) {
 
 class SdkWsCommandServer::Impl {
 public:
+    struct PendingSessionIssue {
+        std::string session_key;
+        int expires_in = 0;
+        Json auth_context = Json::object();
+    };
+
     WsServer server;
     std::thread io_thread;
     std::set<ConnectionHdl, std::owner_less<ConnectionHdl>> connections;
+    std::map<ConnectionHdl, PendingSessionIssue, std::owner_less<ConnectionHdl>> pending_session_issues;
     std::mutex connections_mu;
     std::atomic<uint64_t> active_connections{0};
     std::atomic<uint64_t> auth_failed{0};
@@ -150,10 +158,20 @@ bool SdkWsCommandServer::Start() {
                           auth_result.code,
                           auth_result.message);
         if (auth_result.authorized) {
+            std::lock_guard<std::mutex> lock(impl_->connections_mu);
+            Impl::PendingSessionIssue pending;
+            pending.session_key = auth_result.session_key;
+            pending.expires_in = auth_result.expires_in;
+            pending.auth_context = auth_result.auth_context;
+            impl_->pending_session_issues[hdl] = pending;
             SDK_OPEN_LOG_INFO("[sdk_ws_command_server] handshake accepted, remote={}", remote);
             return true;
         }
         impl_->auth_failed.fetch_add(1);
+        {
+            std::lock_guard<std::mutex> lock(impl_->connections_mu);
+            impl_->pending_session_issues.erase(hdl);
+        }
         SDK_OPEN_LOG_WARN("[sdk_ws_command_server] handshake rejected, remote={}, http_status=401, code={}, message={}",
                           remote,
                           auth_result.code,
@@ -164,17 +182,50 @@ bool SdkWsCommandServer::Start() {
     });
 
     server.set_open_handler([this](ConnectionHdl hdl) {
-        std::lock_guard<std::mutex> lock(impl_->connections_mu);
-        impl_->connections.insert(hdl);
-        impl_->active_connections.store(static_cast<uint64_t>(impl_->connections.size()));
+        Impl::PendingSessionIssue pending;
+        bool has_pending = false;
+        {
+            std::lock_guard<std::mutex> lock(impl_->connections_mu);
+            impl_->connections.insert(hdl);
+            const std::map<ConnectionHdl, Impl::PendingSessionIssue, std::owner_less<ConnectionHdl>>::iterator pending_it =
+                impl_->pending_session_issues.find(hdl);
+            if (pending_it != impl_->pending_session_issues.end()) {
+                pending = pending_it->second;
+                impl_->pending_session_issues.erase(pending_it);
+                has_pending = true;
+            }
+            impl_->active_connections.store(static_cast<uint64_t>(impl_->connections.size()));
+        }
         SDK_OPEN_LOG_INFO("[sdk_ws_command_server] connection opened, remote={}, active_connections={}",
                           SafeRemoteEndpoint(impl_->server, hdl),
                           impl_->active_connections.load());
+
+        if (has_pending && !pending.session_key.empty()) {
+            const Json payload{
+                {"session_key", pending.session_key},
+                {"session_token", pending.session_key},
+                {"expires_in", pending.expires_in},
+                {"auth_context", pending.auth_context},
+            };
+            const std::string event_payload = DumpJson(BuildWsEvent("auth.session_issued", payload));
+            ErrorCode ec;
+            impl_->server.send(hdl, event_payload, websocketpp::frame::opcode::text, ec);
+            if (ec) {
+                SDK_OPEN_LOG_WARN("[sdk_ws_command_server] auth.session_issued send failed, remote={}, err={}",
+                                  SafeRemoteEndpoint(impl_->server, hdl),
+                                  ec.message());
+            } else {
+                SDK_OPEN_LOG_INFO("[sdk_ws_command_server] auth.session_issued sent, remote={}, expires_in={}",
+                                  SafeRemoteEndpoint(impl_->server, hdl),
+                                  pending.expires_in);
+            }
+        }
     });
 
     server.set_close_handler([this](ConnectionHdl hdl) {
         std::lock_guard<std::mutex> lock(impl_->connections_mu);
         impl_->connections.erase(hdl);
+        impl_->pending_session_issues.erase(hdl);
         impl_->active_connections.store(static_cast<uint64_t>(impl_->connections.size()));
         SDK_OPEN_LOG_INFO("[sdk_ws_command_server] connection closed, remote={}, active_connections={}",
                           SafeRemoteEndpoint(impl_->server, hdl),

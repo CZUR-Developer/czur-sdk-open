@@ -26,6 +26,9 @@ public:
         bool authorized = false;
         int code = ToCode(SdkStatusCode::AuthRequired);
         std::string message = "auth required";
+        std::string session_key;
+        int expires_in = 0;
+        Json auth_context = Json::object();
     };
 
     using JsonSupplier = std::function<Json()>;

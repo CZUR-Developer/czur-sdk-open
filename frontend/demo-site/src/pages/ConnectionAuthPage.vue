@@ -1,25 +1,5 @@
 <template>
   <div class="space-y-6">
-    <SectionPanel :title="t('sections.channelPanels')" :description="t('pages.connectionAuth.subtitle')">
-      <div class="grid gap-4 xl:grid-cols-2">
-        <InfoCard
-          v-for="endpoint in connectionEndpoints"
-          :key="endpoint.id"
-          :eyebrow="endpoint.protocol"
-          :title="endpoint.title"
-          :description="endpoint.note"
-          :meta="endpoint.url"
-          :badge-label="t(executionStateLabelKey(endpoint.state))"
-          :badge-tone="executionStateTone(endpoint.state)"
-        >
-          <template #footer>
-            <StatusPill :label="t(endpoint.state === 'success' ? 'actions.disconnect' : 'actions.connect')" tone="primary" />
-            <StatusPill :label="t('labels.handshake')" tone="info" />
-          </template>
-        </InfoCard>
-      </div>
-    </SectionPanel>
-
     <div class="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
       <SectionPanel :title="t('sections.authPanel')" :description="t('common.parameters')">
         <div class="grid gap-4 xl:grid-cols-3">
@@ -83,31 +63,10 @@ import { executionStateLabelKey, executionStateTone } from '../utils/presentatio
 
 const { t } = useI18n();
 
-const connectionEndpoints = computed(() => [
-  {
-    id: 'command-lane',
-    title: 'Command Lane',
-    url: authSessionState.connectionEndpoint,
-    protocol: 'WS',
-    note: describeCommandLane(),
-    state: authSessionState.commandState,
-  },
-  {
-    id: 'video-lane',
-    title: 'Video Lane',
-    url: authSessionState.videoEndpoint,
-    protocol: 'WS',
-    note: authSessionState.sessionKey
-      ? 'Waiting for a stream subscription after the auth bootstrap completed.'
-      : 'Video lane is unchanged in this phase and still waits for a later subscription flow.',
-    state: authSessionState.sessionKey ? 'running' : 'planned',
-  },
-]);
-
 const authActions = computed(() => [
   {
     id: 'validate',
-    eyebrow: 'ws://...?...api_key=***',
+    eyebrow: 'ws://...?...',
     title: 'Command handshake',
     description: authSessionState.apiKey
       ? 'Connection-level API key validation now runs before the command lane opens.'
@@ -120,18 +79,18 @@ const authActions = computed(() => [
   },
   {
     id: 'refresh',
-    eyebrow: 'auth.refresh',
+    eyebrow: 'session',
     title: 'Session key issue',
     description: authSessionState.sessionKey
       ? `session_key received and cached locally, ttl=${authSessionState.sessionExpiresIn}s`
-      : 'The first command after connect exchanges api_key for a short-lived session_key.',
-    meta: authSessionState.sessionKey || 'session_key not available',
+      : 'The command lane pushes auth.session_issued after handshake, and auth.refresh can rotate the session later.',
+    meta: authSessionState.sessionKey ? maskSecret(authSessionState.sessionKey) : 'session_key not available',
     tone: 'info',
     state: authSessionState.refreshState,
   },
   {
     id: 'context',
-    eyebrow: 'auth.get_context',
+    eyebrow: 'Context',
     title: 'Context snapshot',
     description: authSessionState.authContext
       ? 'The runtime resolved account scope, device grants, and capabilities from the session key.'
@@ -146,10 +105,10 @@ const authFormItems = computed(() => [
   { label: t('labels.endpoint'), value: authSessionState.connectionEndpoint, monospace: true },
   {
     label: t('labels.apiKey'),
-    value: authSessionState.apiKey ? `${authSessionState.apiKey.slice(0, 4)}••••${authSessionState.apiKey.slice(-4)}` : t('common.notSet'),
+    value: authSessionState.apiKey ? maskSecret(authSessionState.apiKey) : t('common.notSet'),
     monospace: true,
   },
-  { label: t('labels.sessionKey'), value: authSessionState.sessionKey || t('common.notSet'), monospace: true },
+  { label: t('labels.sessionKey'), value: authSessionState.sessionKey ? maskSecret(authSessionState.sessionKey) : t('common.notSet'), monospace: true },
   { label: t('labels.providerMode'), value: 'mock-auth-provider / runtime ws' },
   { label: t('labels.handshake'), value: 'ws query api_key' },
   { label: t('common.status'), value: t(executionStateLabelKey(authSessionState.commandState)) },
@@ -195,20 +154,13 @@ const authFailureItems = computed(() =>
     .slice(0, 3),
 );
 
-function describeCommandLane(): string {
-  switch (authSessionState.commandState) {
-    case 'success':
-      return authSessionState.sessionKey
-        ? 'api_key handshake succeeded and auth.refresh already returned a session_key.'
-        : 'api_key handshake succeeded and auth.refresh is the next step.';
-    case 'running':
-      return 'Opening the command channel and waiting for the runtime to validate the api_key.';
-    case 'blocked':
-      return 'Set an API key locally first, then the page will reconnect and issue auth.refresh automatically.';
-    case 'error':
-      return 'The runtime rejected the command lane handshake or the follow-up auth bootstrap failed.';
-    default:
-      return 'The page initializes the command lane before any interactive demo action runs.';
+function maskSecret(value: string): string {
+  if (!value) {
+    return '';
   }
+  if (value.length <= 16) {
+    return value;
+  }
+  return `${value.slice(0, 8)}...${value.slice(-8)}`;
 }
 </script>

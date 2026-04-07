@@ -9,6 +9,7 @@ import {
   buildVideoEndpointLabel,
   extractSessionKey,
   isOkResponse,
+  type CommandEvent,
   type CommandResponse,
 } from './protocol';
 import { nowTimeLabel, recordAlert, recordCommandRequest, recordRuntimeEvent } from './runtime-records';
@@ -41,6 +42,13 @@ interface AuthSessionState {
   videoEndpoint: string;
   authContext: AuthContextPayload | null;
   lastConnectedAt: string;
+}
+
+interface SessionIssuedPayload {
+  session_key?: string;
+  session_token?: string;
+  expires_in?: number;
+  auth_context?: AuthContextPayload;
 }
 
 interface HandshakeFailureDiagnosis {
@@ -119,26 +127,49 @@ export async function initializeAuthSession(): Promise<void> {
       tone: 'success',
     });
 
-    const refreshResponse = await sendTrackedCommand(nextClient, 'auth.refresh', {
-      auth: { api_key: state.apiKey },
-    });
-    if (!isOkResponse(refreshResponse)) {
+    state.refreshState = 'running';
+    const sessionIssued = await waitForRuntimeEvent<SessionIssuedPayload>(nextClient, 'auth.session_issued', 2500);
+    if (runToken !== activeRunToken) {
+      nextClient.disconnect('stale auth run');
+      return;
+    }
+    if (!sessionIssued || sessionIssued.code !== 0) {
       clearSession();
       state.refreshState = 'error';
       state.contextState = 'blocked';
+      recordAlert({
+        name: 'SESSION_ISSUE_FAILED',
+        method: 'auth.session_issued',
+        code: String(sessionIssued?.code ?? 1900),
+        message: sessionIssued?.message || 'session issue event failed',
+      });
       return;
     }
 
+    const payload = asSessionIssuedPayload(sessionIssued.payload);
     state.refreshState = 'success';
-    state.sessionKey = extractSessionKey(refreshResponse.data);
-    state.sessionExpiresIn = asNumber(refreshResponse.data.expires_in);
+    state.sessionKey = extractSessionKey(payload);
+    state.sessionExpiresIn = asNumber(payload.expires_in);
     persistValue(STORAGE_KEYS.sessionKey, state.sessionKey);
-    state.authContext = asAuthContext(refreshResponse.data.auth_context);
+    state.authContext = asAuthContext(payload.auth_context);
     recordRuntimeEvent({
       title: 'auth.session_issued',
-      detail: `session_key issued with ttl=${state.sessionExpiresIn}s.`,
+      detail: `session_key issued during command handshake, ttl=${state.sessionExpiresIn}s.`,
       tone: 'success',
     });
+
+    if (!state.sessionKey) {
+      clearSession();
+      state.refreshState = 'error';
+      state.contextState = 'blocked';
+      recordAlert({
+        name: 'SESSION_KEY_MISSING',
+        method: 'auth.session_issued',
+        code: '1900',
+        message: 'The command lane connected, but no session_key was included in auth.session_issued.',
+      });
+      return;
+    }
 
     await loadAuthContext(nextClient);
   } catch (error) {
@@ -150,6 +181,17 @@ export async function initializeAuthSession(): Promise<void> {
     state.commandState = 'error';
     state.refreshState = 'blocked';
     state.contextState = 'blocked';
+
+    if (error instanceof Error && error.message === 'session issue timeout') {
+      recordAlert({
+        name: 'SESSION_ISSUE_TIMEOUT',
+        method: 'auth.session_issued',
+        code: 'TIMEOUT',
+        message: 'The command lane connected, but auth.session_issued was not received before timeout.',
+      });
+      return;
+    }
+
     const diagnosis = await diagnoseHandshakeFailure(state.apiKey, error);
     recordAlert({
       name: diagnosis.alertName,
@@ -320,6 +362,13 @@ function asAuthContext(value: unknown): AuthContextPayload | null {
   return value as AuthContextPayload;
 }
 
+function asSessionIssuedPayload(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object') {
+    return {};
+  }
+  return value as Record<string, unknown>;
+}
+
 function asNumber(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
@@ -390,11 +439,35 @@ function statusName(code: number): string {
       return 'API_KEY_EXPIRED';
     case 1103:
       return 'SESSION_KEY_INVALID';
+    case 1107:
+      return 'CAPABILITY_NOT_ALLOWED';
     case 1901:
       return 'PROVIDER_NOT_READY';
     default:
       return code === 0 ? 'OK' : 'SDK_ERROR';
   }
+}
+
+function waitForRuntimeEvent<TPayload extends Record<string, unknown>>(
+  activeClient: CommandWsClient,
+  eventName: string,
+  timeoutMs: number,
+): Promise<CommandEvent<TPayload>> {
+  return new Promise<CommandEvent<TPayload>>((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      unsubscribe();
+      reject(new Error('session issue timeout'));
+    }, timeoutMs);
+
+    const unsubscribe = activeClient.onEvent((event) => {
+      if (event.event !== eventName) {
+        return;
+      }
+      window.clearTimeout(timeoutId);
+      unsubscribe();
+      resolve(event as CommandEvent<TPayload>);
+    });
+  });
 }
 
 function loadStoredValue(key: string): string | null {

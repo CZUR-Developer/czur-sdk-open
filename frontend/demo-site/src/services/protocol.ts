@@ -23,6 +23,14 @@ export interface CommandResponse<TData = Record<string, unknown>> {
   ts: number;
 }
 
+export interface CommandEvent<TPayload = Record<string, unknown>> {
+  event: string;
+  code: number;
+  message: string;
+  payload: TPayload;
+  ts: number;
+}
+
 let requestCounter = 0;
 let traceCounter = 0;
 

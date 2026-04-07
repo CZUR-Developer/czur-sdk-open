@@ -19,6 +19,7 @@ enum class SdkStatusCode : int {
     AccountTypeNotAllowed = 1104,
     DeviceNotInAuthScope = 1105,
     AuthSceneMismatch = 1106,
+    CapabilityNotAllowed = 1107,
     InternalError = 1900,
     ProviderNotReady = 1901,
     ProviderCallFailed = 1902,

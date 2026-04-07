@@ -1,4 +1,4 @@
-import type { CommandRequest, CommandResponse } from './protocol';
+import type { CommandEvent, CommandRequest, CommandResponse } from './protocol';
 
 export class CommandWsConnectError extends Error {
   readonly closeCode?: number;
@@ -17,11 +17,16 @@ interface PendingRequest {
   reject: (error: Error) => void;
 }
 
+type EventListener = (event: CommandEvent<Record<string, unknown>>) => void;
+const MAX_BUFFERED_EVENTS = 8;
+
 export class CommandWsClient {
   private readonly url: string;
   private socket: WebSocket | null = null;
   private connectPromise: Promise<void> | null = null;
   private pendingRequests = new Map<string, PendingRequest>();
+  private eventListeners = new Set<EventListener>();
+  private bufferedEvents: CommandEvent<Record<string, unknown>>[] = [];
 
   constructor(url: string) {
     this.url = url;
@@ -98,23 +103,42 @@ export class CommandWsClient {
     });
   }
 
+  onEvent(listener: EventListener): () => void {
+    this.eventListeners.add(listener);
+    if (this.bufferedEvents.length > 0) {
+      const bufferedEvents = [...this.bufferedEvents];
+      this.bufferedEvents = [];
+      for (const event of bufferedEvents) {
+        listener(event);
+      }
+    }
+    return () => {
+      this.eventListeners.delete(listener);
+    };
+  }
+
   private handleMessage(data: unknown): void {
     if (typeof data !== 'string') {
       return;
     }
 
-    let response: CommandResponse<Record<string, unknown>> | null = null;
+    let payload: Record<string, unknown> | null = null;
     try {
-      response = JSON.parse(data) as CommandResponse<Record<string, unknown>>;
+      payload = JSON.parse(data) as Record<string, unknown>;
     } catch {
       return;
     }
 
+    if (payload && typeof payload.event === 'string') {
+      this.emitEvent(payload as CommandEvent<Record<string, unknown>>);
+      return;
+    }
+
     const requestId =
-      typeof response.request_id === 'string'
-        ? response.request_id
-        : typeof response.id === 'string'
-          ? response.id
+      typeof payload.request_id === 'string'
+        ? payload.request_id
+        : typeof payload.id === 'string'
+          ? payload.id
           : '';
     if (!requestId) {
       return;
@@ -126,7 +150,7 @@ export class CommandWsClient {
     }
 
     this.pendingRequests.delete(requestId);
-    pendingRequest.resolve(response);
+    pendingRequest.resolve(payload as CommandResponse<Record<string, unknown>>);
   }
 
   private rejectPendingRequests(error: Error): void {
@@ -134,5 +158,18 @@ export class CommandWsClient {
       pendingRequest.reject(error);
     }
     this.pendingRequests.clear();
+  }
+
+  private emitEvent(event: CommandEvent<Record<string, unknown>>): void {
+    if (this.eventListeners.size === 0) {
+      this.bufferedEvents.push(event);
+      if (this.bufferedEvents.length > MAX_BUFFERED_EVENTS) {
+        this.bufferedEvents.shift();
+      }
+      return;
+    }
+    for (const listener of this.eventListeners) {
+      listener(event);
+    }
   }
 }
