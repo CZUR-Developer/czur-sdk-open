@@ -27,6 +27,14 @@ Json GetOptionalObjectField(const Json& obj, const char* key) {
     return Json::object();
 }
 
+std::string GetSessionCredential(const Json& auth) {
+    const std::string session_key = GetOptionalStringField(auth, "session_key");
+    if (!session_key.empty()) {
+        return session_key;
+    }
+    return GetOptionalStringField(auth, "session_token");
+}
+
 const char* ToAuthScopeString(SdkAuthScope auth_scope) {
     switch (auth_scope) {
         case SdkAuthScope::Authenticated:
@@ -65,9 +73,9 @@ SdkCommandDispatcher::SdkCommandDispatcher(const SdkConfig& config, const Provid
     method_descriptors_.push_back({"auth.validate", SdkAuthScope::Authenticated, SdkDeviceScopePolicy::None, "ga",
                                    "校验 ApiKey 并返回授权上下文", {}});
     method_descriptors_.push_back({"auth.refresh", SdkAuthScope::Authenticated, SdkDeviceScopePolicy::None, "beta",
-                                   "以 ApiKey 换取短期 session token", {}});
+                                   "校验 ApiKey 并签发短期 session key", {}});
     method_descriptors_.push_back({"auth.get_context", SdkAuthScope::Authenticated, SdkDeviceScopePolicy::None, "beta",
-                                   "使用 session 或 ApiKey 查询授权上下文", {}});
+                                   "使用 session key 或 ApiKey 查询授权上下文", {}});
 }
 
 void SdkCommandDispatcher::SetStatusSupplier(StatusSupplier supplier) {
@@ -219,6 +227,7 @@ Json SdkCommandDispatcher::HandleAuthRefresh(const SdkCommandRequest& request) c
         SdkStatusCode::Ok,
         "ok",
         Json{
+            {"session_key", result.session_token},
             {"session_token", result.session_token},
             {"expires_in", result.expires_in},
             {"auth_context", BuildAuthContextJson(result.auth_context)},
@@ -231,7 +240,7 @@ Json SdkCommandDispatcher::HandleAuthGetContext(const SdkCommandRequest& request
     }
 
     const std::string api_key = GetOptionalStringField(request.auth, "api_key");
-    const std::string session_token = GetOptionalStringField(request.auth, "session_token");
+    const std::string session_token = GetSessionCredential(request.auth);
     if (api_key.empty() && session_token.empty()) {
         return BuildWsResponse(request.request_id, SdkStatusCode::AuthRequired, "auth required");
     }

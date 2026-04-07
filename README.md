@@ -154,6 +154,25 @@ curl -H "Authorization: Bearer <token>" http://127.0.0.1:17080/api/status
 
 ## Configuration and Environment Variables
 
+Build-time switch:
+
+- `SDK_OPEN_ENABLE_HTTP_SERVER=ON`
+  - Default.
+  - Starts the embedded `admin-site` and `demo-site` HTTP servers on `17080/17081`.
+- `SDK_OPEN_ENABLE_HTTP_SERVER=OFF`
+  - Disables the embedded HTTP servers.
+  - Useful when you want to run `frontend/demo-site` or `frontend/admin-site` with `pnpm run dev` and avoid port conflicts with `sdk_open_app`.
+
+Example:
+
+```bash
+cmake -S . -B build-sdk-open \
+  -DBUILD_SDK_OPEN=ON \
+  -DBUILD_SDK_WEB=OFF \
+  -DSDK_OPEN_ENABLE_HTTP_SERVER=OFF \
+  -DCMAKE_BUILD_TYPE=Debug
+```
+
 The current `sdk_open_app` supports the following environment-variable overrides:
 
 - `SDK_ADMIN_HTTP_PORT`

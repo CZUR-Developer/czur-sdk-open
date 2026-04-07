@@ -22,12 +22,20 @@ public:
         uint64_t request_count = 0;
     };
 
+    struct ConnectionAuthResult {
+        bool authorized = false;
+        int code = ToCode(SdkStatusCode::AuthRequired);
+        std::string message = "auth required";
+    };
+
     using JsonSupplier = std::function<Json()>;
     using RequestHandler = std::function<Json(const Json&)>;
+    using ConnectionAuthHandler = std::function<ConnectionAuthResult(const std::string&)>;
 
-    SdkWsCommandServer(const std::string& host, int port, const std::string& auth_token);
+    SdkWsCommandServer(const std::string& host, int port);
     ~SdkWsCommandServer();
 
+    void SetConnectionAuthHandler(ConnectionAuthHandler handler);
     void SetRequestHandler(RequestHandler handler);
     void SetStatusJsonSupplier(JsonSupplier supplier);
     void SetCapabilitiesJsonSupplier(JsonSupplier supplier);
@@ -40,8 +48,8 @@ private:
 
     std::string host_;
     int port_;
-    std::string auth_token_;
     std::atomic<bool> running_;
+    ConnectionAuthHandler connection_auth_handler_;
     RequestHandler request_handler_;
     JsonSupplier status_json_supplier_;
     JsonSupplier capabilities_json_supplier_;

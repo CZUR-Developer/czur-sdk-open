@@ -2,6 +2,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(SDK_OPEN_ENABLE_HTTP_SERVER "Start sdk_open embedded admin/demo HTTP servers" ON)
+
 set(SDK_OPEN_THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
 set(SDK_OPEN_CPP_HTTPLIB_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/cpp-httplib")
 set(SDK_OPEN_WEBSOCKETPP_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/websocketpp")
@@ -52,6 +54,9 @@ target_include_directories(sdk_open_runtime PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/runtime"
     "${CMAKE_CURRENT_SOURCE_DIR}/interfaces"
 )
+target_compile_definitions(sdk_open_runtime PUBLIC
+    SDK_OPEN_ENABLE_HTTP_SERVER=$<IF:$<BOOL:${SDK_OPEN_ENABLE_HTTP_SERVER}>,1,0>
+)
 target_link_libraries(sdk_open_runtime PUBLIC
     sdk_open_interfaces
     sdk_open_third_party
@@ -77,8 +82,17 @@ target_include_directories(sdk_open_app PRIVATE
 )
 target_link_libraries(sdk_open_app PRIVATE
     sdk_open_runtime
-    sdk_mock_providers
 )
+
+if(BUILD_SDK_PRIVATE)
+    target_compile_definitions(sdk_open_app PRIVATE SDK_USE_PRIVATE_PROVIDER)
+    target_include_directories(sdk_open_app PRIVATE
+        "${CMAKE_SOURCE_DIR}/src/sdk_private/providers"
+    )
+    target_link_libraries(sdk_open_app PRIVATE sdk_private_providers)
+else()
+    target_link_libraries(sdk_open_app PRIVATE sdk_mock_providers)
+endif()
 
 if(BUILD_SDK_WEB)
     message(STATUS "ENV PATH=$ENV{PATH}")

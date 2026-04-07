@@ -25,13 +25,13 @@
 
     <div class="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
       <SectionPanel :title="t('sections.eventCenter')" :description="t('common.recentEvents')">
-        <EventTimeline :items="globalEvents" />
+        <EventTimeline :items="runtimeRecordState.events" />
       </SectionPanel>
 
       <SectionPanel :title="t('sections.errorCenter')" :description="t('common.recentErrors')">
         <div class="space-y-4">
           <InfoCard
-            v-for="error in globalErrors"
+            v-for="error in runtimeRecordState.errors"
             :key="error.id"
             :eyebrow="error.method"
             :title="error.name"
@@ -56,7 +56,8 @@ import SectionPanel from '../components/blocks/SectionPanel.vue';
 import InfoCard from '../components/cards/InfoCard.vue';
 import MetricCard from '../components/cards/MetricCard.vue';
 import StatusPill from '../components/cards/StatusPill.vue';
-import { globalErrors, globalEvents, globalRequestHistory, resultCenterMetrics } from '../data/demoSite';
+import { resultCenterMetrics } from '../data/demoSite';
+import { runtimeRecordState } from '../services/runtime-records';
 
 const { t } = useI18n();
 
@@ -69,7 +70,7 @@ const requestColumns = computed(() => [
 ]);
 
 const requestRows = computed(() =>
-  globalRequestHistory.map((item) => ({
+  runtimeRecordState.requests.map((item) => ({
     id: item.id,
     cells: {
       method: item.method,

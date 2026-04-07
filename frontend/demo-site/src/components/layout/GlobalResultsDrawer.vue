@@ -8,7 +8,7 @@
       <div class="flex items-center justify-between border-b border-slate-200 px-5 py-4">
         <div>
           <p class="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-700">{{ t('common.actionCenter') }}</p>
-          <h2 class="mt-2 text-xl font-semibold tracking-tight text-slate-950">{{ t('common.mockMode') }}</h2>
+          <h2 class="mt-2 text-xl font-semibold tracking-tight text-slate-950">{{ t('common.runtimeActivity') }}</h2>
         </div>
 
         <button
@@ -28,7 +28,7 @@
             <h3 class="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">{{ t('common.recentRequests') }}</h3>
             <StatusPill :label="String(requests.length)" tone="primary" />
           </div>
-          <div class="space-y-3">
+          <div v-if="requests.length > 0" class="space-y-3">
             <article
               v-for="request in requests"
               :key="request.id"
@@ -53,6 +53,12 @@
               </div>
             </article>
           </div>
+          <div
+            v-else
+            class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-4 py-5 text-sm leading-6 text-slate-500"
+          >
+            {{ t('common.noRequestsYet') }}
+          </div>
         </section>
 
         <section>
@@ -60,7 +66,13 @@
             <h3 class="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">{{ t('common.recentEvents') }}</h3>
             <StatusPill :label="String(events.length)" tone="success" />
           </div>
-          <EventTimeline :items="events" />
+          <EventTimeline v-if="events.length > 0" :items="events" />
+          <div
+            v-else
+            class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-4 py-5 text-sm leading-6 text-slate-500"
+          >
+            {{ t('common.noEventsYet') }}
+          </div>
         </section>
 
         <section>
@@ -68,7 +80,7 @@
             <h3 class="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">{{ t('common.recentErrors') }}</h3>
             <StatusPill :label="String(errors.length)" tone="warning" />
           </div>
-          <div class="space-y-3">
+          <div v-if="errors.length > 0" class="space-y-3">
             <article
               v-for="error in errors"
               :key="error.id"
@@ -86,6 +98,12 @@
                 {{ error.occurredAt }} · {{ error.traceId }}
               </p>
             </article>
+          </div>
+          <div
+            v-else
+            class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-4 py-5 text-sm leading-6 text-slate-500"
+          >
+            {{ t('common.noErrorsYet') }}
           </div>
         </section>
       </div>

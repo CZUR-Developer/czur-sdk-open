@@ -154,6 +154,25 @@ curl -H "Authorization: Bearer <token>" http://127.0.0.1:17080/api/status
 
 ## 配置与环境变量
 
+编译期开关：
+
+- `SDK_OPEN_ENABLE_HTTP_SERVER=ON`
+  - 默认值。
+  - 启动内置 `admin-site` 和 `demo-site` HTTP 服务，占用 `17080/17081`。
+- `SDK_OPEN_ENABLE_HTTP_SERVER=OFF`
+  - 禁用内置 HTTP 服务。
+  - 适合直接在 `frontend/demo-site` 或 `frontend/admin-site` 下执行 `pnpm run dev`，避免和 `sdk_open_app` 的端口冲突。
+
+示例：
+
+```bash
+cmake -S . -B build-sdk-open \
+  -DBUILD_SDK_OPEN=ON \
+  -DBUILD_SDK_WEB=OFF \
+  -DSDK_OPEN_ENABLE_HTTP_SERVER=OFF \
+  -DCMAKE_BUILD_TYPE=Debug
+```
+
 当前 `sdk_open_app` 支持以下环境变量覆盖默认配置：
 
 - `SDK_ADMIN_HTTP_PORT`

@@ -52,6 +52,25 @@ std::string GetOptionalStringField(const Json& obj, const char* key) {
     return "";
 }
 
+std::string MaskApiKey(const std::string& api_key) {
+    if (api_key.empty()) {
+        return "<empty>";
+    }
+    if (api_key.size() <= 16) {
+        return api_key.substr(0, api_key.size() / 2) + "...(len=" + std::to_string(api_key.size()) + ")";
+    }
+    return api_key.substr(0, 8) + "..." + api_key.substr(api_key.size() - 6) +
+           " (len=" + std::to_string(api_key.size()) + ")";
+}
+
+std::string SafeRemoteEndpoint(WsServer& server, ConnectionHdl hdl) {
+    try {
+        return server.get_con_from_hdl(hdl)->get_remote_endpoint();
+    } catch (...) {
+        return "<unknown-remote>";
+    }
+}
+
 } // namespace
 
 class SdkWsCommandServer::Impl {
@@ -66,15 +85,17 @@ public:
 };
 
 SdkWsCommandServer::SdkWsCommandServer(const std::string& host,
-                                       int port,
-                                       const std::string& auth_token)
+                                       int port)
     : host_(host),
       port_(port),
-      auth_token_(auth_token),
       running_(false) {}
 
 SdkWsCommandServer::~SdkWsCommandServer() {
     Stop();
+}
+
+void SdkWsCommandServer::SetConnectionAuthHandler(ConnectionAuthHandler handler) {
+    connection_auth_handler_ = std::move(handler);
 }
 
 void SdkWsCommandServer::SetRequestHandler(RequestHandler handler) {
@@ -103,13 +124,49 @@ bool SdkWsCommandServer::Start() {
 
     server.set_validate_handler([this](ConnectionHdl hdl) {
         auto con = impl_->server.get_con_from_hdl(hdl);
+        const std::string remote = SafeRemoteEndpoint(impl_->server, hdl);
+        const std::string resource = con->get_uri()->get_resource();
         const std::string query = con->get_uri()->get_query();
-        const std::string token = QueryValue(query, "token");
-        if (auth_token_.empty() || token == auth_token_) {
+        const std::string api_key = QueryValue(query, "api_key");
+        std::cout << "[sdk_ws_command_server] handshake validate start"
+                  << ", remote=" << remote
+                  << ", resource=" << resource
+                  << ", has_api_key=" << (!api_key.empty() ? "true" : "false")
+                  << ", api_key=" << MaskApiKey(api_key)
+                  << std::endl;
+        if (!connection_auth_handler_) {
+            impl_->auth_failed.fetch_add(1);
+            std::cerr << "[sdk_ws_command_server] handshake validate failed"
+                      << ", remote=" << remote
+                      << ", reason=provider_not_ready"
+                      << std::endl;
+            con->set_status(websocketpp::http::status_code::service_unavailable);
+            con->set_body(DumpJson(BuildErrorBody(SdkStatusCode::ProviderNotReady, "provider not ready")));
+            return false;
+        }
+
+        const ConnectionAuthResult auth_result = connection_auth_handler_(api_key);
+        std::cout << "[sdk_ws_command_server] handshake validate result"
+                  << ", remote=" << remote
+                  << ", authorized=" << (auth_result.authorized ? "true" : "false")
+                  << ", code=" << auth_result.code
+                  << ", message=" << auth_result.message
+                  << std::endl;
+        if (auth_result.authorized) {
+            std::cout << "[sdk_ws_command_server] handshake accepted"
+                      << ", remote=" << remote
+                      << std::endl;
             return true;
         }
         impl_->auth_failed.fetch_add(1);
+        std::cerr << "[sdk_ws_command_server] handshake rejected"
+                  << ", remote=" << remote
+                  << ", http_status=401"
+                  << ", code=" << auth_result.code
+                  << ", message=" << auth_result.message
+                  << std::endl;
         con->set_status(websocketpp::http::status_code::unauthorized);
+        con->set_body(DumpJson(BuildErrorBody(auth_result.code, auth_result.message)));
         return false;
     });
 
@@ -117,12 +174,20 @@ bool SdkWsCommandServer::Start() {
         std::lock_guard<std::mutex> lock(impl_->connections_mu);
         impl_->connections.insert(hdl);
         impl_->active_connections.store(static_cast<uint64_t>(impl_->connections.size()));
+        std::cout << "[sdk_ws_command_server] connection opened"
+                  << ", remote=" << SafeRemoteEndpoint(impl_->server, hdl)
+                  << ", active_connections=" << impl_->active_connections.load()
+                  << std::endl;
     });
 
     server.set_close_handler([this](ConnectionHdl hdl) {
         std::lock_guard<std::mutex> lock(impl_->connections_mu);
         impl_->connections.erase(hdl);
         impl_->active_connections.store(static_cast<uint64_t>(impl_->connections.size()));
+        std::cout << "[sdk_ws_command_server] connection closed"
+                  << ", remote=" << SafeRemoteEndpoint(impl_->server, hdl)
+                  << ", active_connections=" << impl_->active_connections.load()
+                  << std::endl;
     });
 
     server.set_message_handler([this](ConnectionHdl hdl, MessagePtr msg) {

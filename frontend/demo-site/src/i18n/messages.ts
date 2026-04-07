@@ -4,6 +4,7 @@ export const messages = {
       brand: 'sdk_app',
       tagline: 'Demo Site',
       description: 'Interactive protocol workbench for SDK validation, demo flows, and integration references.',
+      protocolVersion: 'Protocol v1.0.0',
     },
     common: {
       locale: 'Language',
@@ -14,6 +15,7 @@ export const messages = {
       recentRequests: 'Recent requests',
       recentErrors: 'Recent errors',
       recentEvents: 'Recent events',
+      runtimeActivity: 'Runtime activity',
       environment: 'Environment',
       method: 'Method',
       protocol: 'Protocol',
@@ -34,9 +36,14 @@ export const messages = {
       primaryFlow: 'Primary flow',
       rawJson: 'Raw JSON',
       mockMode: 'Mock mode',
+      noRequestsYet: 'No command requests yet. Open the command lane and send a method to populate this feed.',
+      noEventsYet: 'No runtime events yet. Connection, auth, and device activity will appear here as they happen.',
+      noErrorsYet: 'No alerts yet. Runtime failures and auth issues will be recorded here when they occur.',
+      notSet: 'Not set',
     },
     actions: {
       openDrawer: 'Open drawer',
+      setApiKey: 'Set API key',
       copyUrl: 'Copy URL',
       healthCheck: 'Health check',
       connect: 'Connect',
@@ -51,6 +58,8 @@ export const messages = {
       compare: 'Compare',
       execute: 'Execute',
       inspect: 'Inspect',
+      save: 'Save',
+      clear: 'Clear',
     },
     status: {
       idle: 'Idle',
@@ -82,6 +91,7 @@ export const messages = {
     header: {
       command: 'Command WS',
       auth: 'Auth',
+      apiKey: 'API Key',
       device: 'Device',
       provider: 'Provider',
       trace: 'Trace ID',
@@ -161,6 +171,8 @@ export const messages = {
     },
     labels: {
       endpoint: 'Endpoint',
+      apiKey: 'API Key',
+      sessionKey: 'Session Key',
       token: 'Token',
       handshake: 'Handshake',
       expiresAt: 'Expires at',
@@ -200,6 +212,7 @@ export const messages = {
       brand: 'sdk_app',
       tagline: '演示站点',
       description: '面向 SDK 验证、演示链路和集成参考的协议工作台。',
+      protocolVersion: '协议版本 v1.0.0',
     },
     common: {
       locale: '语言',
@@ -210,6 +223,7 @@ export const messages = {
       recentRequests: '最近请求',
       recentErrors: '最近错误',
       recentEvents: '最近事件',
+      runtimeActivity: '运行记录',
       environment: '环境上下文',
       method: '方法',
       protocol: '协议',
@@ -230,9 +244,14 @@ export const messages = {
       primaryFlow: '主链路',
       rawJson: '原始 JSON',
       mockMode: 'Mock 模式',
+      noRequestsYet: '当前还没有真实指令请求记录。建立命令通道并发送方法后，这里会出现实时记录。',
+      noEventsYet: '当前还没有运行事件。连接、鉴权和设备活动发生后，这里会实时展示。',
+      noErrorsYet: '当前还没有告警。运行失败和鉴权问题发生时，这里会记录真实告警。',
+      notSet: '未设置',
     },
     actions: {
       openDrawer: '打开抽屉',
+      setApiKey: '设置 API Key',
       copyUrl: '复制地址',
       healthCheck: '连通性检查',
       connect: '连接',
@@ -247,6 +266,8 @@ export const messages = {
       compare: '对比',
       execute: '执行',
       inspect: '查看',
+      save: '保存',
+      clear: '清空',
     },
     status: {
       idle: '待命',
@@ -278,6 +299,7 @@ export const messages = {
     header: {
       command: '指令通道',
       auth: '鉴权态',
+      apiKey: 'API Key',
       device: '当前设备',
       provider: 'Provider 模式',
       trace: '最近 Trace',
@@ -357,6 +379,8 @@ export const messages = {
     },
     labels: {
       endpoint: '端点',
+      apiKey: 'API Key',
+      sessionKey: '会话 Key',
       token: '令牌',
       handshake: '握手',
       expiresAt: '过期时间',

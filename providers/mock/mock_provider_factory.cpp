@@ -3,6 +3,7 @@
 
 #include "mock_provider_factory.h"
 
+#include <iostream>
 #include <memory>
 #include <utility>
 
@@ -14,15 +15,44 @@ namespace mock {
 
 namespace {
 
+std::string MaskApiKey(const std::string& api_key) {
+    if (api_key.empty()) {
+        return "<empty>";
+    }
+    if (api_key.size() <= 16) {
+        return api_key.substr(0, api_key.size() / 2) + "...(len=" + std::to_string(api_key.size()) + ")";
+    }
+    return api_key.substr(0, 8) + "..." + api_key.substr(api_key.size() - 6) +
+           " (len=" + std::to_string(api_key.size()) + ")";
+}
+
 class MockAuthProvider : public ISdkAuthProvider {
 public:
     std::string ProviderName() const override { return "mock-auth-provider"; }
 
     AuthValidateResult ValidateApiKey(const AuthValidateRequest& request) override {
         AuthValidateResult result;
+        std::cout << "[mock_auth_provider] ValidateApiKey begin"
+                  << ", api_key=" << MaskApiKey(request.api_key)
+                  << ", now_ts=" << request.now_ts
+                  << std::endl;
         if (request.api_key.empty()) {
             result.code = ToCode(SdkStatusCode::AuthRequired);
-            result.message = "auth required";
+            result.message = "api key required";
+            std::cerr << "[mock_auth_provider] ValidateApiKey reject"
+                      << ", code=" << result.code
+                      << ", message=" << result.message
+                      << std::endl;
+            return result;
+        }
+        if (request.api_key != "demo-key-42F8" && request.api_key != "mock-key") {
+            result.code = ToCode(SdkStatusCode::ApiKeyInvalid);
+            result.message = "api key invalid";
+            std::cerr << "[mock_auth_provider] ValidateApiKey reject"
+                      << ", code=" << result.code
+                      << ", message=" << result.message
+                      << ", note=mock provider only accepts demo-key-42F8/mock-key"
+                      << std::endl;
             return result;
         }
         result.auth_context.is_valid = true;
@@ -47,6 +77,11 @@ public:
             "ocr.recognize",
             "file.convert",
         };
+        std::cout << "[mock_auth_provider] ValidateApiKey success"
+                  << ", account_type=" << ToAccountTypeString(result.auth_context.account_type)
+                  << ", auth_scene=" << result.auth_context.auth_scene
+                  << ", device_scope_count=" << result.auth_context.device_scope.size()
+                  << std::endl;
         return result;
     }
 

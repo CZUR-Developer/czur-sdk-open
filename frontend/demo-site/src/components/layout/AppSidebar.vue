@@ -3,11 +3,10 @@
     class="flex h-full w-76 flex-col border-r border-slate-900/70 bg-slate-950/95 text-slate-100"
     :class="mobile ? 'shadow-2xl' : ''"
   >
-    <div class="flex min-h-[92px] items-center justify-between border-b border-slate-800 px-4 py-3">
+    <div class="flex min-h-[76px] items-center justify-between border-b border-slate-800 px-4 py-3">
       <div>
-        <div class="text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-300">{{ t('app.brand') }}</div>
-        <div class="mt-2 text-lg font-semibold tracking-tight text-white">{{ t('app.tagline') }}</div>
-        <p class="mt-2 max-w-[220px] text-sm leading-5 text-slate-400">{{ t('app.description') }}</p>
+        <div class="text-base font-semibold tracking-tight text-white">{{ t('app.tagline') }}</div>
+        <p class="mt-1.5 max-w-[220px] text-xs leading-4 text-slate-400">{{ t('app.protocolVersion') }}</p>
       </div>
 
       <button
