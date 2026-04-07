@@ -1,0 +1,64 @@
+<template>
+  <article class="overflow-hidden rounded-[32px] border border-white/70 bg-white/90 shadow-[var(--demo-shadow)]">
+    <div class="relative min-h-[300px] bg-slate-950">
+      <div class="absolute inset-0 opacity-70" :class="variantClass" />
+      <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.12),_transparent_38%)]" />
+      <div class="absolute inset-x-0 top-0 h-px bg-cyan-300/50" />
+
+      <div class="relative flex min-h-[300px] flex-col justify-between p-6">
+        <div class="flex flex-wrap gap-2">
+          <StatusPill v-if="badgeLabel" :label="badgeLabel" :tone="badgeTone" />
+        </div>
+
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">{{ eyebrow }}</p>
+          <h3 class="mt-3 text-2xl font-semibold tracking-tight text-white">{{ title }}</h3>
+          <p class="mt-3 max-w-xl text-sm leading-6 text-slate-300">{{ description }}</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid gap-3 p-5 sm:grid-cols-2">
+      <div
+        v-for="metric in metrics"
+        :key="metric.label"
+        class="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4"
+      >
+        <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{{ metric.label }}</p>
+        <p class="mt-2 text-sm font-medium text-slate-900" :class="metric.monospace ? 'font-mono text-[13px]' : ''">
+          {{ metric.value }}
+        </p>
+      </div>
+    </div>
+  </article>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue';
+
+import type { PreviewMetric, Tone } from '../../types/demo';
+import StatusPill from '../cards/StatusPill.vue';
+
+const props = withDefaults(
+  defineProps<{
+    eyebrow: string;
+    title: string;
+    description: string;
+    metrics: PreviewMetric[];
+    badgeLabel?: string;
+    badgeTone?: Tone;
+    variant?: 'image' | 'video';
+  }>(),
+  {
+    badgeLabel: undefined,
+    badgeTone: 'neutral',
+    variant: 'image',
+  },
+);
+
+const variantClass = computed(() =>
+  props.variant === 'video'
+    ? 'bg-[linear-gradient(135deg,_rgba(14,116,144,0.72),_rgba(15,23,42,0.95))]'
+    : 'bg-[linear-gradient(135deg,_rgba(8,145,178,0.62),_rgba(15,23,42,0.92))]',
+);
+</script>

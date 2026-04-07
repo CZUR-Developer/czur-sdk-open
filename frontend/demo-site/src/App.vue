@@ -1,14 +1,11 @@
 <template>
-  <main>
-    <h1>SDK 演示站点（骨架）</h1>
-    <p>用于展示 B/S 接入示例和接口调用流程。</p>
-  </main>
+  <AppShell>
+    <RouterView />
+  </AppShell>
 </template>
 
-<style scoped>
-main {
-  font-family: "Noto Sans SC", sans-serif;
-  padding: 24px;
-}
-</style>
+<script setup lang="ts">
+import { RouterView } from 'vue-router';
 
+import AppShell from './components/layout/AppShell.vue';
+</script>
