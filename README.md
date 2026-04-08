@@ -195,6 +195,8 @@ Device control, capture, image processing, OCR, and file processing directions a
 ## Documentation
 
 - Chinese version: [README_ZH.md](./README_ZH.md)
+- Command channel flow: [doc/COMMAND_CHANNEL_FLOW.md](./doc/COMMAND_CHANNEL_FLOW.md)
+- Chinese command channel flow: [doc/COMMAND_CHANNEL_FLOW_ZH.md](./doc/COMMAND_CHANNEL_FLOW_ZH.md)
 - Public error codes: [doc/ERROR_CODES.md](./doc/ERROR_CODES.md)
 - Chinese error codes: [doc/ERROR_CODES_ZH.md](./doc/ERROR_CODES_ZH.md)
 - Contribution guide: [CONTRIBUTING.md](./CONTRIBUTING.md)

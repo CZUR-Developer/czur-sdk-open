@@ -194,6 +194,8 @@ cmake -S . -B build-sdk-open \
 
 ## 文档
 
+- 指令通道英文时序文档：[doc/COMMAND_CHANNEL_FLOW.md](./doc/COMMAND_CHANNEL_FLOW.md)
+- 指令通道中文时序文档：[doc/COMMAND_CHANNEL_FLOW_ZH.md](./doc/COMMAND_CHANNEL_FLOW_ZH.md)
 - 英文版本：[README.md](./README.md)
 - 英文错误码文档：[doc/ERROR_CODES.md](./doc/ERROR_CODES.md)
 - 中文错误码文档：[doc/ERROR_CODES_ZH.md](./doc/ERROR_CODES_ZH.md)
