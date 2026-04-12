@@ -57,7 +57,7 @@ export class CommandWsClient {
       socket.addEventListener('error', () => {
         if (!settled) {
           settled = true;
-          reject(new CommandWsConnectError('websocket handshake failed'));
+          reject(new CommandWsConnectError('websocket connect failed'));
         }
       });
 
@@ -69,7 +69,7 @@ export class CommandWsClient {
         if (!settled) {
           settled = true;
           reject(
-            new CommandWsConnectError(event.reason || 'websocket handshake failed', {
+            new CommandWsConnectError(event.reason || 'websocket connect failed', {
               closeCode: event.code,
               closeReason: event.reason,
             }),
@@ -137,9 +137,7 @@ export class CommandWsClient {
     const requestId =
       typeof payload.request_id === 'string'
         ? payload.request_id
-        : typeof payload.id === 'string'
-          ? payload.id
-          : '';
+        : '';
     if (!requestId) {
       return;
     }

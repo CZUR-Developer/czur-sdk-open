@@ -20,7 +20,7 @@ namespace sdk {
 
 class SdkHttpServer {
 public:
-    using StatusJsonSupplier = std::function<Json()>;
+    using JsonSupplier = std::function<Json()>;
 
     SdkHttpServer(const std::string& site_name,
                   const std::string& host,
@@ -29,7 +29,8 @@ public:
                   const std::string& auth_token);
     ~SdkHttpServer();
 
-    void EnableStatusApi(StatusJsonSupplier supplier);
+    void SetHealthSupplier(JsonSupplier supplier);
+    void SetStatusSupplier(JsonSupplier supplier);
     bool Start();
     void Stop();
 
@@ -42,8 +43,8 @@ private:
     int port_;
     std::string document_root_;
     std::string auth_token_;
-    bool status_api_enabled_;
-    StatusJsonSupplier status_supplier_;
+    JsonSupplier health_supplier_;
+    JsonSupplier status_supplier_;
     std::atomic<bool> running_;
     std::unique_ptr<httplib::Server> server_;
     std::thread server_thread_;

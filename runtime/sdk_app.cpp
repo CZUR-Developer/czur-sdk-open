@@ -3,7 +3,6 @@
 
 #include "sdk_app.h"
 
-#include <ctime>
 #include <utility>
 
 #include "sdk_logger.h"
@@ -12,119 +11,52 @@ namespace editor {
 namespace sdk {
 
 namespace {
-
 #if SDK_OPEN_ENABLE_HTTP_SERVER
 constexpr bool kSdkOpenHttpServerEnabled = true;
 #else
 constexpr bool kSdkOpenHttpServerEnabled = false;
 #endif
 
-std::string MaskApiKey(const std::string& api_key) {
-    if (api_key.empty()) {
-        return "<empty>";
-    }
-    if (api_key.size() <= 16) {
-        return api_key.substr(0, api_key.size() / 2) + "...(len=" + std::to_string(api_key.size()) + ")";
-    }
-    return api_key.substr(0, 8) + "..." + api_key.substr(api_key.size() - 6) +
-           " (len=" + std::to_string(api_key.size()) + ")";
-}
-
-Json BuildAuthContextJson(const AuthContext& auth_context) {
-    Json device_scope = Json::array();
-    for (std::vector<SdkDeviceGrant>::const_iterator it = auth_context.device_scope.begin();
-         it != auth_context.device_scope.end();
-         ++it) {
-        device_scope.push_back(Json{
-            {"vid", it->vid},
-            {"pid", it->pid},
-        });
-    }
-
-    Json capabilities = Json::array();
-    for (std::vector<std::string>::const_iterator it = auth_context.capabilities.begin();
-         it != auth_context.capabilities.end();
-         ++it) {
-        capabilities.push_back(*it);
-    }
-
-    return Json{
-        {"is_valid", auth_context.is_valid},
-        {"account_type", ToAccountTypeString(auth_context.account_type)},
-        {"account_type_code", auth_context.account_type_code},
-        {"auth_scene", auth_context.auth_scene},
-        {"license_mode", auth_context.license_mode},
-        {"device_scope", device_scope},
-        {"expires_at", auth_context.expires_at},
-        {"capabilities", capabilities},
-    };
-}
-
 } // namespace
 
 SdkApp::SdkApp(const SdkConfig& config, ProviderBundle providers)
     : config_(config),
       providers_(std::move(providers)),
-      command_dispatcher_(new SdkCommandDispatcher(config_, providers_)),
+      command_application_service_(new CommandApplicationService(config_, providers_)),
       admin_http_server_(
           "admin-site", config_.bind_host, config_.admin_http_port, config_.web_root + "/admin", config_.auth_token),
       demo_http_server_(
           "demo-site", config_.bind_host, config_.demo_http_port, config_.web_root + "/demo", config_.auth_token),
       command_ws_server_(config_.bind_host, config_.command_ws_port),
-      video_ws_server_(config_.bind_host, config_.video_ws_port, config_.auth_token),
+      video_ws_server_(config_.bind_host, config_.video_ws_port),
       running_(false),
       start_time_(std::chrono::steady_clock::now()) {
+    admin_application_service_.SetStatusSupplier([this]() { return BuildStatusJson(); });
     if (kSdkOpenHttpServerEnabled) {
-        admin_http_server_.EnableStatusApi([this]() { return BuildStatusJson(); });
+        admin_http_server_.SetHealthSupplier([this]() { return admin_application_service_.BuildHealthJson(); });
+        admin_http_server_.SetStatusSupplier([this]() { return admin_application_service_.BuildStatusJson(); });
+        demo_http_server_.SetHealthSupplier([this]() { return admin_application_service_.BuildHealthJson(); });
+        demo_http_server_.SetStatusSupplier([this]() { return admin_application_service_.BuildStatusJson(); });
     }
-    command_dispatcher_->SetStatusSupplier([this]() { return BuildStatusJson(); });
-    command_ws_server_.SetConnectionAuthHandler([this](const std::string& api_key) {
-        SdkWsCommandServer::ConnectionAuthResult result;
-        const std::string provider_name = providers_.auth_provider ? providers_.auth_provider->ProviderName() : "<none>";
-        SDK_OPEN_LOG_INFO("[sdk_app] command ws auth validate begin, provider={}, api_key={}, now_ts={}",
-                          provider_name,
-                          MaskApiKey(api_key),
-                          static_cast<std::int64_t>(std::time(nullptr)));
-        if (!providers_.auth_provider) {
-            result.code = ToCode(SdkStatusCode::ProviderNotReady);
-            result.message = "provider not ready";
-            SDK_OPEN_LOG_WARN("[sdk_app] command ws auth validate failed, provider={}, code={}, message={}",
-                              provider_name,
-                              result.code,
-                              result.message);
-            return result;
+    command_application_service_->SetStatusSupplier([this]() { return BuildStatusJson(); });
+    command_ws_server_.SetRequestHandler(
+        [this](const std::string& connection_id, const Json& request) { return command_application_service_->HandleRequest(connection_id, request); });
+    command_ws_server_.SetCloseHandler([this](const std::string& connection_id) {
+        if (command_application_service_) {
+            command_application_service_->OnConnectionClosed(connection_id);
         }
-        if (api_key.empty()) {
-            result.code = ToCode(SdkStatusCode::AuthRequired);
-            result.message = "api key required";
-            SDK_OPEN_LOG_WARN("[sdk_app] command ws auth validate failed, provider={}, code={}, message={}",
-                              provider_name,
-                              result.code,
-                              result.message);
-            return result;
-        }
-
-        const std::int64_t now_ts = static_cast<std::int64_t>(std::time(nullptr));
-        AuthRefreshRequest refresh_request;
-        refresh_request.api_key = api_key;
-        refresh_request.now_ts = now_ts;
-        const AuthRefreshResult refresh = providers_.auth_provider->RefreshSession(refresh_request);
-        result.authorized = IsOkStatusCode(refresh.code);
-        result.code = refresh.code;
-        result.message = refresh.message;
-        result.session_key = refresh.session_token;
-        result.expires_in = refresh.expires_in;
-        result.auth_context = BuildAuthContextJson(refresh.auth_context);
-        SDK_OPEN_LOG_INFO("[sdk_app] command ws auth validate result, provider={}, authorized={}, code={}, message={}",
-                          provider_name,
-                          result.authorized ? "true" : "false",
-                          result.code,
-                          result.message);
+    });
+    video_ws_server_.SetConnectionAuthHandler([this](const std::string& session_token, const std::string& stream_id) {
+        SdkWsVideoServer::ConnectionAuthResult result;
+        const VideoSessionService::ValidationResult validation =
+            command_application_service_->ValidateVideoStream(session_token, stream_id);
+        result.authorized = validation.authorized;
+        result.code = validation.code;
+        result.message = validation.message;
+        result.connection_id = validation.binding.connection_id;
+        result.stream_id = validation.binding.stream_id;
         return result;
     });
-    command_ws_server_.SetRequestHandler([this](const Json& request) { return command_dispatcher_->Dispatch(request); });
-    command_ws_server_.SetStatusJsonSupplier([this]() { return BuildStatusJson(); });
-    command_ws_server_.SetCapabilitiesJsonSupplier([this]() { return BuildCapabilitiesJson(); });
 }
 
 bool SdkApp::Start() {
@@ -258,11 +190,12 @@ Json SdkApp::BuildStatusJson() const {
                   {"binaryBytes", video_stats.binary_bytes},
               }},
          }},
+        {"application",
+         {
+             {"boundSessions", command_application_service_ ? command_application_service_->ActiveSessionCount() : 0},
+             {"activeStreams", command_application_service_ ? command_application_service_->ActiveStreamCount() : 0},
+         }},
     };
-}
-
-Json SdkApp::BuildCapabilitiesJson() const {
-    return command_dispatcher_ ? command_dispatcher_->BuildCapabilitiesJson() : Json::object();
 }
 
 } // namespace sdk

@@ -3,18 +3,20 @@
 
 #pragma once
 
-#include <string>
-
+#include "sdk_provider_bundle.h"
 #include "sdk_provider_types.h"
 
 namespace editor {
 namespace sdk {
 
-class ISdkGraphicProvider {
+class OfdFacade {
 public:
-    virtual ~ISdkGraphicProvider() = default;
-    virtual std::string ProviderName() const = 0;
-    virtual SdkImageProcessResult Process(const SdkImageProcessRequest& request) = 0;
+    explicit OfdFacade(const ProviderBundle& providers);
+
+    SdkFileConvertResult Convert(const SdkFileConvertRequest& request) const;
+
+private:
+    ProviderBundle providers_;
 };
 
 } // namespace sdk

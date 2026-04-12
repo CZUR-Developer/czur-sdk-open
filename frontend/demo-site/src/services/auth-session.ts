@@ -2,18 +2,16 @@ import { reactive, readonly } from 'vue';
 
 import type { ExecutionState } from '../types/demo';
 import {
-  buildCommandProbeUrl,
   buildCommandEndpointLabel,
   buildCommandRequest,
   buildCommandWsUrl,
   buildVideoEndpointLabel,
-  extractSessionKey,
+  extractSessionToken,
   isOkResponse,
-  type CommandEvent,
   type CommandResponse,
 } from './protocol';
 import { nowTimeLabel, recordAlert, recordCommandRequest, recordRuntimeEvent } from './runtime-records';
-import { CommandWsClient, CommandWsConnectError } from './ws-client';
+import { CommandWsClient } from './ws-client';
 
 interface DeviceGrant {
   vid: number;
@@ -32,8 +30,8 @@ interface AuthContextPayload {
 }
 
 interface AuthSessionState {
-  apiKey: string;
-  sessionKey: string;
+  token: string;
+  sessionToken: string;
   sessionExpiresIn: number;
   commandState: ExecutionState;
   refreshState: ExecutionState;
@@ -44,27 +42,14 @@ interface AuthSessionState {
   lastConnectedAt: string;
 }
 
-interface SessionIssuedPayload {
-  session_key?: string;
-  session_token?: string;
-  expires_in?: number;
-  auth_context?: AuthContextPayload;
-}
-
-interface HandshakeFailureDiagnosis {
-  alertName: string;
-  alertCode: string;
-  alertMessage: string;
-}
-
 const STORAGE_KEYS = {
-  apiKey: 'sdk-demo-site-api-key',
-  sessionKey: 'sdk-demo-site-session-key',
+  token: 'sdk-demo-site-token',
+  sessionToken: 'sdk-demo-site-session-token',
 } as const;
 
 const state = reactive<AuthSessionState>({
-  apiKey: loadStoredValue(STORAGE_KEYS.apiKey) ?? 'demo-key-42F8',
-  sessionKey: loadStoredValue(STORAGE_KEYS.sessionKey) ?? '',
+  token: loadStoredValue(STORAGE_KEYS.token) ?? 'demo-token-42F8',
+  sessionToken: loadStoredValue(STORAGE_KEYS.sessionToken) ?? '',
   sessionExpiresIn: 0,
   commandState: 'idle',
   refreshState: 'idle',
@@ -88,28 +73,28 @@ export async function initializeAuthSession(): Promise<void> {
   state.videoEndpoint = buildVideoEndpointLabel();
   clearRuntimeState();
 
-  if (!state.apiKey) {
+  if (!state.token) {
     state.commandState = 'blocked';
     state.refreshState = 'blocked';
     state.contextState = 'blocked';
     recordRuntimeEvent({
       title: 'command.idle',
-      detail: 'Waiting for a locally stored API key before opening the command channel.',
+      detail: 'Waiting for a locally stored token before creating a bound session.',
       tone: 'warning',
     });
-    disconnectClient('api key missing');
+    disconnectClient('token missing');
     return;
   }
 
   state.commandState = 'running';
   recordRuntimeEvent({
     title: 'command.connecting',
-    detail: `Opening ${state.connectionEndpoint} with api_key handshake.`,
+    detail: `Opening ${state.connectionEndpoint} with anonymous command-channel connect.`,
     tone: 'primary',
   });
   disconnectClient('reconnect');
 
-  const nextClient = new CommandWsClient(buildCommandWsUrl(state.apiKey));
+  const nextClient = new CommandWsClient(buildCommandWsUrl());
   client = nextClient;
 
   try {
@@ -128,45 +113,36 @@ export async function initializeAuthSession(): Promise<void> {
     });
 
     state.refreshState = 'running';
-    const sessionIssued = await waitForRuntimeEvent<SessionIssuedPayload>(nextClient, 'auth.session_issued', 2500);
-    if (runToken !== activeRunToken) {
-      nextClient.disconnect('stale auth run');
-      return;
-    }
-    if (!sessionIssued || sessionIssued.code !== 0) {
+    const createResponse = await sendTrackedCommand(nextClient, 'auth.create_session', {
+      params: { token: state.token },
+    });
+    if (!isOkResponse(createResponse)) {
       clearSession();
       state.refreshState = 'error';
       state.contextState = 'blocked';
-      recordAlert({
-        name: 'SESSION_ISSUE_FAILED',
-        method: 'auth.session_issued',
-        code: String(sessionIssued?.code ?? 1900),
-        message: sessionIssued?.message || 'session issue event failed',
-      });
       return;
     }
 
-    const payload = asSessionIssuedPayload(sessionIssued.payload);
     state.refreshState = 'success';
-    state.sessionKey = extractSessionKey(payload);
-    state.sessionExpiresIn = asNumber(payload.expires_in);
-    persistValue(STORAGE_KEYS.sessionKey, state.sessionKey);
-    state.authContext = asAuthContext(payload.auth_context);
+    state.sessionToken = extractSessionToken(createResponse.data);
+    state.sessionExpiresIn = asNumber(createResponse.data.expires_in);
+    state.authContext = asAuthContext(createResponse.data.auth_context);
+    persistValue(STORAGE_KEYS.sessionToken, state.sessionToken);
     recordRuntimeEvent({
-      title: 'auth.session_issued',
-      detail: `session_key issued during command handshake, ttl=${state.sessionExpiresIn}s.`,
+      title: 'auth.session_created',
+      detail: `session_token issued through auth.create_session, ttl=${state.sessionExpiresIn}s.`,
       tone: 'success',
     });
 
-    if (!state.sessionKey) {
+    if (!state.sessionToken) {
       clearSession();
       state.refreshState = 'error';
       state.contextState = 'blocked';
       recordAlert({
-        name: 'SESSION_KEY_MISSING',
-        method: 'auth.session_issued',
+        name: 'SESSION_TOKEN_MISSING',
+        method: 'auth.create_session',
         code: '1900',
-        message: 'The command lane connected, but no session_key was included in auth.session_issued.',
+        message: 'The runtime created a session response without session_token.',
       });
       return;
     }
@@ -181,23 +157,11 @@ export async function initializeAuthSession(): Promise<void> {
     state.commandState = 'error';
     state.refreshState = 'blocked';
     state.contextState = 'blocked';
-
-    if (error instanceof Error && error.message === 'session issue timeout') {
-      recordAlert({
-        name: 'SESSION_ISSUE_TIMEOUT',
-        method: 'auth.session_issued',
-        code: 'TIMEOUT',
-        message: 'The command lane connected, but auth.session_issued was not received before timeout.',
-      });
-      return;
-    }
-
-    const diagnosis = await diagnoseHandshakeFailure(state.apiKey, error);
     recordAlert({
-      name: diagnosis.alertName,
+      name: 'COMMAND_CONNECT_FAILED',
       method: 'command.connect',
-      code: diagnosis.alertCode,
-      message: diagnosis.alertMessage,
+      code: 'NETWORK',
+      message: errorMessage(error),
     });
   }
 }
@@ -209,9 +173,7 @@ export async function refreshSession(): Promise<void> {
   }
 
   state.refreshState = 'running';
-  const refreshResponse = await sendTrackedCommand(client, 'auth.refresh', {
-    auth: { api_key: state.apiKey },
-  });
+  const refreshResponse = await sendTrackedCommand(client, 'auth.refresh_session');
   if (!isOkResponse(refreshResponse)) {
     clearSession();
     state.refreshState = 'error';
@@ -220,13 +182,13 @@ export async function refreshSession(): Promise<void> {
   }
 
   state.refreshState = 'success';
-  state.sessionKey = extractSessionKey(refreshResponse.data);
+  state.sessionToken = extractSessionToken(refreshResponse.data);
   state.sessionExpiresIn = asNumber(refreshResponse.data.expires_in);
-  persistValue(STORAGE_KEYS.sessionKey, state.sessionKey);
   state.authContext = asAuthContext(refreshResponse.data.auth_context);
+  persistValue(STORAGE_KEYS.sessionToken, state.sessionToken);
   recordRuntimeEvent({
-    title: 'auth.session_issued',
-    detail: `session_key rotated with ttl=${state.sessionExpiresIn}s.`,
+    title: 'auth.session_refreshed',
+    detail: `session_token rotated with ttl=${state.sessionExpiresIn}s.`,
     tone: 'success',
   });
 }
@@ -238,8 +200,7 @@ export async function loadAuthContext(activeClient: CommandWsClient | null = cli
   }
 
   state.contextState = 'running';
-  const authPayload = state.sessionKey ? { session_key: state.sessionKey } : { api_key: state.apiKey };
-  const response = await sendTrackedCommand(activeClient, 'auth.get_context', { auth: authPayload });
+  const response = await sendTrackedCommand(activeClient, 'auth.get_context');
   if (!isOkResponse(response)) {
     state.contextState = 'error';
     return;
@@ -249,34 +210,34 @@ export async function loadAuthContext(activeClient: CommandWsClient | null = cli
   state.authContext = asAuthContext(response.data.auth_context);
   recordRuntimeEvent({
     title: 'auth.context_ready',
-    detail: 'Auth context loaded from the runtime command lane.',
+    detail: 'Auth context loaded from the bound command session.',
     tone: 'info',
   });
   recordRuntimeEvent({
-    title: 'auth.validation_completed',
-    detail: 'Credential bootstrap completed and session_key is ready for command traffic.',
+    title: 'auth.bootstrap_completed',
+    detail: 'Command connection and bound session are ready for business methods.',
     tone: 'success',
     meta: nowTimeLabel(),
   });
 }
 
 export function saveApiKey(value: string): void {
-  state.apiKey = value.trim();
-  persistValue(STORAGE_KEYS.apiKey, state.apiKey);
+  state.token = value.trim();
+  persistValue(STORAGE_KEYS.token, state.token);
 }
 
 export function clearApiKey(): void {
   activeRunToken += 1;
-  state.apiKey = '';
-  persistValue(STORAGE_KEYS.apiKey, '');
+  state.token = '';
+  persistValue(STORAGE_KEYS.token, '');
   clearSession();
-  disconnectClient('api key cleared');
+  disconnectClient('token cleared');
   state.commandState = 'blocked';
   state.refreshState = 'blocked';
   state.contextState = 'blocked';
   recordRuntimeEvent({
     title: 'command.idle',
-    detail: 'Cleared api_key and disconnected the command channel.',
+    detail: 'Cleared token and disconnected the command channel.',
     tone: 'warning',
   });
 }
@@ -284,7 +245,7 @@ export function clearApiKey(): void {
 export function disconnectCommandChannel(): void {
   activeRunToken += 1;
   disconnectClient('manual disconnect');
-  state.commandState = state.apiKey ? 'idle' : 'blocked';
+  state.commandState = state.token ? 'idle' : 'blocked';
 }
 
 function clearRuntimeState(): void {
@@ -296,10 +257,10 @@ function clearRuntimeState(): void {
 }
 
 function clearSession(): void {
-  state.sessionKey = '';
+  state.sessionToken = '';
   state.sessionExpiresIn = 0;
   state.authContext = null;
-  persistValue(STORAGE_KEYS.sessionKey, '');
+  persistValue(STORAGE_KEYS.sessionToken, '');
 }
 
 function disconnectClient(reason: string): void {
@@ -310,7 +271,7 @@ function disconnectClient(reason: string): void {
 async function sendTrackedCommand(
   activeClient: CommandWsClient,
   method: string,
-  options: { params?: Record<string, unknown>; auth?: Record<string, unknown> } = {},
+  options: { params?: Record<string, unknown> } = {},
 ): Promise<CommandResponse<Record<string, unknown>>> {
   const request = buildCommandRequest(method, options);
   const traceId =
@@ -362,13 +323,6 @@ function asAuthContext(value: unknown): AuthContextPayload | null {
   return value as AuthContextPayload;
 }
 
-function asSessionIssuedPayload(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object') {
-    return {};
-  }
-  return value as Record<string, unknown>;
-}
-
 function asNumber(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
@@ -377,97 +331,25 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'unknown error';
 }
 
-async function diagnoseHandshakeFailure(apiKey: string, error: unknown): Promise<HandshakeFailureDiagnosis> {
-  if (!apiKey) {
-    return {
-      alertName: 'API_KEY_NOT_CONFIGURED',
-      alertCode: 'CONFIG',
-      alertMessage: 'No api_key is stored locally, so the command channel was not opened.',
-    };
-  }
-
-  const commandReachable = await probeCommandEndpoint();
-  if (!commandReachable) {
-    return {
-      alertName: 'COMMAND_SERVER_UNREACHABLE',
-      alertCode: 'NETWORK',
-      alertMessage: `The command lane at ${state.connectionEndpoint} is unreachable. Confirm sdk_open_app is running and listening on port 17090.`,
-    };
-  }
-
-  if (error instanceof CommandWsConnectError && typeof error.closeCode === 'number' && error.closeCode > 0) {
-    return {
-      alertName: 'WS_HANDSHAKE_REJECTED',
-      alertCode: String(error.closeCode),
-      alertMessage: 'The runtime rejected the WebSocket handshake. Check whether the api_key is valid and accepted by the command lane.',
-    };
-  }
-
-  return {
-    alertName: 'WS_HANDSHAKE_REJECTED',
-    alertCode: '1101',
-    alertMessage: 'The command lane was reachable, but it rejected the WebSocket handshake. Check whether the api_key is valid.',
-  };
-}
-
-async function probeCommandEndpoint(): Promise<boolean> {
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 1200);
-
-  try {
-    await fetch(buildCommandProbeUrl(), {
-      method: 'GET',
-      mode: 'no-cors',
-      cache: 'no-store',
-      signal: controller.signal,
-    });
-    return true;
-  } catch {
-    return false;
-  } finally {
-    window.clearTimeout(timeout);
-  }
-}
-
 function statusName(code: number): string {
   switch (code) {
     case 1100:
       return 'AUTH_REQUIRED';
     case 1101:
-      return 'API_KEY_INVALID';
+      return 'TOKEN_INVALID';
     case 1102:
-      return 'API_KEY_EXPIRED';
+      return 'TOKEN_EXPIRED';
     case 1103:
-      return 'SESSION_KEY_INVALID';
+      return 'SESSION_TOKEN_INVALID';
     case 1107:
       return 'CAPABILITY_NOT_ALLOWED';
+    case 1300:
+      return 'STREAM_NOT_FOUND';
     case 1901:
       return 'PROVIDER_NOT_READY';
     default:
       return code === 0 ? 'OK' : 'SDK_ERROR';
   }
-}
-
-function waitForRuntimeEvent<TPayload extends Record<string, unknown>>(
-  activeClient: CommandWsClient,
-  eventName: string,
-  timeoutMs: number,
-): Promise<CommandEvent<TPayload>> {
-  return new Promise<CommandEvent<TPayload>>((resolve, reject) => {
-    const timeoutId = window.setTimeout(() => {
-      unsubscribe();
-      reject(new Error('session issue timeout'));
-    }, timeoutMs);
-
-    const unsubscribe = activeClient.onEvent((event) => {
-      if (event.event !== eventName) {
-        return;
-      }
-      window.clearTimeout(timeoutId);
-      unsubscribe();
-      resolve(event as CommandEvent<TPayload>);
-    });
-  });
 }
 
 function loadStoredValue(key: string): string | null {

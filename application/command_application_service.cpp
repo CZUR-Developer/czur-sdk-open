@@ -1,0 +1,606 @@
+// Copyright (c) 2026 CZUR Tech. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+#include "command_application_service.h"
+
+#include <ctime>
+#include <utility>
+
+namespace editor {
+namespace sdk {
+
+namespace {
+
+std::string GetOptionalStringField(const Json& obj, const char* key) {
+    const auto it = obj.find(key);
+    if (it != obj.end() && it->is_string()) {
+        return it->get<std::string>();
+    }
+    return "";
+}
+
+Json GetOptionalObjectField(const Json& obj, const char* key) {
+    const auto it = obj.find(key);
+    if (it != obj.end() && it->is_object()) {
+        return *it;
+    }
+    return Json::object();
+}
+
+std::vector<std::string> GetOptionalStringArrayField(const Json& obj, const char* key) {
+    std::vector<std::string> values;
+    const auto it = obj.find(key);
+    if (it == obj.end() || !it->is_array()) {
+        return values;
+    }
+    for (Json::const_iterator value_it = it->begin(); value_it != it->end(); ++value_it) {
+        if (value_it->is_string()) {
+            values.push_back(value_it->get<std::string>());
+        }
+    }
+    return values;
+}
+
+int GetOptionalIntField(const Json& obj, const char* key, int default_value) {
+    const auto it = obj.find(key);
+    if (it != obj.end() && it->is_number_integer()) {
+        return it->get<int>();
+    }
+    return default_value;
+}
+
+CommandApplicationService::MethodDescriptor MakeMethod(const std::string& method,
+                                                       bool requires_session,
+                                                       const std::string& summary) {
+    CommandApplicationService::MethodDescriptor descriptor;
+    descriptor.method = method;
+    descriptor.requires_session = requires_session;
+    descriptor.summary = summary;
+    return descriptor;
+}
+
+} // namespace
+
+CommandApplicationService::CommandApplicationService(const SdkConfig& config, const ProviderBundle& providers)
+    : config_(config),
+      providers_(providers),
+      authorization_service_(providers_),
+      device_facade_(providers_),
+      graphic_facade_(providers_),
+      ocr_facade_(providers_),
+      ofd_facade_(providers_) {
+    methods_.push_back(MakeMethod("system.ping", false, "SDK heartbeat probe"));
+    methods_.push_back(MakeMethod("system.info", false, "SDK runtime status snapshot"));
+    methods_.push_back(MakeMethod("system.capabilities", false, "List public methods and auth model"));
+    methods_.push_back(MakeMethod("auth.create_session", false, "Create a bound session from token"));
+    methods_.push_back(MakeMethod("auth.get_context", true, "Get the current bound auth context"));
+    methods_.push_back(MakeMethod("auth.refresh_session", true, "Refresh the current bound session"));
+    methods_.push_back(MakeMethod("auth.destroy_session", true, "Destroy the current bound session"));
+    methods_.push_back(MakeMethod("device.list", true, "List devices visible to the current session"));
+    methods_.push_back(MakeMethod("device.get", true, "Get one device visible to the current session"));
+    methods_.push_back(MakeMethod("device.open", true, "Open a device"));
+    methods_.push_back(MakeMethod("capture.take", true, "Capture a still image"));
+    methods_.push_back(MakeMethod("video.start", true, "Create one video stream session"));
+    methods_.push_back(MakeMethod("video.stop", true, "Stop one video stream session"));
+    methods_.push_back(MakeMethod("video.set_format", true, "Update one video stream format"));
+    methods_.push_back(MakeMethod("image.process", true, "Run one image-processing request"));
+    methods_.push_back(MakeMethod("ocr.recognize", true, "Submit one OCR request"));
+    methods_.push_back(MakeMethod("file.convert", true, "Submit one file conversion request"));
+}
+
+void CommandApplicationService::SetStatusSupplier(StatusSupplier supplier) {
+    status_supplier_ = std::move(supplier);
+}
+
+Json CommandApplicationService::HandleRequest(const std::string& connection_id, const Json& request_json) {
+    if (!request_json.is_object()) {
+        return BuildWsResponse("", SdkStatusCode::InvalidRequest, "invalid request");
+    }
+
+    Request request;
+    request.request_id = GetOptionalStringField(request_json, "request_id");
+    request.method = GetOptionalStringField(request_json, "method");
+    request.params = GetOptionalObjectField(request_json, "params");
+    request.client = GetOptionalObjectField(request_json, "client");
+
+    if (request.request_id.empty()) {
+        return BuildWsResponse("", SdkStatusCode::InvalidRequest, "request_id required");
+    }
+    if (request.method.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidMethod, "missing method");
+    }
+
+    const MethodDescriptor* descriptor = FindMethod(request.method);
+    if (descriptor == NULL) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::UnsupportedMethod, "unsupported method");
+    }
+
+    if (request.method == "system.ping") {
+        return HandleSystemPing(request);
+    }
+    if (request.method == "system.info") {
+        return HandleSystemInfo(request);
+    }
+    if (request.method == "system.capabilities") {
+        return HandleSystemCapabilities(request);
+    }
+    if (request.method == "auth.create_session") {
+        return HandleAuthCreateSession(connection_id, request);
+    }
+    if (request.method == "auth.get_context") {
+        return HandleAuthGetContext(connection_id, request);
+    }
+    if (request.method == "auth.refresh_session") {
+        return HandleAuthRefreshSession(connection_id, request);
+    }
+    if (request.method == "auth.destroy_session") {
+        return HandleAuthDestroySession(connection_id, request);
+    }
+    if (request.method == "device.list") {
+        return HandleDeviceList(connection_id, request);
+    }
+    if (request.method == "device.get") {
+        return HandleDeviceGet(connection_id, request);
+    }
+    if (request.method == "device.open") {
+        return HandleDeviceOpen(connection_id, request);
+    }
+    if (request.method == "capture.take") {
+        return HandleCaptureTake(connection_id, request);
+    }
+    if (request.method == "video.start") {
+        return HandleVideoStart(connection_id, request);
+    }
+    if (request.method == "video.stop") {
+        return HandleVideoStop(connection_id, request);
+    }
+    if (request.method == "video.set_format") {
+        return HandleVideoSetFormat(connection_id, request);
+    }
+    if (request.method == "image.process") {
+        return HandleImageProcess(connection_id, request);
+    }
+    if (request.method == "ocr.recognize") {
+        return HandleOcrRecognize(connection_id, request);
+    }
+    if (request.method == "file.convert") {
+        return HandleFileConvert(connection_id, request);
+    }
+
+    return BuildWsResponse(request.request_id, SdkStatusCode::UnsupportedMethod, "unsupported method");
+}
+
+void CommandApplicationService::OnConnectionClosed(const std::string& connection_id) {
+    authorization_service_.ClearConnection(connection_id);
+    video_session_service_.ClearConnection(connection_id);
+}
+
+Json CommandApplicationService::BuildCapabilitiesJson() const {
+    Json methods = Json::array();
+    for (std::vector<MethodDescriptor>::const_iterator it = methods_.begin(); it != methods_.end(); ++it) {
+        methods.push_back(Json{
+            {"method", it->method},
+            {"requires_session", it->requires_session},
+            {"summary", it->summary},
+        });
+    }
+
+    return Json{
+        {"auth_model",
+         {
+             {"connection_requires_token", false},
+             {"session_field", "session_token"},
+             {"session_binding", "connection_bound"},
+             {"video_binding", "session_token + stream_id"},
+         }},
+        {"methods", std::move(methods)},
+    };
+}
+
+VideoSessionService::ValidationResult CommandApplicationService::ValidateVideoStream(const std::string& session_token,
+                                                                                     const std::string& stream_id) const {
+    return video_session_service_.Validate(session_token, stream_id);
+}
+
+std::size_t CommandApplicationService::ActiveSessionCount() const {
+    return authorization_service_.ActiveSessionCount();
+}
+
+std::size_t CommandApplicationService::ActiveStreamCount() const {
+    return video_session_service_.ActiveStreamCount();
+}
+
+Json CommandApplicationService::HandleSystemPing(const Request& request) const {
+    return BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", Json{{"pong", true}});
+}
+
+Json CommandApplicationService::HandleSystemInfo(const Request& request) const {
+    return BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", status_supplier_ ? status_supplier_() : Json::object());
+}
+
+Json CommandApplicationService::HandleSystemCapabilities(const Request& request) const {
+    return BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", BuildCapabilitiesJson());
+}
+
+Json CommandApplicationService::HandleAuthCreateSession(const std::string& connection_id, const Request& request) {
+    const std::string token = GetOptionalStringField(request.params, "token");
+    const AuthorizationService::SessionResult session_result = authorization_service_.CreateSession(connection_id, token);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    return BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", BuildSessionJson(session_result));
+}
+
+Json CommandApplicationService::HandleAuthGetContext(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = authorization_service_.GetContext(connection_id);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"session_token", session_result.session_token},
+                                {"auth_context", BuildAuthContextJson(session_result.auth_context)}});
+}
+
+Json CommandApplicationService::HandleAuthRefreshSession(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = authorization_service_.RefreshSession(connection_id);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    return BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", BuildSessionJson(session_result));
+}
+
+Json CommandApplicationService::HandleAuthDestroySession(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = authorization_service_.DestroySession(connection_id);
+    return BuildWsResponse(request.request_id, session_result.code, session_result.message, Json{{"destroyed", true}});
+}
+
+Json CommandApplicationService::HandleDeviceList(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+
+    const DeviceListResult result = device_facade_.ListDevices(session_result.auth_context);
+    if (!IsOkStatusCode(result.code)) {
+        return BuildWsResponse(request.request_id, result.code, result.message);
+    }
+
+    Json devices = Json::array();
+    for (std::vector<SdkDeviceDescriptor>::const_iterator it = result.devices.begin(); it != result.devices.end(); ++it) {
+        devices.push_back(Json{
+            {"device_id", it->device_id},
+            {"model", it->model},
+            {"display_name", it->display_name},
+            {"vid", it->vid},
+            {"pid", it->pid},
+            {"status", it->status},
+            {"authorized", it->authorized},
+            {"supports_video", it->supports_video},
+        });
+    }
+
+    return BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", Json{{"devices", devices}, {"count", devices.size()}});
+}
+
+Json CommandApplicationService::HandleDeviceGet(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    const std::string device_id = GetOptionalStringField(request.params, "device_id");
+    if (device_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "device_id required");
+    }
+
+    const DeviceGetResult result = device_facade_.GetDevice(session_result.auth_context, device_id);
+    if (!IsOkStatusCode(result.code)) {
+        return BuildWsResponse(request.request_id, result.code, result.message);
+    }
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"device_id", result.device.device_id},
+                                {"model", result.device.model},
+                                {"display_name", result.device.display_name},
+                                {"vid", result.device.vid},
+                                {"pid", result.device.pid},
+                                {"status", result.device.status},
+                                {"authorized", result.device.authorized},
+                                {"supports_video", result.device.supports_video},
+                                {"provider", providers_.device_provider ? providers_.device_provider->ProviderName() : ""}});
+}
+
+Json CommandApplicationService::HandleDeviceOpen(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    const std::string device_id = GetOptionalStringField(request.params, "device_id");
+    if (device_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "device_id required");
+    }
+    const SdkDeviceOpenResult result = device_facade_.OpenDevice(session_result.auth_context, device_id);
+    if (!IsOkStatusCode(result.code)) {
+        return BuildWsResponse(request.request_id, result.code, result.message);
+    }
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"device_id", result.device.device_id},
+                                {"opened", result.opened},
+                                {"provider", providers_.device_provider ? providers_.device_provider->ProviderName() : ""}});
+}
+
+Json CommandApplicationService::HandleCaptureTake(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+
+    SdkCaptureRequest capture_request;
+    capture_request.device_id = GetOptionalStringField(request.params, "device_id");
+    capture_request.include_base64 = false;
+    if (capture_request.device_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "device_id required");
+    }
+
+    const SdkCaptureResult result = device_facade_.CaptureStill(session_result.auth_context, capture_request);
+    if (!IsOkStatusCode(result.code)) {
+        return BuildWsResponse(request.request_id, result.code, result.message);
+    }
+    Json data{
+        {"device_id", capture_request.device_id},
+        {"captured", result.captured},
+        {"content_type", result.content_type},
+        {"output_path", result.output_path},
+    };
+    if (!result.payload.empty()) {
+        data["payload"] = result.payload;
+    }
+    return BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", data);
+}
+
+Json CommandApplicationService::HandleVideoStart(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+
+    SdkVideoStartRequest start_request;
+    start_request.device_id = GetOptionalStringField(request.params, "device_id");
+    if (start_request.device_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "device_id required");
+    }
+
+    const SdkVideoStartResult start_result = device_facade_.StartVideo(session_result.auth_context, start_request);
+    if (!IsOkStatusCode(start_result.code)) {
+        return BuildWsResponse(request.request_id, start_result.code, start_result.message);
+    }
+
+    const VideoSessionService::StreamResult stream_result =
+        video_session_service_.RegisterStream(connection_id,
+                                              session_result.session_token,
+                                              start_request.device_id,
+                                              start_result.pixel_format,
+                                              start_result.width,
+                                              start_result.height,
+                                              start_result.fps);
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"device_id", start_request.device_id},
+                                {"stream_id", stream_result.binding.stream_id},
+                                {"session_token", stream_result.binding.session_token},
+                                {"pixel_format", stream_result.binding.pixel_format},
+                                {"width", stream_result.binding.width},
+                                {"height", stream_result.binding.height},
+                                {"fps", stream_result.binding.fps}});
+}
+
+Json CommandApplicationService::HandleVideoStop(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+
+    SdkVideoStopRequest stop_request;
+    stop_request.device_id = GetOptionalStringField(request.params, "device_id");
+    if (stop_request.device_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "device_id required");
+    }
+
+    const SdkVideoStopResult stop_result = device_facade_.StopVideo(session_result.auth_context, stop_request);
+    if (!IsOkStatusCode(stop_result.code)) {
+        return BuildWsResponse(request.request_id, stop_result.code, stop_result.message);
+    }
+    const VideoSessionService::StreamResult stream_result = video_session_service_.StopStream(connection_id, stop_request.device_id);
+    if (!IsOkStatusCode(stream_result.code)) {
+        return BuildWsResponse(request.request_id, stream_result.code, stream_result.message);
+    }
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"device_id", stop_request.device_id},
+                                {"stream_id", stream_result.binding.stream_id},
+                                {"stopped", true}});
+}
+
+Json CommandApplicationService::HandleVideoSetFormat(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+
+    SdkVideoFormatRequest format_request;
+    format_request.device_id = GetOptionalStringField(request.params, "device_id");
+    format_request.pixel_format = GetOptionalStringField(request.params, "pixel_format");
+    format_request.width = GetOptionalIntField(request.params, "width", 1280);
+    format_request.height = GetOptionalIntField(request.params, "height", 720);
+    format_request.fps = GetOptionalIntField(request.params, "fps", 15);
+    if (format_request.device_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "device_id required");
+    }
+    if (format_request.pixel_format.empty()) {
+        format_request.pixel_format = "jpeg";
+    }
+
+    const SdkVideoFormatResult format_result = device_facade_.SetVideoFormat(session_result.auth_context, format_request);
+    if (!IsOkStatusCode(format_result.code)) {
+        return BuildWsResponse(request.request_id, format_result.code, format_result.message);
+    }
+    const VideoSessionService::StreamResult stream_result =
+        video_session_service_.UpdateStreamFormat(connection_id,
+                                                  format_request.device_id,
+                                                  format_request.pixel_format,
+                                                  format_request.width,
+                                                  format_request.height,
+                                                  format_request.fps);
+    if (!IsOkStatusCode(stream_result.code)) {
+        return BuildWsResponse(request.request_id, stream_result.code, stream_result.message);
+    }
+
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"device_id", format_request.device_id},
+                                {"stream_id", stream_result.binding.stream_id},
+                                {"pixel_format", stream_result.binding.pixel_format},
+                                {"width", stream_result.binding.width},
+                                {"height", stream_result.binding.height},
+                                {"fps", stream_result.binding.fps}});
+}
+
+Json CommandApplicationService::HandleImageProcess(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+
+    SdkImageProcessRequest process_request;
+    process_request.input_path = GetOptionalStringField(request.params, "input_path");
+    process_request.output_path = GetOptionalStringField(request.params, "output_path");
+    if (process_request.input_path.empty() || process_request.output_path.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "input_path and output_path required");
+    }
+
+    const SdkImageProcessResult result = graphic_facade_.Process(process_request);
+    if (!IsOkStatusCode(result.code)) {
+        return BuildWsResponse(request.request_id, result.code, result.message);
+    }
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"input_path", process_request.input_path},
+                                {"output_path", process_request.output_path},
+                                {"processed", result.processed},
+                                {"provider", providers_.graphic_provider ? providers_.graphic_provider->ProviderName() : ""}});
+}
+
+Json CommandApplicationService::HandleOcrRecognize(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+
+    SdkOcrRecognizeRequest ocr_request;
+    ocr_request.input_files = GetOptionalStringArrayField(request.params, "input_files");
+    ocr_request.output_path = GetOptionalStringField(request.params, "output_path");
+    if (ocr_request.input_files.empty() || ocr_request.output_path.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "input_files and output_path required");
+    }
+
+    const SdkOcrRecognizeResult result = ocr_facade_.Recognize(ocr_request);
+    if (!IsOkStatusCode(result.code)) {
+        return BuildWsResponse(request.request_id, result.code, result.message);
+    }
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"task_id", result.task_id},
+                                {"input_count", ocr_request.input_files.size()},
+                                {"output_path", ocr_request.output_path},
+                                {"provider", providers_.ocr_provider ? providers_.ocr_provider->ProviderName() : ""}});
+}
+
+Json CommandApplicationService::HandleFileConvert(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+
+    SdkFileConvertRequest convert_request;
+    convert_request.input_path = GetOptionalStringField(request.params, "input_path");
+    convert_request.output_path = GetOptionalStringField(request.params, "output_path");
+    if (convert_request.input_path.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "input_path required");
+    }
+
+    const SdkFileConvertResult result = ofd_facade_.Convert(convert_request);
+    if (!IsOkStatusCode(result.code)) {
+        return BuildWsResponse(request.request_id, result.code, result.message);
+    }
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"input_path", convert_request.input_path},
+                                {"output_path", convert_request.output_path},
+                                {"accepted", result.accepted},
+                                {"provider", providers_.ofd_provider ? providers_.ofd_provider->ProviderName() : ""}});
+}
+
+AuthorizationService::SessionResult CommandApplicationService::RequireCapability(const std::string& connection_id,
+                                                                                 const std::string& capability) const {
+    return authorization_service_.RequireCapability(connection_id, capability);
+}
+
+Json CommandApplicationService::BuildSessionJson(const AuthorizationService::SessionResult& session_result) const {
+    return Json{
+        {"session_token", session_result.session_token},
+        {"expires_in", session_result.expires_in},
+        {"auth_context", BuildAuthContextJson(session_result.auth_context)},
+    };
+}
+
+Json CommandApplicationService::BuildAuthContextJson(const AuthContext& auth_context) const {
+    Json device_scope = Json::array();
+    for (std::vector<SdkDeviceGrant>::const_iterator it = auth_context.device_scope.begin();
+         it != auth_context.device_scope.end();
+         ++it) {
+        device_scope.push_back(Json{
+            {"vid", it->vid},
+            {"pid", it->pid},
+        });
+    }
+
+    Json capabilities = Json::array();
+    for (std::vector<std::string>::const_iterator it = auth_context.capabilities.begin();
+         it != auth_context.capabilities.end();
+         ++it) {
+        capabilities.push_back(*it);
+    }
+
+    return Json{
+        {"is_valid", auth_context.is_valid},
+        {"account_type", ToAccountTypeString(auth_context.account_type)},
+        {"account_type_code", auth_context.account_type_code},
+        {"auth_scene", auth_context.auth_scene},
+        {"license_mode", auth_context.license_mode},
+        {"device_scope", device_scope},
+        {"expires_at", auth_context.expires_at},
+        {"capabilities", capabilities},
+    };
+}
+
+const CommandApplicationService::MethodDescriptor* CommandApplicationService::FindMethod(const std::string& method) const {
+    for (std::vector<MethodDescriptor>::const_iterator it = methods_.begin(); it != methods_.end(); ++it) {
+        if (it->method == method) {
+            return &(*it);
+        }
+    }
+    return NULL;
+}
+
+} // namespace sdk
+} // namespace editor

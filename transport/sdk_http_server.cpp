@@ -5,8 +5,6 @@
 
 #include <httplib.h>
 
-#include <utility>
-
 #include "sdk_logger.h"
 
 namespace editor {
@@ -15,10 +13,6 @@ namespace sdk {
 namespace {
 
 const char* kJsonContentType = "application/json; charset=utf-8";
-
-Json BuildUnauthorizedJson() {
-    return BuildErrorBody(SdkStatusCode::AuthRequired, "unauthorized");
-}
 
 } // namespace
 
@@ -32,24 +26,25 @@ SdkHttpServer::SdkHttpServer(const std::string& site_name,
       port_(port),
       document_root_(document_root),
       auth_token_(auth_token),
-      status_api_enabled_(false),
       running_(false) {}
 
 SdkHttpServer::~SdkHttpServer() {
     Stop();
 }
 
-void SdkHttpServer::EnableStatusApi(StatusJsonSupplier supplier) {
-    status_api_enabled_ = true;
-    status_supplier_ = std::move(supplier);
+void SdkHttpServer::SetHealthSupplier(JsonSupplier supplier) {
+    health_supplier_ = supplier;
+}
+
+void SdkHttpServer::SetStatusSupplier(JsonSupplier supplier) {
+    status_supplier_ = supplier;
 }
 
 bool SdkHttpServer::IsAuthorized(const std::string& authorization) const {
     if (auth_token_.empty()) {
         return true;
     }
-    const std::string expected = "Bearer " + auth_token_;
-    return authorization == expected;
+    return authorization == "Bearer " + auth_token_;
 }
 
 bool SdkHttpServer::ConfigureRoutes() {
@@ -57,19 +52,24 @@ bool SdkHttpServer::ConfigureRoutes() {
         return false;
     }
 
-    if (status_api_enabled_) {
-        server_->Get("/api/status", [this](const httplib::Request& req, httplib::Response& res) {
-            if (!IsAuthorized(req.get_header_value("Authorization"))) {
-                res.status = ToHttpStatus(SdkHttpStatus::Unauthorized);
-                res.set_content(DumpJson(BuildUnauthorizedJson()), kJsonContentType);
-                return;
-            }
-            const Json body = status_supplier_ ? status_supplier_() : Json::object();
-            res.status = ToHttpStatus(SdkHttpStatus::Ok);
-            res.set_header("Cache-Control", "no-store");
-            res.set_content(DumpJson(body), kJsonContentType);
-        });
-    }
+    server_->Get("/healthz", [this](const httplib::Request&, httplib::Response& res) {
+        const Json body = health_supplier_ ? health_supplier_() : Json{{"ok", true}};
+        res.status = ToHttpStatus(SdkHttpStatus::Ok);
+        res.set_header("Cache-Control", "no-store");
+        res.set_content(DumpJson(body), kJsonContentType);
+    });
+
+    server_->Get("/api/status", [this](const httplib::Request& req, httplib::Response& res) {
+        if (!IsAuthorized(req.get_header_value("Authorization"))) {
+            res.status = ToHttpStatus(SdkHttpStatus::Unauthorized);
+            res.set_content(DumpJson(BuildErrorBody(SdkStatusCode::AuthRequired, "unauthorized")), kJsonContentType);
+            return;
+        }
+        const Json body = status_supplier_ ? status_supplier_() : Json::object();
+        res.status = ToHttpStatus(SdkHttpStatus::Ok);
+        res.set_header("Cache-Control", "no-store");
+        res.set_content(DumpJson(body), kJsonContentType);
+    });
 
     if (!server_->set_mount_point("/", document_root_)) {
         SDK_OPEN_LOG_ERROR("[sdk_http_server] {} set_mount_point failed, root={}", site_name_, document_root_);
@@ -88,7 +88,6 @@ bool SdkHttpServer::Start() {
     if (running_.load()) {
         return true;
     }
-
     server_.reset(new httplib::Server());
     if (!ConfigureRoutes()) {
         server_.reset();
@@ -104,19 +103,13 @@ bool SdkHttpServer::Start() {
 
     running_.store(true);
     server_thread_ = std::thread([this]() {
-        if (!server_->listen_after_bind()) {
-            if (running_.load()) {
-                SDK_OPEN_LOG_ERROR("[sdk_http_server] {} listen failed", site_name_);
-            }
+        if (!server_->listen_after_bind() && running_.load()) {
+            SDK_OPEN_LOG_ERROR("[sdk_http_server] {} listen failed", site_name_);
         }
         running_.store(false);
     });
 
-    SDK_OPEN_LOG_INFO("[sdk_http_server] {} listening on http://{}:{}, root={}",
-                      site_name_,
-                      host_,
-                      port_,
-                      document_root_);
+    SDK_OPEN_LOG_INFO("[sdk_http_server] {} listening on http://{}:{}, root={}", site_name_, host_, port_, document_root_);
     return true;
 }
 
@@ -124,7 +117,6 @@ void SdkHttpServer::Stop() {
     if (!server_) {
         return;
     }
-
     running_.store(false);
     server_->stop();
     if (server_thread_.joinable()) {

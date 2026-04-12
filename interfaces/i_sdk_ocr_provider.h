@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include "sdk_provider_types.h"
+
 namespace editor {
 namespace sdk {
 
@@ -13,9 +15,8 @@ class ISdkOcrProvider {
 public:
     virtual ~ISdkOcrProvider() = default;
     virtual std::string ProviderName() const = 0;
-    virtual std::string SubmitTask(const std::vector<std::string>& input_files, const std::string& output_path) = 0;
+    virtual SdkOcrRecognizeResult Recognize(const SdkOcrRecognizeRequest& request) = 0;
 };
 
 } // namespace sdk
 } // namespace editor
-

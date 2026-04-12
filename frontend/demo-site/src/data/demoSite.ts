@@ -48,7 +48,7 @@ export const globalRequestHistory: RequestHistoryItem[] = [
   },
   {
     id: 'req-2',
-    method: 'auth.validate',
+    method: 'auth.create_session',
     requestId: 'req-auth-017',
     code: '0',
     traceId: 'trc-demo-20260407-1818',
@@ -59,7 +59,7 @@ export const globalRequestHistory: RequestHistoryItem[] = [
     id: 'req-3',
     method: 'capture.take',
     requestId: 'req-cap-064',
-    code: '1703',
+    code: '1902',
     traceId: 'trc-demo-20260407-1832',
     duration: '142ms',
     state: 'error',
@@ -127,10 +127,10 @@ export const globalErrors: ErrorItem[] = [
   },
   {
     id: 'err-3',
-    code: '1703',
-    name: 'DEVICE_BUSY',
+    code: '1902',
+    name: 'PROVIDER_CALL_FAILED',
     method: 'capture.take',
-    message: 'Capture lane is still draining a previous frame and rejected the new turn.',
+    message: 'Capture provider rejected the request while a previous frame was still draining.',
     traceId: 'trc-demo-20260407-1832',
     occurredAt: '18:32:17',
   },
@@ -259,16 +259,16 @@ export const connectionEndpoints: EndpointCardItem[] = [
 export const authActions: InfoCardItem[] = [
   {
     id: 'validate',
-    eyebrow: 'auth.validate',
+    eyebrow: 'auth.create_session',
     title: 'Primary credential check',
-    description: 'api_key + session_token + auth_scene=demo',
+    description: 'token -> session_token -> bound command session',
     meta: 'next trace: trc-demo-20260407-1844',
     tone: 'primary',
     state: 'success',
   },
   {
     id: 'refresh',
-    eyebrow: 'auth.refresh',
+    eyebrow: 'auth.refresh_session',
     title: 'Session refresh posture',
     description: 'refresh interval=25m · soft expiry=30m',
     meta: 'recommended when idle > 15m',
@@ -300,24 +300,24 @@ export const authFailureItems: ErrorItem[] = [
     id: 'auth-1',
     code: '1100',
     name: 'AUTH_REQUIRED',
-    method: 'auth.validate',
-    message: 'Credential headers were empty on the initial command connect.',
+    method: 'auth.create_session',
+    message: 'The bound session was not created before the business request was sent.',
     traceId: 'trc-demo-20260407-1710',
     occurredAt: '17:10:22',
   },
   {
     id: 'auth-2',
     code: '1103',
-    name: 'TOKEN_EXPIRED',
-    method: 'auth.refresh',
+    name: 'SESSION_TOKEN_INVALID',
+    method: 'auth.refresh_session',
     message: 'Session token expired before refresh window and must be reissued.',
     traceId: 'trc-demo-20260407-1735',
     occurredAt: '17:35:09',
   },
   {
     id: 'auth-3',
-    code: '1112',
-    name: 'DEVICE_SCOPE_DENIED',
+    code: '1105',
+    name: 'DEVICE_NOT_IN_AUTH_SCOPE',
     method: 'device.open',
     message: 'Requested device is outside the current scope grant.',
     traceId: 'trc-demo-20260407-1744',
@@ -869,7 +869,7 @@ export const protocolTemplateCards: InfoCardItem[] = [
     id: 'tpl-ping',
     eyebrow: 'system.ping',
     title: 'Transport sanity',
-    description: 'smallest request envelope used for handshake smoke test',
+    description: 'smallest request envelope used for anonymous command-channel verification',
     tone: 'success',
   },
   {
@@ -912,13 +912,9 @@ export const protocolRequestSnippet: JsonSnippet = {
     "auto_deskew": true,
     "detect_barcode": true
   },
-  "auth": {
-    "api_key": "demo-key",
-    "session_token": "demo-session-token"
-  },
   "client": {
     "name": "sdk-demo-site",
-    "version": "0.1.0"
+    "version": "2.0.0"
   }
 }`,
 };
@@ -929,10 +925,10 @@ export const protocolResponseSnippet: JsonSnippet = {
   caption: 'Friendly panels and raw JSON remain visible at the same time.',
   payload: `{
   "request_id": "req-cap-064",
-  "code": 1703,
-  "message": "DEVICE_BUSY",
+  "code": 1902,
+  "message": "PROVIDER_CALL_FAILED",
   "trace_id": "trc-demo-20260407-1832",
-  "result": {
+  "data": {
     "retry_after_ms": 300,
     "active_lane": "preview"
   },
@@ -963,7 +959,7 @@ export const protocolHistory: RequestHistoryItem[] = [
     id: 'proto-h-3',
     method: 'capture.take',
     requestId: 'req-cap-064',
-    code: '1703',
+    code: '1902',
     traceId: 'trc-demo-20260407-1832',
     duration: '142ms',
     state: 'error',

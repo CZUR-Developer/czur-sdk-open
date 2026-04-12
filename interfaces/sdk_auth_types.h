@@ -37,7 +37,7 @@ struct AuthContext {
 };
 
 struct AuthValidateRequest {
-    std::string api_key;
+    std::string token;
     std::int64_t now_ts = 0;
 };
 
@@ -48,7 +48,7 @@ struct AuthValidateResult {
 };
 
 struct AuthRefreshRequest {
-    std::string api_key;
+    std::string session_token;
     std::int64_t now_ts = 0;
 };
 
@@ -72,7 +72,6 @@ struct SessionValidateResult {
 };
 
 struct AuthLookupRequest {
-    std::string api_key;
     std::string session_token;
     std::int64_t now_ts = 0;
 };
@@ -81,7 +80,6 @@ struct AuthContextResult {
     int code = ToCode(SdkStatusCode::Ok);
     std::string message = "ok";
     bool via_session = false;
-    bool via_api_key = false;
     AuthContext auth_context;
 };
 

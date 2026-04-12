@@ -44,7 +44,7 @@
 
     <ApiKeyDialog
       :open="apiKeyDialogOpen"
-      :api-key="authSessionState.apiKey"
+      :api-key="authSessionState.token"
       @close="apiKeyDialogOpen = false"
       @save="saveApiKey"
       @clear="clearApiKey"

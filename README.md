@@ -1,93 +1,173 @@
 # CZUR Open SDK
 
-[中文文档](./README_ZH.md).
+[中文文档](./README_ZH.md)
 
 ## Overview
 
-`sdk_open` is the open-layer skeleton of the CZUR local SDK. It provides a unified local HTTP + WebSocket entrypoint set, a JSON command protocol skeleton, pluggable provider interfaces, and a runnable mock provider bundle for integration, debugging, and future extension.
+`src/sdk_open` is the open-source runtime for the CZUR local SDK. It provides unified local HTTP + WebSocket endpoints, stable public provider interfaces, a runnable mock-provider bundle, and a four-layer runtime structure that can also be reused by the internal product entrypoint.
 
-This directory focuses on the open integration layer itself. It does not expose private capability-library implementation details. In its current shape, it can be used both as a minimal runnable demo and as the base framework for future real-device, image-processing, OCR, OFD, and auth integrations.
+This directory is designed to be independently buildable and runnable. It does not expose private capability-library types.
 
-## Capabilities
+## Executables
 
-### Available now
+Two executables are intentionally retained:
 
-- Two local HTTP entrypoints:
-  - `admin-site`: `http://127.0.0.1:17080`
-  - `demo-site`: `http://127.0.0.1:17081`
-- Two local WebSocket entrypoints:
-  - command channel: `ws://127.0.0.1:17090`
-  - video channel: `ws://127.0.0.1:17091`
-- Implemented command methods:
-  - `system.ping`
-  - `system.info`
-  - `system.capabilities`
-  - `auth.validate`
-  - `auth.refresh`
-  - `auth.get_context`
-- Default mock providers:
-  - auth
-  - device
-  - graphic
-  - ocr
-  - ofd
-- Unified JSON serialization/deserialization and status-code enums
+- `sdk_open_app`
+  - implemented by `src/sdk_open/runtime/sdk_open_main.cpp`
+  - links only the public `sdk_open` runtime and mock providers
+  - serves as the standalone open-source executable
+- `sdk_app`
+  - implemented by `src/app/process/sdk/sdk_main.cpp`
+  - reuses the same `sdk_open` core runtime
+  - wires mock or private providers through main-repo build switches
 
-### Designed for extension
+## Four-Layer Architecture
 
-- The following capability domains are reserved for future growth:
-  - `device.*`
-  - `capture.*`
-  - `image.*`
-  - `ocr.*`
-  - `file.*`
-- In the current repository, these domains mainly exist as protocol scaffolding, provider interfaces, and capability metadata. Real business integration can continue to evolve on top of them.
+`src/sdk_open` is organized into these four layers:
 
-## Architecture and Extensibility
+- `transport/`
+  - HTTP site hosting
+  - command WebSocket
+  - video WebSocket
+  - connection and transport-session handling
+- `application/`
+  - request validation
+  - token / session auth
+  - orchestration
+  - unified error mapping
+- `facade/`
+  - `DeviceFacade`
+  - `GraphicFacade`
+  - `OcrFacade`
+  - `OfdFacade`
+- `interfaces/` + `providers/*`
+  - public DTOs and provider interfaces
+  - mock/private provider adapter implementations
 
-`sdk_open` is currently organized into 4 layers:
+See the target architecture guide for the final boundary definition:
+[doc/RUNTIME_ARCHITECTURE_ZH.md](./doc/RUNTIME_ARCHITECTURE_ZH.md)
 
-- `runtime/`
-  - app composition, HTTP/WS servers, command dispatching, JSON protocol handling
-- `interfaces/`
-  - provider interfaces, auth types, status-code enums, provider bundle
-- `providers/mock/`
-  - default mock providers for a minimal runnable setup
-- `third_party/`
-  - vendored `cpp-httplib`, `websocketpp`, `asio`, `nlohmann/json`
+## Default Endpoints
 
-How to extend it:
+Default runtime endpoints:
 
-- If you only need a runnable demo or protocol-level integration, use the mock providers.
-- If you need real capabilities, implement custom providers and wire them through `ProviderBundle`.
-- The command entrypoint uses a unified JSON request model, so new methods can continue to be registered in the dispatcher while keeping the same response shape.
+- `http://127.0.0.1:17080`
+  - admin site
+- `http://127.0.0.1:17081`
+  - demo site
+- `ws://127.0.0.1:17090`
+  - command channel
+- `ws://127.0.0.1:17091`
+  - video channel
 
-Main provider interfaces already reserved:
+## Public Methods
 
-- `ISdkAuthProvider`
-- `ISdkDeviceProvider`
-- `ISdkGraphicProvider`
-- `ISdkOcrProvider`
-- `ISdkOfdProvider`
+The current runtime exposes:
 
-## Environment
+- `system.ping`
+- `system.info`
+- `system.capabilities`
+- `auth.create_session`
+- `auth.get_context`
+- `auth.refresh_session`
+- `auth.destroy_session`
+- `device.list`
+- `device.get`
+- `device.open`
+- `capture.take`
+- `video.start`
+- `video.stop`
+- `video.set_format`
+- `image.process`
+- `ocr.recognize`
+- `file.convert`
 
-- Platform: Linux
-- Language standard: C++17
-- Build system: CMake
-- Bundled dependencies:
-  - `cpp-httplib`
-  - `websocketpp`
-  - `asio`
-  - `nlohmann/json`
-- Optional frontend:
-  - `frontend/admin-site`
-  - `frontend/demo-site`
-  - If you only want to run the backend skeleton, start with `BUILD_SDK_WEB=OFF`
+## Protocol Model
 
-## Quick Start
+### Command WS
 
-`sdk_open` is currently built through the repository root CMake flow. The minimal startup path is to disable web frontend builds.
+- command WebSocket connects anonymously
+- no business token is passed in the WebSocket handshake query
+- requests use only `request_id`
+- business requests no longer carry an `auth` object
+- session state is bound to the command connection context
+
+Minimal anonymous request:
+
+```json
+{
+  "request_id": "req-ping-001",
+  "method": "system.ping",
+  "params": {},
+  "client": {
+    "source": "demo-site",
+    "protocol_version": "2.0.0",
+    "trace_id": "trc-001"
+  }
+}
+```
+
+Create a bound session:
+
+```json
+{
+  "request_id": "req-auth-001",
+  "method": "auth.create_session",
+  "params": {
+    "token": "demo-token-42F8"
+  },
+  "client": {
+    "source": "demo-site",
+    "protocol_version": "2.0.0",
+    "trace_id": "trc-002"
+  }
+}
+```
+
+Response shape:
+
+```json
+{
+  "request_id": "req-auth-001",
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "session_token": "ss-v2-xxxx",
+    "expires_in": 7200
+  },
+  "ts": 1710000000
+}
+```
+
+### Video WS
+
+- `video.start`, `video.stop`, and `video.set_format` go through command WS
+- video WS is reserved for frame output and related events
+- video WS connects with `session_token + stream_id`
+
+Example:
+
+```text
+ws://127.0.0.1:17091?session_token=ss-v2-xxxx&stream_id=stream-001
+```
+
+## Admin APIs
+
+Admin APIs are separate from SDK business auth:
+
+- `GET /healthz`
+  - anonymous
+- `GET /api/status`
+  - requires `Authorization: Bearer <auth_token>`
+
+Example:
+
+```bash
+curl http://127.0.0.1:17080/healthz
+curl -H "Authorization: Bearer <token>" http://127.0.0.1:17080/api/status
+```
+
+## Build and Run
 
 ### 1. Configure
 
@@ -98,82 +178,18 @@ cmake -S . -B build -DBUILD_SDK_OPEN=ON -DBUILD_SDK_WEB=OFF -DCMAKE_BUILD_TYPE=D
 ### 2. Build
 
 ```bash
-cmake --build build --target sdk_open_runtime sdk_mock_providers sdk_open_app -j4
+cmake --build build --target sdk_open_app sdk_app -j4
 ```
 
-### 3. Run
+### 3. Run the open executable
 
 ```bash
 ./build/Debug/sdk_open_app
 ```
 
-Default endpoints after startup:
+## Environment Variables
 
-- `http://127.0.0.1:17080`
-- `http://127.0.0.1:17081`
-- `ws://127.0.0.1:17090`
-- `ws://127.0.0.1:17091`
-
-## Minimal Request Examples
-
-Minimal command-channel `ping`:
-
-```json
-{
-  "request_id": "1",
-  "method": "system.ping",
-  "params": {},
-  "auth": {},
-  "client": {}
-}
-```
-
-Capability query:
-
-```json
-{
-  "request_id": "2",
-  "method": "system.capabilities",
-  "params": {},
-  "auth": {},
-  "client": {}
-}
-```
-
-HTTP status endpoint:
-
-```bash
-curl http://127.0.0.1:17080/api/status
-```
-
-If `SDK_AUTH_TOKEN` is set, use:
-
-```bash
-curl -H "Authorization: Bearer <token>" http://127.0.0.1:17080/api/status
-```
-
-## Configuration and Environment Variables
-
-Build-time switch:
-
-- `SDK_OPEN_ENABLE_HTTP_SERVER=ON`
-  - Default.
-  - Starts the embedded `admin-site` and `demo-site` HTTP servers on `17080/17081`.
-- `SDK_OPEN_ENABLE_HTTP_SERVER=OFF`
-  - Disables the embedded HTTP servers.
-  - Useful when you want to run `frontend/demo-site` or `frontend/admin-site` with `pnpm run dev` and avoid port conflicts with `sdk_open_app`.
-
-Example:
-
-```bash
-cmake -S . -B build-sdk-open \
-  -DBUILD_SDK_OPEN=ON \
-  -DBUILD_SDK_WEB=OFF \
-  -DSDK_OPEN_ENABLE_HTTP_SERVER=OFF \
-  -DCMAKE_BUILD_TYPE=Debug
-```
-
-The current `sdk_open_app` supports the following environment-variable overrides:
+`sdk_open_app` and `sdk_app` support these overrides:
 
 - `SDK_ADMIN_HTTP_PORT`
 - `SDK_DEMO_HTTP_PORT`
@@ -181,22 +197,9 @@ The current `sdk_open_app` supports the following environment-variable overrides
 - `SDK_VIDEO_WS_PORT`
 - `SDK_AUTH_TOKEN`
 
-## Current Project Status
-
-`sdk_open` is currently closer to an open-layer foundation than a full production SDK. The parts that are already usable are mainly:
-
-- local service entrypoints
-- the unified command protocol skeleton
-- `system.*` and `auth.*`
-- mock providers
-
-Device control, capture, image processing, OCR, and file processing directions already have clear extension points reserved, but concrete business capability integration can continue to evolve through real providers.
-
 ## Documentation
 
-- Chinese version: [README_ZH.md](./README_ZH.md)
+- Target runtime architecture: [doc/RUNTIME_ARCHITECTURE_ZH.md](./doc/RUNTIME_ARCHITECTURE_ZH.md)
 - Command channel flow: [doc/COMMAND_CHANNEL_FLOW.md](./doc/COMMAND_CHANNEL_FLOW.md)
-- Chinese command channel flow: [doc/COMMAND_CHANNEL_FLOW_ZH.md](./doc/COMMAND_CHANNEL_FLOW_ZH.md)
-- Public error codes: [doc/ERROR_CODES.md](./doc/ERROR_CODES.md)
-- Chinese error codes: [doc/ERROR_CODES_ZH.md](./doc/ERROR_CODES_ZH.md)
-- Contribution guide: [CONTRIBUTING.md](./CONTRIBUTING.md)
+- Error codes: [doc/ERROR_CODES.md](./doc/ERROR_CODES.md)
+- 中文说明: [README_ZH.md](./README_ZH.md)

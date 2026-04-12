@@ -15,7 +15,8 @@ public:
     virtual ~ISdkAuthProvider() = default;
 
     virtual std::string ProviderName() const = 0;
-    virtual AuthValidateResult ValidateApiKey(const AuthValidateRequest& request) = 0;
+    virtual AuthValidateResult ValidateToken(const AuthValidateRequest& request) = 0;
+    virtual AuthRefreshResult CreateSession(const AuthValidateRequest& request) = 0;
     virtual AuthRefreshResult RefreshSession(const AuthRefreshRequest& request) = 0;
     virtual SessionValidateResult ValidateSession(const SessionValidateRequest& request) = 0;
     virtual AuthContextResult GetAuthContext(const AuthLookupRequest& request) = 0;

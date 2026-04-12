@@ -66,25 +66,25 @@ const { t } = useI18n();
 const authActions = computed(() => [
   {
     id: 'validate',
-    eyebrow: 'ws://...?...',
-    title: 'Command handshake',
-    description: authSessionState.apiKey
-      ? 'Connection-level API key validation now runs before the command lane opens.'
-      : 'The command lane stays idle until the browser has a locally stored API key.',
+    eyebrow: 'auth.create_session',
+    title: 'Command connect',
+    description: authSessionState.token
+      ? 'The command lane connects anonymously and creates a bound session through auth.create_session.'
+      : 'The command lane stays idle until the browser has a locally stored token.',
     meta: authSessionState.lastConnectedAt
       ? `connected at ${authSessionState.lastConnectedAt}`
-      : 'handshake happens before auth.refresh',
+      : 'connect first, then create the session in-band',
     tone: 'primary',
     state: authSessionState.commandState,
   },
   {
     id: 'refresh',
-    eyebrow: 'session',
-    title: 'Session key issue',
-    description: authSessionState.sessionKey
-      ? `session_key received and cached locally, ttl=${authSessionState.sessionExpiresIn}s`
-      : 'The command lane pushes auth.session_issued after handshake, and auth.refresh can rotate the session later.',
-    meta: authSessionState.sessionKey ? maskSecret(authSessionState.sessionKey) : 'session_key not available',
+    eyebrow: 'auth.refresh_session',
+    title: 'Session token issue',
+    description: authSessionState.sessionToken
+      ? `session_token cached locally, ttl=${authSessionState.sessionExpiresIn}s`
+      : 'The runtime returns session_token from auth.create_session, and auth.refresh_session can rotate it later.',
+    meta: authSessionState.sessionToken ? maskSecret(authSessionState.sessionToken) : 'session_token not available',
     tone: 'info',
     state: authSessionState.refreshState,
   },
@@ -93,8 +93,8 @@ const authActions = computed(() => [
     eyebrow: 'Context',
     title: 'Context snapshot',
     description: authSessionState.authContext
-      ? 'The runtime resolved account scope, device grants, and capabilities from the session key.'
-      : 'Context is fetched after session issue and fills the granted capability surface.',
+      ? 'The runtime resolved account scope, device grants, and capabilities from the bound session token.'
+      : 'Context is fetched after session creation and fills the granted capability surface.',
     meta: authSessionState.authContext?.auth_scene || 'awaiting auth context',
     tone: 'success',
     state: authSessionState.contextState,
@@ -105,12 +105,12 @@ const authFormItems = computed(() => [
   { label: t('labels.endpoint'), value: authSessionState.connectionEndpoint, monospace: true },
   {
     label: t('labels.apiKey'),
-    value: authSessionState.apiKey ? maskSecret(authSessionState.apiKey) : t('common.notSet'),
+    value: authSessionState.token ? maskSecret(authSessionState.token) : t('common.notSet'),
     monospace: true,
   },
-  { label: t('labels.sessionKey'), value: authSessionState.sessionKey ? maskSecret(authSessionState.sessionKey) : t('common.notSet'), monospace: true },
+  { label: t('labels.sessionKey'), value: authSessionState.sessionToken ? maskSecret(authSessionState.sessionToken) : t('common.notSet'), monospace: true },
   { label: t('labels.providerMode'), value: 'mock-auth-provider / runtime ws' },
-  { label: t('labels.handshake'), value: 'ws query api_key' },
+  { label: t('labels.handshake'), value: 'anonymous ws + auth.create_session' },
   { label: t('common.status'), value: t(executionStateLabelKey(authSessionState.commandState)) },
 ]);
 

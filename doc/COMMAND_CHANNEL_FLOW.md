@@ -1,208 +1,237 @@
-# CZUR Open SDK Command Channel Flow
+# CZUR Open SDK Command Channel
 
 [中文版本](./COMMAND_CHANNEL_FLOW_ZH.md)
 
 ## Overview
 
-This document describes the public connection flow and communication model of the `sdk_open` command channel.
+This document describes the final public command WebSocket model used by `sdk_open`.
 
-Current scope:
+Core rules:
 
-- This document covers only the command WebSocket channel.
-- It does not describe the video WebSocket channel yet.
-- The goal is to help external integrators understand how to connect, authenticate, bootstrap a session, and send follow-up commands.
+- command WS connects anonymously
+- the business token is not passed in the WebSocket handshake query
+- all requests use only `request_id`
+- business requests no longer carry an explicit `auth` object
+- session state is bound by the server to the command connection
 
 Default endpoint:
 
-- command channel: `ws://127.0.0.1:17090`
+- `ws://127.0.0.1:17090`
 
-## Connection Establishment
+## Connection Model
 
-The command channel is established through a WebSocket handshake with an `api_key` query parameter.
-
-Example:
+The client first opens an anonymous WebSocket:
 
 ```text
-ws://127.0.0.1:17090?api_key=<your-api-key>
+ws://127.0.0.1:17090
 ```
 
-Handshake behavior:
+After the connection is established:
 
-1. The client opens the WebSocket with `?api_key=...`.
-2. The server validates the `api_key` during the handshake.
-3. If validation succeeds, the WebSocket upgrade is accepted.
-4. If validation fails, the handshake is rejected with HTTP `401`.
+- `system.*` can be called directly
+- `auth.create_session` uses a `token` to create a connection-bound session
+- later `device.*`, `capture.*`, `video.*`, `image.*`, `ocr.*`, and `file.*` calls reuse that bound session
 
-Handshake failure body shape:
+## Request Shape
 
-```json
-{
-  "code": 1101,
-  "message": "api key invalid",
-  "data": {}
-}
-```
-
-Notes:
-
-- `api_key` is used only for initial handshake admission and session issuance.
-- The command channel accepts text JSON messages only.
-
-## Bootstrap Sequence
-
-After the WebSocket handshake succeeds, the server actively pushes the first system event:
-
-- `auth.session_issued`
-
-This event bootstraps the session for the current command connection. The client should cache the returned `session_key` and use it for follow-up business commands.
-
-Example event:
-
-```json
-{
-  "event": "auth.session_issued",
-  "code": 0,
-  "message": "ok",
-  "payload": {
-    "session_key": "ss-v1-xxxxxxxx",
-    "session_token": "ss-v1-xxxxxxxx",
-    "expires_in": 7200,
-    "auth_context": {
-      "is_valid": true,
-      "account_type": "svip",
-      "account_type_code": 1,
-      "auth_scene": "plugin",
-      "license_mode": "offline_api_key",
-      "device_scope": [
-        { "vid": 4660, "pid": 22136 }
-      ],
-      "expires_at": 0,
-      "capabilities": [
-        "system.ping",
-        "system.info",
-        "system.capabilities",
-        "auth.validate",
-        "auth.refresh",
-        "auth.get_context",
-        "device.list"
-      ]
-    }
-  },
-  "ts": 1710000000
-}
-```
-
-Field notes:
-
-- `session_key` is the primary public field name.
-- `session_token` is currently kept as a compatibility alias.
-- `expires_in` is the session TTL in seconds.
-- `auth_context` contains account tier, granted device scope, and capability list.
-
-## Message Model
-
-### Request shape
-
-Command requests use the following JSON shape:
+Unified request shape:
 
 ```json
 {
   "request_id": "req-001",
-  "method": "device.list",
-  "params": {},
-  "auth": {
-    "session_key": "ss-v1-xxxxxxxx"
+  "method": "auth.create_session",
+  "params": {
+    "token": "demo-token-42F8"
   },
   "client": {
     "source": "demo-site",
-    "protocol_version": "1.0.0",
+    "protocol_version": "2.0.0",
     "trace_id": "trc-001"
   }
 }
 ```
 
-Compatibility notes:
+Notes:
 
-- `id` may still be accepted as a legacy alias of `request_id`.
-- `auth.session_token` may still be accepted as a compatibility alias of `auth.session_key`.
+- `request_id` is the only request identifier
+- `method` is the public method name
+- `params` carries method parameters
+- `client` carries source, protocol version, and trace metadata
+- `id` is no longer used
+- `auth.session_key` and `auth.session_token` are no longer request fields
 
-### Response shape
+## Response Shape
 
-Command responses use the following JSON shape:
+Unified response shape:
 
 ```json
 {
-  "code": 0,
-  "message": "ok",
-  "data": {
-    "devices": ["mock-device-01"],
-    "count": 1
-  },
   "request_id": "req-001",
-  "id": "req-001",
-  "ts": 1710000001
-}
-```
-
-### Event shape
-
-Server-pushed events use the following JSON shape:
-
-```json
-{
-  "event": "auth.session_issued",
   "code": 0,
   "message": "ok",
-  "payload": {},
+  "data": {},
   "ts": 1710000000
 }
 ```
 
-## Authorization Rules
+Notes:
 
-The command channel uses a two-stage authorization model.
+- `code` uses the public SDK status codes
+- `data` carries the method result
+- `ts` is the server timestamp
 
-### Stage 1: handshake admission
+## Event Shape
 
-- The client provides `api_key` in the WebSocket URL query.
-- The server validates the `api_key`.
-- If validation succeeds, the connection is upgraded and a session is issued.
+Server-pushed event shape:
 
-### Stage 2: command authorization
+```json
+{
+  "event": "video.ready",
+  "code": 0,
+  "message": "ok",
+  "payload": {
+    "stream_id": "stream-001"
+  },
+  "ts": 1710000001
+}
+```
 
-- `system.*` methods can be called without `session_key`.
-- `auth.validate`, `auth.refresh`, and `auth.get_context` remain available for auth-related operations.
-- Business methods outside `system.*` and `auth.*` must provide `auth.session_key`.
-- The server first validates `session_key`, then checks whether the session grants the requested capability.
+Events are separate from request/response traffic and do not carry `request_id`.
 
-Typical failures:
+## Auth Flow
 
-- `1100`: auth required or session key required
-- `1101`: api key invalid
-- `1103`: session token invalid
-- `1107`: capability not allowed
+### 1. Anonymous connection
 
-See also:
+The client opens the command WebSocket without a token.
 
-- [ERROR_CODES.md](./ERROR_CODES.md)
+### 2. Create a bound session
 
-## Supported Method Domains
+The client sends:
 
-Current command channel method domains include:
+```json
+{
+  "request_id": "req-auth-001",
+  "method": "auth.create_session",
+  "params": {
+    "token": "demo-token-42F8"
+  },
+  "client": {
+    "source": "demo-site",
+    "protocol_version": "2.0.0",
+    "trace_id": "trc-auth-001"
+  }
+}
+```
 
-- `system.*`
-- `auth.*`
-- `device.*`
-- `capture.*`
-- `image.*`
-- `ocr.*`
-- `file.*`
-- `recognition.*`
+Successful response example:
 
-Important note:
+```json
+{
+  "request_id": "req-auth-001",
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "session_token": "ss-v2-xxxx",
+    "expires_in": 7200,
+    "auth_context": {
+      "is_valid": true,
+      "account_type": "sdk_demo_basic",
+      "auth_scene": "plugin",
+      "license_mode": "offline_token",
+      "device_scope": [
+        { "vid": 4660, "pid": 22136 }
+      ],
+      "capabilities": [
+        "system.ping",
+        "system.info",
+        "system.capabilities",
+        "auth.create_session",
+        "auth.get_context",
+        "auth.refresh_session",
+        "auth.destroy_session",
+        "device.list",
+        "device.get",
+        "device.open",
+        "capture.take",
+        "video.start",
+        "video.stop",
+        "video.set_format",
+        "image.process",
+        "ocr.recognize",
+        "file.convert"
+      ]
+    }
+  },
+  "ts": 1710000002
+}
+```
 
-- Some business methods are already wired into the unified session-auth path but still act as placeholder or adapter implementations in the current runtime.
-- External integrators should treat the auth flow and wire format as stable, while concrete business capability depth may continue to evolve.
+### 3. Read the current auth context
+
+```json
+{
+  "request_id": "req-auth-ctx-001",
+  "method": "auth.get_context",
+  "params": {},
+  "client": {
+    "source": "demo-site",
+    "protocol_version": "2.0.0",
+    "trace_id": "trc-auth-ctx-001"
+  }
+}
+```
+
+### 4. Call business methods
+
+Business methods do not resend the session:
+
+```json
+{
+  "request_id": "req-device-list-001",
+  "method": "device.list",
+  "params": {},
+  "client": {
+    "source": "demo-site",
+    "protocol_version": "2.0.0",
+    "trace_id": "trc-device-001"
+  }
+}
+```
+
+### 5. Refresh or destroy the session
+
+Supported auth lifecycle methods:
+
+- `auth.refresh_session`
+- `auth.destroy_session`
+
+## Access Rules
+
+- `system.*` is anonymous
+- `auth.create_session` is anonymous
+- `auth.get_context`, `auth.refresh_session`, and `auth.destroy_session` require a valid bound session
+- all other business methods require a valid bound session by default
+- capability and device-scope checks are enforced in the application layer
+
+Common auth failures:
+
+- `1100`: auth required
+- `1101`: `token` invalid
+- `1102`: `token` expired
+- `1103`: bound `session_token` invalid or expired
+- `1107`: capability not granted
+
+## Relation to Video WS
+
+- `video.start`, `video.stop`, and `video.set_format` are command-WS methods
+- video WS is reserved for frame output and related events
+- video WS connects with `session_token + stream_id`
+
+Example:
+
+```text
+ws://127.0.0.1:17091?session_token=ss-v2-xxxx&stream_id=stream-001
+```
 
 ## Sequence Example
 
@@ -210,63 +239,24 @@ Important note:
 sequenceDiagram
     participant Client
     participant CommandWS as Command WebSocket
+    participant App as Application Layer
     participant Auth as Auth Provider
 
-    Client->>CommandWS: Connect ws://127.0.0.1:17090?api_key=...
-    CommandWS->>Auth: Validate api_key and issue session
-    Auth-->>CommandWS: session_key + auth_context
-    CommandWS-->>Client: WebSocket upgrade accepted
-    CommandWS-->>Client: event auth.session_issued
-    Client->>CommandWS: auth.get_context with auth.session_key
-    CommandWS-->>Client: auth context response
-    Client->>CommandWS: business method with auth.session_key
-    CommandWS-->>Client: business response
-```
-
-## Minimal Examples
-
-### Minimal anonymous command
-
-```json
-{
-  "request_id": "req-ping-001",
-  "method": "system.ping",
-  "params": {},
-  "auth": {},
-  "client": {}
-}
-```
-
-### Minimal auth context query
-
-```json
-{
-  "request_id": "req-auth-ctx-001",
-  "method": "auth.get_context",
-  "params": {},
-  "auth": {
-    "session_key": "ss-v1-xxxxxxxx"
-  },
-  "client": {}
-}
-```
-
-### Minimal business request
-
-```json
-{
-  "request_id": "req-device-list-001",
-  "method": "device.list",
-  "params": {},
-  "auth": {
-    "session_key": "ss-v1-xxxxxxxx"
-  },
-  "client": {}
-}
+    Client->>CommandWS: Connect ws://127.0.0.1:17090
+    CommandWS-->>Client: WebSocket accepted
+    Client->>CommandWS: auth.create_session(token)
+    CommandWS->>App: route request
+    App->>Auth: validate token and create session
+    Auth-->>App: session_token + auth_context
+    App-->>Client: auth.create_session response
+    Client->>CommandWS: auth.get_context
+    App-->>Client: auth context response
+    Client->>CommandWS: device.list
+    App-->>Client: business response
 ```
 
 ## Documentation Links
 
-- Chinese version: [COMMAND_CHANNEL_FLOW_ZH.md](./COMMAND_CHANNEL_FLOW_ZH.md)
-- Public error codes: [ERROR_CODES.md](./ERROR_CODES.md)
-- Main project guide: [../README.md](../README.md)
+- Target architecture: [RUNTIME_ARCHITECTURE_ZH.md](./RUNTIME_ARCHITECTURE_ZH.md)
+- Error codes: [ERROR_CODES.md](./ERROR_CODES.md)
+- Main README: [../README.md](../README.md)

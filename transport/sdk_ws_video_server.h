@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -20,9 +21,20 @@ public:
         uint64_t binary_bytes = 0;
     };
 
-    SdkWsVideoServer(const std::string& host, int port, const std::string& auth_token);
+    struct ConnectionAuthResult {
+        bool authorized = false;
+        int code = 1100;
+        std::string message = "auth required";
+        std::string connection_id;
+        std::string stream_id;
+    };
+
+    using ConnectionAuthHandler = std::function<ConnectionAuthResult(const std::string&, const std::string&)>;
+
+    SdkWsVideoServer(const std::string& host, int port);
     ~SdkWsVideoServer();
 
+    void SetConnectionAuthHandler(ConnectionAuthHandler handler);
     bool Start();
     void Stop();
     Stats GetStats() const;
@@ -32,8 +44,8 @@ private:
 
     std::string host_;
     int port_;
-    std::string auth_token_;
     std::atomic<bool> running_;
+    ConnectionAuthHandler connection_auth_handler_;
     std::unique_ptr<Impl> impl_;
 };
 

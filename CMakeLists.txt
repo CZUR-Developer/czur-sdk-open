@@ -46,12 +46,19 @@ target_include_directories(sdk_open_interfaces INTERFACE
 
 set(SDK_OPEN_RUNTIME_SRCS
     runtime/sdk_app.cpp
-    runtime/sdk_command_dispatcher.cpp
-    runtime/sdk_http_server.cpp
     runtime/sdk_json_utils.cpp
-    runtime/sdk_ws_command_server.cpp
-    runtime/sdk_ws_video_server.cpp
     runtime/sdk_config.cpp
+    transport/sdk_http_server.cpp
+    transport/sdk_ws_command_server.cpp
+    transport/sdk_ws_video_server.cpp
+    application/admin_application_service.cpp
+    application/authorization_service.cpp
+    application/command_application_service.cpp
+    application/video_session_service.cpp
+    facade/device_facade.cpp
+    facade/graphic_facade.cpp
+    facade/ocr_facade.cpp
+    facade/ofd_facade.cpp
 )
 
 add_library(sdk_open_logging STATIC
@@ -68,6 +75,9 @@ target_link_libraries(sdk_open_logging PUBLIC pthread)
 add_library(sdk_open_runtime STATIC ${SDK_OPEN_RUNTIME_SRCS})
 target_include_directories(sdk_open_runtime PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/runtime"
+    "${CMAKE_CURRENT_SOURCE_DIR}/transport"
+    "${CMAKE_CURRENT_SOURCE_DIR}/application"
+    "${CMAKE_CURRENT_SOURCE_DIR}/facade"
     "${CMAKE_CURRENT_SOURCE_DIR}/interfaces"
 )
 target_compile_definitions(sdk_open_runtime PUBLIC
@@ -97,6 +107,9 @@ add_executable(sdk_open_app
 )
 target_include_directories(sdk_open_app PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/runtime"
+    "${CMAKE_CURRENT_SOURCE_DIR}/transport"
+    "${CMAKE_CURRENT_SOURCE_DIR}/application"
+    "${CMAKE_CURRENT_SOURCE_DIR}/facade"
     "${CMAKE_CURRENT_SOURCE_DIR}/providers/mock"
     "${CMAKE_CURRENT_SOURCE_DIR}/interfaces"
 )
@@ -104,15 +117,7 @@ target_link_libraries(sdk_open_app PRIVATE
     sdk_open_runtime
 )
 
-if(BUILD_SDK_PRIVATE)
-    target_compile_definitions(sdk_open_app PRIVATE SDK_USE_PRIVATE_PROVIDER)
-    target_include_directories(sdk_open_app PRIVATE
-        "${CMAKE_SOURCE_DIR}/src/sdk_private/providers"
-    )
-    target_link_libraries(sdk_open_app PRIVATE sdk_private_providers)
-else()
-    target_link_libraries(sdk_open_app PRIVATE sdk_mock_providers)
-endif()
+target_link_libraries(sdk_open_app PRIVATE sdk_mock_providers)
 
 if(BUILD_SDK_WEB)
     message(STATUS "ENV PATH=$ENV{PATH}")

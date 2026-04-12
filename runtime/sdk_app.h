@@ -8,13 +8,14 @@
 #include <memory>
 #include <string>
 
-#include "sdk_command_dispatcher.h"
+#include "../application/admin_application_service.h"
+#include "../application/command_application_service.h"
+#include "../transport/sdk_http_server.h"
+#include "../transport/sdk_ws_command_server.h"
+#include "../transport/sdk_ws_video_server.h"
 #include "sdk_config.h"
-#include "sdk_http_server.h"
 #include "sdk_json_utils.h"
 #include "sdk_provider_bundle.h"
-#include "sdk_ws_command_server.h"
-#include "sdk_ws_video_server.h"
 
 namespace editor {
 namespace sdk {
@@ -28,12 +29,12 @@ public:
 
 private:
     Json BuildStatusJson() const;
-    Json BuildCapabilitiesJson() const;
     uint64_t UptimeSeconds() const;
 
     SdkConfig config_;
     ProviderBundle providers_;
-    std::unique_ptr<SdkCommandDispatcher> command_dispatcher_;
+    std::unique_ptr<CommandApplicationService> command_application_service_;
+    AdminApplicationService admin_application_service_;
     SdkHttpServer admin_http_server_;
     SdkHttpServer demo_http_server_;
     SdkWsCommandServer command_ws_server_;

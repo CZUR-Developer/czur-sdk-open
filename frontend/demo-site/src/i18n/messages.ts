@@ -43,7 +43,7 @@ export const messages = {
     },
     actions: {
       openDrawer: 'Open drawer',
-      setApiKey: 'Set API key',
+      setApiKey: 'Set token',
       copyUrl: 'Copy URL',
       healthCheck: 'Health check',
       connect: 'Connect',
@@ -91,7 +91,7 @@ export const messages = {
     header: {
       command: 'Command WS',
       auth: 'Auth',
-      apiKey: 'API Key',
+      apiKey: 'Token',
       device: 'Device',
       provider: 'Provider',
       trace: 'Trace ID',
@@ -171,10 +171,10 @@ export const messages = {
     },
     labels: {
       endpoint: 'Endpoint',
-      apiKey: 'API Key',
-      sessionKey: 'Session Key',
+      apiKey: 'Token',
+      sessionKey: 'Session Token',
       token: 'Token',
-      handshake: 'Handshake',
+      handshake: 'Connection mode',
       expiresAt: 'Expires at',
       deviceScope: 'Device scope',
       capabilities: 'Capabilities',
@@ -251,7 +251,7 @@ export const messages = {
     },
     actions: {
       openDrawer: '打开抽屉',
-      setApiKey: '设置 API Key',
+      setApiKey: '设置令牌',
       copyUrl: '复制地址',
       healthCheck: '连通性检查',
       connect: '连接',
@@ -299,7 +299,7 @@ export const messages = {
     header: {
       command: '指令通道',
       auth: '鉴权态',
-      apiKey: 'API Key',
+      apiKey: '令牌',
       device: '当前设备',
       provider: 'Provider 模式',
       trace: '最近 Trace',
@@ -379,10 +379,10 @@ export const messages = {
     },
     labels: {
       endpoint: '端点',
-      apiKey: 'API Key',
-      sessionKey: '会话 Key',
+      apiKey: '令牌',
+      sessionKey: '会话令牌',
       token: '令牌',
-      handshake: '握手',
+      handshake: '连接模式',
       expiresAt: '过期时间',
       deviceScope: '设备范围',
       capabilities: '能力集',

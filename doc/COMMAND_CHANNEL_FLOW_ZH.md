@@ -1,208 +1,240 @@
-# CZUR Open SDK 指令通道时序说明
+# CZUR Open SDK 指令通道说明
 
 [English version](./COMMAND_CHANNEL_FLOW.md)
 
 ## 概述
 
-本文档描述 `sdk_open` 指令通道的对外连接方式、建立时序和后续通信模型。
+本文档描述 `sdk_open` 最终对外 command WebSocket 模型。
 
-当前范围：
+关键规则：
 
-- 本文档只覆盖 command WebSocket channel。
-- 当前不包含 video WebSocket channel 的建立过程和协议说明。
-- 目标是帮助外部接入方理解如何建立连接、完成授权、获取会话，并继续发送后续指令。
+- command WS 匿名建连
+- 业务 token 不出现在 WebSocket 握手 query 中
+- 所有请求只使用 `request_id`
+- 业务请求不再显式携带 `auth` 对象
+- 会话状态由服务端绑定到 command 连接
 
 默认地址：
 
-- 指令通道：`ws://127.0.0.1:17090`
+- `ws://127.0.0.1:17090`
 
-## 连接建立
+## 建连模型
 
-指令通道通过带 `api_key` query 参数的 WebSocket 握手建立。
-
-示例：
+客户端先建立匿名 WebSocket 连接：
 
 ```text
-ws://127.0.0.1:17090?api_key=<your-api-key>
+ws://127.0.0.1:17090
 ```
 
-握手行为如下：
+连接建立后：
 
-1. 客户端通过 `?api_key=...` 发起 WebSocket 连接。
-2. 服务端在握手阶段校验 `api_key`。
-3. 校验成功后，接受 WebSocket upgrade。
-4. 校验失败时，直接拒绝握手并返回 HTTP `401`。
+- `system.*` 可以直接调用
+- `auth.create_session` 使用 `token` 创建连接绑定会话
+- 后续 `device.*`、`capture.*`、`video.*`、`image.*`、`ocr.*`、`file.*` 复用当前连接绑定的会话
 
-握手失败 body 结构：
+## 请求模型
 
-```json
-{
-  "code": 1101,
-  "message": "api key invalid",
-  "data": {}
-}
-```
-
-说明：
-
-- `api_key` 只用于首次握手放行和 session 签发。
-- 指令通道只接受文本 JSON 消息，不接受二进制请求。
-
-## 启动时序
-
-WebSocket 握手成功后，服务端会主动下发第一条系统事件：
-
-- `auth.session_issued`
-
-这条事件用于为当前指令连接完成 session bootstrap。客户端应缓存返回的 `session_key`，并在后续业务指令中优先使用它。
-
-事件示例：
-
-```json
-{
-  "event": "auth.session_issued",
-  "code": 0,
-  "message": "ok",
-  "payload": {
-    "session_key": "ss-v1-xxxxxxxx",
-    "session_token": "ss-v1-xxxxxxxx",
-    "expires_in": 7200,
-    "auth_context": {
-      "is_valid": true,
-      "account_type": "svip",
-      "account_type_code": 1,
-      "auth_scene": "plugin",
-      "license_mode": "offline_api_key",
-      "device_scope": [
-        { "vid": 4660, "pid": 22136 }
-      ],
-      "expires_at": 0,
-      "capabilities": [
-        "system.ping",
-        "system.info",
-        "system.capabilities",
-        "auth.validate",
-        "auth.refresh",
-        "auth.get_context",
-        "device.list"
-      ]
-    }
-  },
-  "ts": 1710000000
-}
-```
-
-字段说明：
-
-- `session_key` 是当前对外主字段名。
-- `session_token` 当前保留为兼容别名。
-- `expires_in` 是 session 的有效时长，单位为秒。
-- `auth_context` 包含账号等级、授权设备范围和 capability 列表。
-
-## 消息模型
-
-### 请求结构
-
-指令请求统一使用如下 JSON 结构：
+统一请求结构：
 
 ```json
 {
   "request_id": "req-001",
-  "method": "device.list",
-  "params": {},
-  "auth": {
-    "session_key": "ss-v1-xxxxxxxx"
+  "method": "auth.create_session",
+  "params": {
+    "token": "demo-token-42F8"
   },
   "client": {
     "source": "demo-site",
-    "protocol_version": "1.0.0",
+    "protocol_version": "2.0.0",
     "trace_id": "trc-001"
   }
 }
 ```
 
-兼容性说明：
+说明：
 
-- `id` 目前仍可作为 `request_id` 的兼容别名。
-- `auth.session_token` 目前仍可作为 `auth.session_key` 的兼容别名。
+- `request_id` 是唯一请求标识
+- `method` 是公开方法名
+- `params` 是方法参数
+- `client` 用于来源、协议版本和 trace 信息
+- 不再使用 `id`
+- 不再使用 `auth.session_key` 或 `auth.session_token` 请求字段
 
-### 响应结构
+## 响应模型
 
-指令响应统一使用如下 JSON 结构：
+统一响应结构：
 
 ```json
 {
-  "code": 0,
-  "message": "ok",
-  "data": {
-    "devices": ["mock-device-01"],
-    "count": 1
-  },
   "request_id": "req-001",
-  "id": "req-001",
-  "ts": 1710000001
-}
-```
-
-### 事件结构
-
-服务端主动事件统一使用如下 JSON 结构：
-
-```json
-{
-  "event": "auth.session_issued",
   "code": 0,
   "message": "ok",
-  "payload": {},
+  "data": {},
   "ts": 1710000000
 }
 ```
 
-## 授权规则
+说明：
 
-指令通道采用“两段式”授权模型。
+- `code` 使用公开错误码
+- `data` 承载方法结果
+- `ts` 是服务端时间戳
 
-### 第一阶段：握手放行
+## 事件模型
 
-- 客户端在 WebSocket URL query 中传入 `api_key`。
-- 服务端校验 `api_key`。
-- 校验通过后，连接升级成功，并为该连接签发 session。
+服务端主动事件结构：
 
-### 第二阶段：指令鉴权
+```json
+{
+  "event": "video.ready",
+  "code": 0,
+  "message": "ok",
+  "payload": {
+    "stream_id": "stream-001"
+  },
+  "ts": 1710000001
+}
+```
 
-- `system.*` 方法可匿名调用，不要求 `session_key`。
-- `auth.validate`、`auth.refresh`、`auth.get_context` 继续保留给授权相关场景使用。
-- 非 `system.*` 和 `auth.*` 的业务方法，必须传入 `auth.session_key`。
-- 服务端会先校验 `session_key`，再判断该 session 是否具备访问当前 method 的 capability。
+说明：
+
+- 事件和请求响应分离
+- 事件不带 `request_id`
+
+## 授权流程
+
+### 1. 匿名连接
+
+客户端建立 command WS 连接，不带 token。
+
+### 2. 创建连接绑定会话
+
+客户端发送：
+
+```json
+{
+  "request_id": "req-auth-001",
+  "method": "auth.create_session",
+  "params": {
+    "token": "demo-token-42F8"
+  },
+  "client": {
+    "source": "demo-site",
+    "protocol_version": "2.0.0",
+    "trace_id": "trc-auth-001"
+  }
+}
+```
+
+成功响应示例：
+
+```json
+{
+  "request_id": "req-auth-001",
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "session_token": "ss-v2-xxxx",
+    "expires_in": 7200,
+    "auth_context": {
+      "is_valid": true,
+      "account_type": "sdk_demo_basic",
+      "auth_scene": "plugin",
+      "license_mode": "offline_token",
+      "device_scope": [
+        { "vid": 4660, "pid": 22136 }
+      ],
+      "capabilities": [
+        "system.ping",
+        "system.info",
+        "system.capabilities",
+        "auth.create_session",
+        "auth.get_context",
+        "auth.refresh_session",
+        "auth.destroy_session",
+        "device.list",
+        "device.get",
+        "device.open",
+        "capture.take",
+        "video.start",
+        "video.stop",
+        "video.set_format",
+        "image.process",
+        "ocr.recognize",
+        "file.convert"
+      ]
+    }
+  },
+  "ts": 1710000002
+}
+```
+
+### 3. 读取当前会话上下文
+
+```json
+{
+  "request_id": "req-auth-ctx-001",
+  "method": "auth.get_context",
+  "params": {},
+  "client": {
+    "source": "demo-site",
+    "protocol_version": "2.0.0",
+    "trace_id": "trc-auth-ctx-001"
+  }
+}
+```
+
+### 4. 调用业务方法
+
+业务请求不再重复传 session：
+
+```json
+{
+  "request_id": "req-device-list-001",
+  "method": "device.list",
+  "params": {},
+  "client": {
+    "source": "demo-site",
+    "protocol_version": "2.0.0",
+    "trace_id": "trc-device-001"
+  }
+}
+```
+
+### 5. 刷新或销毁会话
+
+支持的方法：
+
+- `auth.refresh_session`
+- `auth.destroy_session`
+
+## 访问规则
+
+- `system.*` 可匿名调用
+- `auth.create_session` 可匿名调用
+- `auth.get_context`、`auth.refresh_session`、`auth.destroy_session` 需要当前连接已绑定合法会话
+- 其余业务方法默认都要求当前连接已绑定合法会话
+- 应用层统一执行 capability 和 device scope 判定
 
 常见失败码：
 
-- `1100`：需要认证，或缺少 `session_key`
-- `1101`：`api_key` 非法
-- `1103`：`session_key` 非法或已失效
-- `1107`：当前 session 不具备目标 capability
+- `1100`：当前方法需要认证
+- `1101`：`token` 非法
+- `1102`：`token` 已过期
+- `1103`：当前连接绑定的 `session_token` 非法或已过期
+- `1107`：当前会话不具备目标 capability
 
-另见：
+## 与 Video WS 的关系
 
-- [ERROR_CODES_ZH.md](./ERROR_CODES_ZH.md)
+- `video.start`、`video.stop`、`video.set_format` 都走 command WS
+- video WS 只负责视频帧输出与相关事件
+- video WS 使用 `session_token + stream_id` 建连
 
-## 当前开放的方法域
+示例：
 
-当前指令通道已开放的方法域包括：
-
-- `system.*`
-- `auth.*`
-- `device.*`
-- `capture.*`
-- `image.*`
-- `ocr.*`
-- `file.*`
-- `recognition.*`
-
-重要说明：
-
-- 当前部分业务 method 已经接入统一的 session 授权链路，但底层能力仍是占位实现或适配实现。
-- 外部接入时，应把授权流程和协议结构视为稳定接口；具体业务能力深度仍会继续演进。
+```text
+ws://127.0.0.1:17091?session_token=ss-v2-xxxx&stream_id=stream-001
+```
 
 ## 时序示例
 
@@ -210,63 +242,24 @@ WebSocket 握手成功后，服务端会主动下发第一条系统事件：
 sequenceDiagram
     participant Client
     participant CommandWS as 指令 WebSocket
-    participant Auth as 授权 Provider
+    participant App as Application Layer
+    participant Auth as Auth Provider
 
-    Client->>CommandWS: Connect ws://127.0.0.1:17090?api_key=...
-    CommandWS->>Auth: 校验 api_key 并签发 session
-    Auth-->>CommandWS: session_key + auth_context
-    CommandWS-->>Client: WebSocket upgrade accepted
-    CommandWS-->>Client: event auth.session_issued
-    Client->>CommandWS: auth.get_context with auth.session_key
-    CommandWS-->>Client: auth context response
-    Client->>CommandWS: business method with auth.session_key
-    CommandWS-->>Client: business response
-```
-
-## 最小示例
-
-### 最小匿名指令
-
-```json
-{
-  "request_id": "req-ping-001",
-  "method": "system.ping",
-  "params": {},
-  "auth": {},
-  "client": {}
-}
-```
-
-### 最小授权上下文查询
-
-```json
-{
-  "request_id": "req-auth-ctx-001",
-  "method": "auth.get_context",
-  "params": {},
-  "auth": {
-    "session_key": "ss-v1-xxxxxxxx"
-  },
-  "client": {}
-}
-```
-
-### 最小业务请求
-
-```json
-{
-  "request_id": "req-device-list-001",
-  "method": "device.list",
-  "params": {},
-  "auth": {
-    "session_key": "ss-v1-xxxxxxxx"
-  },
-  "client": {}
-}
+    Client->>CommandWS: Connect ws://127.0.0.1:17090
+    CommandWS-->>Client: WebSocket accepted
+    Client->>CommandWS: auth.create_session(token)
+    CommandWS->>App: route request
+    App->>Auth: validate token and create session
+    Auth-->>App: session_token + auth_context
+    App-->>Client: auth.create_session response
+    Client->>CommandWS: auth.get_context
+    App-->>Client: auth context response
+    Client->>CommandWS: device.list
+    App-->>Client: business response
 ```
 
 ## 文档链接
 
-- 英文版本：[COMMAND_CHANNEL_FLOW.md](./COMMAND_CHANNEL_FLOW.md)
-- 错误码文档：[ERROR_CODES_ZH.md](./ERROR_CODES_ZH.md)
+- 目标架构说明：[RUNTIME_ARCHITECTURE_ZH.md](./RUNTIME_ARCHITECTURE_ZH.md)
+- 错误码说明：[ERROR_CODES_ZH.md](./ERROR_CODES_ZH.md)
 - 主项目说明：[../README_ZH.md](../README_ZH.md)

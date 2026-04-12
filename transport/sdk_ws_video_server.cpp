@@ -8,11 +8,10 @@
 
 #include <asio/ip/address.hpp>
 
+#include <map>
 #include <mutex>
 #include <set>
-#include <string>
 #include <thread>
-#include <utility>
 
 #include "sdk_json_utils.h"
 #include "sdk_logger.h"
@@ -50,9 +49,14 @@ std::string QueryValue(const std::string& query, const std::string& key) {
 
 class SdkWsVideoServer::Impl {
 public:
+    struct PendingConnection {
+        std::string stream_id;
+    };
+
     WsServer server;
     std::thread io_thread;
     std::set<ConnectionHdl, std::owner_less<ConnectionHdl>> connections;
+    std::map<ConnectionHdl, PendingConnection, std::owner_less<ConnectionHdl>> pending;
     std::mutex connections_mu;
     std::atomic<uint64_t> active_connections{0};
     std::atomic<uint64_t> auth_failed{0};
@@ -60,23 +64,23 @@ public:
     std::atomic<uint64_t> binary_bytes{0};
 };
 
-SdkWsVideoServer::SdkWsVideoServer(const std::string& host,
-                                   int port,
-                                   const std::string& auth_token)
+SdkWsVideoServer::SdkWsVideoServer(const std::string& host, int port)
     : host_(host),
       port_(port),
-      auth_token_(auth_token),
       running_(false) {}
 
 SdkWsVideoServer::~SdkWsVideoServer() {
     Stop();
 }
 
+void SdkWsVideoServer::SetConnectionAuthHandler(ConnectionAuthHandler handler) {
+    connection_auth_handler_ = handler;
+}
+
 bool SdkWsVideoServer::Start() {
     if (running_.load()) {
         return true;
     }
-
     impl_.reset(new Impl());
     WsServer& server = impl_->server;
     server.clear_access_channels(websocketpp::log::alevel::all);
@@ -85,80 +89,65 @@ bool SdkWsVideoServer::Start() {
     server.set_reuse_addr(true);
 
     server.set_validate_handler([this](ConnectionHdl hdl) {
+        if (!connection_auth_handler_) {
+            return false;
+        }
         auto con = impl_->server.get_con_from_hdl(hdl);
         const std::string query = con->get_uri()->get_query();
-        const std::string token = QueryValue(query, "token");
-        if (auth_token_.empty() || token == auth_token_) {
-            return true;
+        const std::string session_token = QueryValue(query, "session_token");
+        const std::string stream_id = QueryValue(query, "stream_id");
+        const ConnectionAuthResult result = connection_auth_handler_(session_token, stream_id);
+        if (!result.authorized) {
+            impl_->auth_failed.fetch_add(1);
+            con->set_status(websocketpp::http::status_code::unauthorized);
+            con->set_body(DumpJson(BuildErrorBody(result.code, result.message)));
+            return false;
         }
-        impl_->auth_failed.fetch_add(1);
-        con->set_status(websocketpp::http::status_code::unauthorized);
-        return false;
+        std::lock_guard<std::mutex> lock(impl_->connections_mu);
+        Impl::PendingConnection pending;
+        pending.stream_id = result.stream_id;
+        impl_->pending[hdl] = pending;
+        return true;
     });
 
     server.set_open_handler([this](ConnectionHdl hdl) {
-        std::lock_guard<std::mutex> lock(impl_->connections_mu);
-        impl_->connections.insert(hdl);
-        impl_->active_connections.store(static_cast<uint64_t>(impl_->connections.size()));
+        std::string stream_id;
+        {
+            std::lock_guard<std::mutex> lock(impl_->connections_mu);
+            impl_->connections.insert(hdl);
+            const std::map<ConnectionHdl, Impl::PendingConnection, std::owner_less<ConnectionHdl>>::iterator it =
+                impl_->pending.find(hdl);
+            if (it != impl_->pending.end()) {
+                stream_id = it->second.stream_id;
+                impl_->pending.erase(it);
+            }
+            impl_->active_connections.store(static_cast<uint64_t>(impl_->connections.size()));
+        }
+        ErrorCode ec;
+        impl_->server.send(hdl,
+                           DumpJson(BuildWsEvent("video.ready", Json{{"stream_id", stream_id}})),
+                           websocketpp::frame::opcode::text,
+                           ec);
     });
 
     server.set_close_handler([this](ConnectionHdl hdl) {
         std::lock_guard<std::mutex> lock(impl_->connections_mu);
         impl_->connections.erase(hdl);
+        impl_->pending.erase(hdl);
         impl_->active_connections.store(static_cast<uint64_t>(impl_->connections.size()));
     });
 
     server.set_message_handler([this](ConnectionHdl hdl, MessagePtr msg) {
         if (msg->get_opcode() == websocketpp::frame::opcode::binary) {
-            const std::string payload = msg->get_payload();
             impl_->binary_frames.fetch_add(1);
-            impl_->binary_bytes.fetch_add(static_cast<uint64_t>(payload.size()));
-
-            const uint64_t frame_no = impl_->binary_frames.load();
-            if (frame_no % 30 == 0) {
-                Json event = {
-                    {"event", "videoStats"},
-                    {"frames", frame_no},
-                    {"bytes", impl_->binary_bytes.load()},
-                };
-                ErrorCode ec;
-                impl_->server.send(hdl, DumpJson(event), websocketpp::frame::opcode::text, ec);
-            }
+            impl_->binary_bytes.fetch_add(static_cast<uint64_t>(msg->get_payload().size()));
             return;
-        }
-
-        const std::string payload = msg->get_payload();
-        std::string response;
-        Json request;
-        if (!TryParseJson(payload, &request) || !request.is_object()) {
-            response = DumpJson(Json{
-                {"event", "error"},
-                {"message", "invalid json"},
-            });
-            ErrorCode ec;
-            impl_->server.send(hdl, response, websocketpp::frame::opcode::text, ec);
-            return;
-        }
-
-        std::string type;
-        const auto it = request.find("type");
-        if (it != request.end() && it->is_string()) {
-            type = it->get<std::string>();
-        }
-
-        if (type == "start" || type == "stop" || type == "setFormat") {
-            response = DumpJson(Json{
-                {"event", "controlAck"},
-                {"type", type},
-            });
-        } else {
-            response = DumpJson(Json{
-                {"event", "error"},
-                {"message", "unknown control type"},
-            });
         }
         ErrorCode ec;
-        impl_->server.send(hdl, response, websocketpp::frame::opcode::text, ec);
+        impl_->server.send(hdl,
+                           DumpJson(BuildWsEvent("error", Json{{"message", "video channel is output only"}}, SdkStatusCode::InvalidRequest, "invalid message")),
+                           websocketpp::frame::opcode::text,
+                           ec);
     });
 
     ErrorCode ec;
@@ -168,7 +157,6 @@ bool SdkWsVideoServer::Start() {
         impl_.reset();
         return false;
     }
-
     asio::ip::tcp::endpoint endpoint(addr, static_cast<uint16_t>(port_));
     server.listen(endpoint, ec);
     if (ec) {
@@ -182,13 +170,11 @@ bool SdkWsVideoServer::Start() {
         impl_.reset();
         return false;
     }
-
     running_.store(true);
     impl_->io_thread = std::thread([this]() {
         impl_->server.run();
         running_.store(false);
     });
-
     SDK_OPEN_LOG_INFO("[sdk_ws_video_server] listening on ws://{}:{}", host_, port_);
     return true;
 }
@@ -197,20 +183,21 @@ void SdkWsVideoServer::Stop() {
     if (!impl_) {
         return;
     }
-
     running_.store(false);
     ErrorCode ec;
     impl_->server.stop_listening(ec);
     {
         std::lock_guard<std::mutex> lock(impl_->connections_mu);
-        for (const ConnectionHdl& hdl : impl_->connections) {
-            impl_->server.close(hdl, websocketpp::close::status::going_away, "server stopping", ec);
+        for (std::set<ConnectionHdl, std::owner_less<ConnectionHdl>>::const_iterator it = impl_->connections.begin();
+             it != impl_->connections.end();
+             ++it) {
+            impl_->server.close(*it, websocketpp::close::status::going_away, "server stopping", ec);
         }
         impl_->connections.clear();
+        impl_->pending.clear();
         impl_->active_connections.store(0);
     }
     impl_->server.stop();
-
     if (impl_->io_thread.joinable()) {
         impl_->io_thread.join();
     }

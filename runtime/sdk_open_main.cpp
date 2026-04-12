@@ -8,11 +8,7 @@
 #include <limits.h>
 #include <cstdlib>
 
-#ifdef SDK_USE_PRIVATE_PROVIDER
-#include "private_provider_factory.h"
-#else
 #include "mock_provider_factory.h"
-#endif
 #include "sdk_app.h"
 #include "sdk_config.h"
 #include "sdk_logger.h"
@@ -70,13 +66,8 @@ int main(int argc, char* argv[]) {
     ApplyEnvPortOverride("SDK_VIDEO_WS_PORT", config.video_ws_port);
     ApplyEnvStringOverride("SDK_AUTH_TOKEN", config.auth_token);
 
-#ifdef SDK_USE_PRIVATE_PROVIDER
-    editor::sdk::ProviderBundle providers = editor::sdk::private_impl::CreateProviderBundle();
-    SDK_OPEN_LOG_INFO("[sdk_open_app] provider mode: private");
-#else
     editor::sdk::ProviderBundle providers = editor::sdk::mock::CreateProviderBundle();
     SDK_OPEN_LOG_INFO("[sdk_open_app] provider mode: mock");
-#endif
     editor::sdk::SdkApp app(config, std::move(providers));
     if (!app.Start()) {
         SDK_OPEN_LOG_ERROR("[sdk_open_app] failed to start");
