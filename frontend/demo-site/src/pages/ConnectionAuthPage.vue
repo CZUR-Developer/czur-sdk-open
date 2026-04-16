@@ -109,7 +109,7 @@ const authFormItems = computed(() => [
     monospace: true,
   },
   { label: t('labels.sessionKey'), value: authSessionState.sessionToken ? maskSecret(authSessionState.sessionToken) : t('common.notSet'), monospace: true },
-  { label: t('labels.providerMode'), value: 'mock-auth-provider / runtime ws' },
+  { label: t('labels.providerMode'), value: 'runtime auth provider / command ws' },
   { label: t('labels.handshake'), value: 'anonymous ws + auth.create_session' },
   { label: t('common.status'), value: t(executionStateLabelKey(authSessionState.commandState)) },
 ]);

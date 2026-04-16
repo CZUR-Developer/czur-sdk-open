@@ -248,6 +248,21 @@ export function disconnectCommandChannel(): void {
   state.commandState = state.token ? 'idle' : 'blocked';
 }
 
+export async function sendBoundCommand(
+  method: string,
+  options: { params?: Record<string, unknown> } = {},
+): Promise<CommandResponse<Record<string, unknown>>> {
+  if (!client || state.commandState !== 'success') {
+    if (state.token) {
+      await initializeAuthSession();
+    }
+  }
+  if (!client || state.commandState !== 'success') {
+    throw new Error('command channel not connected');
+  }
+  return sendTrackedCommand(client, method, options);
+}
+
 function clearRuntimeState(): void {
   clearSession();
   state.commandState = 'idle';

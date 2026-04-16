@@ -80,8 +80,8 @@ const draftValue = ref(props.apiKey);
 
 const description = computed(() =>
   locale.value === 'zh-CN'
-    ? '该值仅保存在当前浏览器本地，用于演示站的 mock 鉴权上下文展示。'
-    : 'This value is only stored locally in the browser and used for mock auth context display.',
+    ? '该值仅保存在当前浏览器本地，用于演示站建立运行时授权会话。'
+    : 'This value is only stored locally in the browser and used to establish the runtime auth session.',
 );
 
 watch(
