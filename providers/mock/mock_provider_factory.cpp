@@ -55,7 +55,9 @@ public:
         result.auth_context.account_type = SdkAccountType::SvipPlus;
         result.auth_context.account_type_code = AccountTypeCode(SdkAccountType::SvipPlus);
         result.auth_context.auth_scene = "plugin";
-        result.auth_context.license_mode = "offline_token";
+        result.auth_context.license_mode = "offline_api_key";
+        result.auth_context.entitlement_state = "offline_unlocked";
+        result.auth_context.machine_code = "mock-machine-code";
         result.auth_context.device_scope.clear();
         SdkDeviceGrant first_device;
         first_device.vid = 4660;
@@ -73,6 +75,7 @@ public:
             "auth.create_session",
             "auth.get_context",
             "auth.refresh_session",
+            "auth.activate_offline",
             "auth.destroy_session",
             "device.list",
             "device.get",
@@ -148,6 +151,42 @@ public:
         result.message = session.message;
         result.via_session = IsOkStatusCode(session.code);
         result.auth_context = session.auth_context;
+        return result;
+    }
+
+    OfflineActivateResult ActivateOffline(const OfflineActivateRequest& request) override {
+        OfflineActivateResult result;
+        if (request.auth_code.empty()) {
+            result.code = ToCode(SdkStatusCode::InvalidParams);
+            result.message = "auth_code required";
+            return result;
+        }
+        AuthValidateRequest validate_request;
+        validate_request.token = request.token.empty() ? "mock-token" : request.token;
+        validate_request.now_ts = request.now_ts;
+        const AuthRefreshResult session = CreateSession(validate_request);
+        result.code = session.code;
+        result.message = session.message;
+        result.activated = IsOkStatusCode(session.code);
+        result.session_token = session.session_token;
+        result.expires_in = session.expires_in;
+        result.auth_context = session.auth_context;
+        return result;
+    }
+
+    QuotaConsumeResult ConsumeQuota(const QuotaConsumeRequest& request) override {
+        QuotaConsumeResult result;
+        AuthValidateRequest validate_request;
+        validate_request.token = request.token.empty() ? "mock-token" : request.token;
+        validate_request.now_ts = request.now_ts;
+        const AuthValidateResult validate = ValidateToken(validate_request);
+        result.code = validate.code;
+        result.message = validate.message;
+        result.consumed = IsOkStatusCode(validate.code);
+        result.bucket = request.capability;
+        result.limit = 0;
+        result.remaining = 0;
+        result.auth_context = validate.auth_context;
         return result;
     }
 };

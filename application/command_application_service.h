@@ -56,6 +56,7 @@ private:
     Json HandleAuthCreateSession(const std::string& connection_id, const Request& request);
     Json HandleAuthGetContext(const std::string& connection_id, const Request& request);
     Json HandleAuthRefreshSession(const std::string& connection_id, const Request& request);
+    Json HandleAuthActivateOffline(const std::string& connection_id, const Request& request);
     Json HandleAuthDestroySession(const std::string& connection_id, const Request& request);
     Json HandleDeviceList(const std::string& connection_id, const Request& request);
     Json HandleDeviceGet(const std::string& connection_id, const Request& request);
@@ -70,6 +71,10 @@ private:
 
     AuthorizationService::SessionResult RequireCapability(const std::string& connection_id,
                                                           const std::string& capability) const;
+    AuthorizationService::SessionResult ConsumeQuota(const std::string& connection_id,
+                                                     const std::string& capability,
+                                                     const std::string& request_id,
+                                                     int units = 1);
     Json BuildSessionJson(const AuthorizationService::SessionResult& session_result) const;
     Json BuildAuthContextJson(const AuthContext& auth_context) const;
     const MethodDescriptor* FindMethod(const std::string& method) const;

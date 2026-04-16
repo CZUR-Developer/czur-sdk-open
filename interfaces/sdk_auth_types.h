@@ -25,15 +25,26 @@ struct SdkDeviceGrant {
     int pid = 0;
 };
 
+struct AuthQuotaBucket {
+    std::string bucket;
+    std::vector<std::string> methods;
+    int limit = 0;
+    int remaining = 0;
+    std::string enforcement;
+};
+
 struct AuthContext {
     bool is_valid = false;
     SdkAccountType account_type = SdkAccountType::Unknown;
     int account_type_code = -1;
     std::string auth_scene;
     std::string license_mode;
+    std::string entitlement_state;
+    std::string machine_code;
     std::vector<SdkDeviceGrant> device_scope;
     std::int64_t expires_at = 0;
     std::vector<std::string> capabilities;
+    std::vector<AuthQuotaBucket> quota_buckets;
 };
 
 struct AuthValidateRequest {
@@ -80,6 +91,41 @@ struct AuthContextResult {
     int code = ToCode(SdkStatusCode::Ok);
     std::string message = "ok";
     bool via_session = false;
+    AuthContext auth_context;
+};
+
+struct OfflineActivateRequest {
+    std::string token;
+    std::string session_token;
+    std::string auth_code;
+    std::int64_t now_ts = 0;
+};
+
+struct OfflineActivateResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool activated = false;
+    std::string session_token;
+    int expires_in = 0;
+    AuthContext auth_context;
+};
+
+struct QuotaConsumeRequest {
+    std::string token;
+    std::string session_token;
+    std::string capability;
+    std::string request_id;
+    int units = 1;
+    std::int64_t now_ts = 0;
+};
+
+struct QuotaConsumeResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool consumed = false;
+    std::string bucket;
+    int limit = 0;
+    int remaining = 0;
     AuthContext auth_context;
 };
 

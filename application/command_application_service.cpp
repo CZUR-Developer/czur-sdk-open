@@ -75,6 +75,7 @@ CommandApplicationService::CommandApplicationService(const SdkConfig& config, co
     methods_.push_back(MakeMethod("auth.create_session", false, "Create a bound session from token"));
     methods_.push_back(MakeMethod("auth.get_context", true, "Get the current bound auth context"));
     methods_.push_back(MakeMethod("auth.refresh_session", true, "Refresh the current bound session"));
+    methods_.push_back(MakeMethod("auth.activate_offline", true, "Unlock one offline api key on this machine"));
     methods_.push_back(MakeMethod("auth.destroy_session", true, "Destroy the current bound session"));
     methods_.push_back(MakeMethod("device.list", true, "List devices visible to the current session"));
     methods_.push_back(MakeMethod("device.get", true, "Get one device visible to the current session"));
@@ -132,6 +133,9 @@ Json CommandApplicationService::HandleRequest(const std::string& connection_id, 
     }
     if (request.method == "auth.refresh_session") {
         return HandleAuthRefreshSession(connection_id, request);
+    }
+    if (request.method == "auth.activate_offline") {
+        return HandleAuthActivateOffline(connection_id, request);
     }
     if (request.method == "auth.destroy_session") {
         return HandleAuthDestroySession(connection_id, request);
@@ -251,6 +255,20 @@ Json CommandApplicationService::HandleAuthRefreshSession(const std::string& conn
     return BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", BuildSessionJson(session_result));
 }
 
+Json CommandApplicationService::HandleAuthActivateOffline(const std::string& connection_id, const Request& request) {
+    const std::string auth_code = GetOptionalStringField(request.params, "auth_code");
+    if (auth_code.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "auth_code required");
+    }
+
+    const AuthorizationService::SessionResult session_result =
+        authorization_service_.ActivateOffline(connection_id, auth_code);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    return BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", BuildSessionJson(session_result));
+}
+
 Json CommandApplicationService::HandleAuthDestroySession(const std::string& connection_id, const Request& request) {
     const AuthorizationService::SessionResult session_result = authorization_service_.DestroySession(connection_id);
     return BuildWsResponse(request.request_id, session_result.code, session_result.message, Json{{"destroyed", true}});
@@ -337,6 +355,10 @@ Json CommandApplicationService::HandleCaptureTake(const std::string& connection_
     const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
     if (!IsOkStatusCode(session_result.code)) {
         return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    const AuthorizationService::SessionResult quota_result = ConsumeQuota(connection_id, request.method, request.request_id);
+    if (!IsOkStatusCode(quota_result.code)) {
+        return BuildWsResponse(request.request_id, quota_result.code, quota_result.message);
     }
 
     SdkCaptureRequest capture_request;
@@ -477,6 +499,10 @@ Json CommandApplicationService::HandleImageProcess(const std::string& connection
     if (!IsOkStatusCode(session_result.code)) {
         return BuildWsResponse(request.request_id, session_result.code, session_result.message);
     }
+    const AuthorizationService::SessionResult quota_result = ConsumeQuota(connection_id, request.method, request.request_id);
+    if (!IsOkStatusCode(quota_result.code)) {
+        return BuildWsResponse(request.request_id, quota_result.code, quota_result.message);
+    }
 
     SdkImageProcessRequest process_request;
     process_request.input_path = GetOptionalStringField(request.params, "input_path");
@@ -529,6 +555,10 @@ Json CommandApplicationService::HandleFileConvert(const std::string& connection_
     if (!IsOkStatusCode(session_result.code)) {
         return BuildWsResponse(request.request_id, session_result.code, session_result.message);
     }
+    const AuthorizationService::SessionResult quota_result = ConsumeQuota(connection_id, request.method, request.request_id);
+    if (!IsOkStatusCode(quota_result.code)) {
+        return BuildWsResponse(request.request_id, quota_result.code, quota_result.message);
+    }
 
     SdkFileConvertRequest convert_request;
     convert_request.input_path = GetOptionalStringField(request.params, "input_path");
@@ -553,6 +583,13 @@ Json CommandApplicationService::HandleFileConvert(const std::string& connection_
 AuthorizationService::SessionResult CommandApplicationService::RequireCapability(const std::string& connection_id,
                                                                                  const std::string& capability) const {
     return authorization_service_.RequireCapability(connection_id, capability);
+}
+
+AuthorizationService::SessionResult CommandApplicationService::ConsumeQuota(const std::string& connection_id,
+                                                                            const std::string& capability,
+                                                                            const std::string& request_id,
+                                                                            int units) {
+    return authorization_service_.ConsumeQuota(connection_id, capability, request_id, units);
 }
 
 Json CommandApplicationService::BuildSessionJson(const AuthorizationService::SessionResult& session_result) const {
@@ -581,15 +618,36 @@ Json CommandApplicationService::BuildAuthContextJson(const AuthContext& auth_con
         capabilities.push_back(*it);
     }
 
+    Json quota_buckets = Json::array();
+    for (std::vector<AuthQuotaBucket>::const_iterator it = auth_context.quota_buckets.begin();
+         it != auth_context.quota_buckets.end();
+         ++it) {
+        Json methods = Json::array();
+        for (std::vector<std::string>::const_iterator method_it = it->methods.begin(); method_it != it->methods.end();
+             ++method_it) {
+            methods.push_back(*method_it);
+        }
+        quota_buckets.push_back(Json{
+            {"bucket", it->bucket},
+            {"methods", methods},
+            {"limit", it->limit},
+            {"remaining", it->remaining},
+            {"enforcement", it->enforcement},
+        });
+    }
+
     return Json{
         {"is_valid", auth_context.is_valid},
         {"account_type", ToAccountTypeString(auth_context.account_type)},
         {"account_type_code", auth_context.account_type_code},
         {"auth_scene", auth_context.auth_scene},
         {"license_mode", auth_context.license_mode},
+        {"entitlement_state", auth_context.entitlement_state},
+        {"machine_code", auth_context.machine_code},
         {"device_scope", device_scope},
         {"expires_at", auth_context.expires_at},
         {"capabilities", capabilities},
+        {"quota_buckets", quota_buckets},
     };
 }
 

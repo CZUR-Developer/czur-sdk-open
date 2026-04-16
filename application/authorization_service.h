@@ -19,6 +19,7 @@ public:
     struct SessionResult {
         int code = ToCode(SdkStatusCode::Ok);
         std::string message = "ok";
+        std::string token;
         std::string session_token;
         int expires_in = 0;
         AuthContext auth_context;
@@ -31,6 +32,11 @@ public:
     SessionResult GetContext(const std::string& connection_id) const;
     SessionResult RequireSession(const std::string& connection_id) const;
     SessionResult RequireCapability(const std::string& connection_id, const std::string& capability) const;
+    SessionResult ActivateOffline(const std::string& connection_id, const std::string& auth_code);
+    SessionResult ConsumeQuota(const std::string& connection_id,
+                               const std::string& capability,
+                               const std::string& request_id,
+                               int units = 1);
     SessionResult DestroySession(const std::string& connection_id);
     void ClearConnection(const std::string& connection_id);
     std::size_t ActiveSessionCount() const;

@@ -20,6 +20,8 @@ public:
     virtual AuthRefreshResult RefreshSession(const AuthRefreshRequest& request) = 0;
     virtual SessionValidateResult ValidateSession(const SessionValidateRequest& request) = 0;
     virtual AuthContextResult GetAuthContext(const AuthLookupRequest& request) = 0;
+    virtual OfflineActivateResult ActivateOffline(const OfflineActivateRequest& request) = 0;
+    virtual QuotaConsumeResult ConsumeQuota(const QuotaConsumeRequest& request) = 0;
 };
 
 } // namespace sdk

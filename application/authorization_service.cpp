@@ -31,6 +31,7 @@ AuthorizationService::SessionResult AuthorizationService::CreateSession(const st
     const AuthRefreshResult provider_result = providers_.auth_provider->CreateSession(request);
     result.code = provider_result.code;
     result.message = provider_result.message;
+    result.token = token;
     result.session_token = provider_result.session_token;
     result.expires_in = provider_result.expires_in;
     result.auth_context = provider_result.auth_context;
@@ -48,13 +49,22 @@ AuthorizationService::SessionResult AuthorizationService::RefreshSession(const s
         return bound_session;
     }
 
-    AuthRefreshRequest request;
-    request.session_token = bound_session.session_token;
-    request.now_ts = static_cast<std::int64_t>(std::time(NULL));
-    const AuthRefreshResult provider_result = providers_.auth_provider->RefreshSession(request);
     SessionResult result;
+    AuthRefreshResult provider_result;
+    if (bound_session.auth_context.license_mode == "online_api_key" && !bound_session.token.empty()) {
+        AuthValidateRequest validate_request;
+        validate_request.token = bound_session.token;
+        validate_request.now_ts = static_cast<std::int64_t>(std::time(NULL));
+        provider_result = providers_.auth_provider->CreateSession(validate_request);
+    } else {
+        AuthRefreshRequest request;
+        request.session_token = bound_session.session_token;
+        request.now_ts = static_cast<std::int64_t>(std::time(NULL));
+        provider_result = providers_.auth_provider->RefreshSession(request);
+    }
     result.code = provider_result.code;
     result.message = provider_result.message;
+    result.token = bound_session.token;
     result.session_token = provider_result.session_token;
     result.expires_in = provider_result.expires_in;
     result.auth_context = provider_result.auth_context;
@@ -101,6 +111,79 @@ AuthorizationService::SessionResult AuthorizationService::DestroySession(const s
     {
         std::lock_guard<std::mutex> lock(sessions_mu_);
         sessions_.erase(connection_id);
+    }
+    return result;
+}
+
+AuthorizationService::SessionResult AuthorizationService::ActivateOffline(const std::string& connection_id,
+                                                                          const std::string& auth_code) {
+    SessionResult bound_session = RequireSession(connection_id);
+    if (!IsOkStatusCode(bound_session.code)) {
+        return bound_session;
+    }
+    if (!providers_.auth_provider) {
+        bound_session.code = ToCode(SdkStatusCode::ProviderNotReady);
+        bound_session.message = "provider not ready";
+        return bound_session;
+    }
+
+    OfflineActivateRequest request;
+    request.token = bound_session.token;
+    request.session_token = bound_session.session_token;
+    request.auth_code = auth_code;
+    request.now_ts = static_cast<std::int64_t>(std::time(NULL));
+    const OfflineActivateResult provider_result = providers_.auth_provider->ActivateOffline(request);
+
+    SessionResult result;
+    result.code = provider_result.code;
+    result.message = provider_result.message;
+    result.token = bound_session.token;
+    result.session_token = provider_result.session_token;
+    result.expires_in = provider_result.expires_in;
+    result.auth_context = provider_result.auth_context;
+    if (IsOkStatusCode(result.code)) {
+        std::lock_guard<std::mutex> lock(sessions_mu_);
+        sessions_[connection_id] = result;
+    }
+    return result;
+}
+
+AuthorizationService::SessionResult AuthorizationService::ConsumeQuota(const std::string& connection_id,
+                                                                       const std::string& capability,
+                                                                       const std::string& request_id,
+                                                                       int units) {
+    SessionResult bound_session = RequireSession(connection_id);
+    if (!IsOkStatusCode(bound_session.code)) {
+        return bound_session;
+    }
+    if (!providers_.auth_provider) {
+        bound_session.code = ToCode(SdkStatusCode::ProviderNotReady);
+        bound_session.message = "provider not ready";
+        return bound_session;
+    }
+
+    QuotaConsumeRequest request;
+    request.token = bound_session.token;
+    request.session_token = bound_session.session_token;
+    request.capability = capability;
+    request.request_id = request_id;
+    request.units = units;
+    request.now_ts = static_cast<std::int64_t>(std::time(NULL));
+    const QuotaConsumeResult provider_result = providers_.auth_provider->ConsumeQuota(request);
+
+    SessionResult result = bound_session;
+    result.code = provider_result.code;
+    result.message = provider_result.message;
+    result.auth_context = provider_result.auth_context;
+    if (IsOkStatusCode(result.code)) {
+        std::lock_guard<std::mutex> lock(sessions_mu_);
+        std::map<std::string, SessionResult>::iterator it = sessions_.find(connection_id);
+        if (it != sessions_.end()) {
+            it->second.auth_context = provider_result.auth_context;
+            result = it->second;
+            result.code = provider_result.code;
+            result.message = provider_result.message;
+        }
     }
     return result;
 }
