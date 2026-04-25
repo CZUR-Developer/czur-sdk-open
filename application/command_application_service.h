@@ -24,6 +24,8 @@ namespace sdk {
 class CommandApplicationService {
 public:
     using StatusSupplier = std::function<Json()>;
+    using VideoFrameSink = std::function<void(const SdkVideoFrame&)>;
+    using VideoStreamClosedSink = std::function<void(const std::string&)>;
 
     struct MethodDescriptor {
         std::string method;
@@ -34,6 +36,8 @@ public:
     explicit CommandApplicationService(const SdkConfig& config, const ProviderBundle& providers);
 
     void SetStatusSupplier(StatusSupplier supplier);
+    void SetVideoFrameSink(VideoFrameSink sink);
+    void SetVideoStreamClosedSink(VideoStreamClosedSink sink);
     Json HandleRequest(const std::string& connection_id, const Json& request_json);
     void OnConnectionClosed(const std::string& connection_id);
     Json BuildCapabilitiesJson() const;
@@ -77,6 +81,7 @@ private:
                                                      int units = 1);
     Json BuildSessionJson(const AuthorizationService::SessionResult& session_result) const;
     Json BuildAuthContextJson(const AuthContext& auth_context) const;
+    Json BuildDeviceJson(const SdkDeviceDescriptor& device) const;
     const MethodDescriptor* FindMethod(const std::string& method) const;
 
     SdkConfig config_;
@@ -88,6 +93,8 @@ private:
     OcrFacade ocr_facade_;
     OfdFacade ofd_facade_;
     StatusSupplier status_supplier_;
+    VideoFrameSink video_frame_sink_;
+    VideoStreamClosedSink video_stream_closed_sink_;
     std::vector<MethodDescriptor> methods_;
 };
 

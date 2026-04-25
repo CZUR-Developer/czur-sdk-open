@@ -16,9 +16,10 @@ public:
     virtual ~ISdkDeviceProvider() = default;
     virtual std::string ProviderName() const = 0;
     virtual std::vector<SdkDeviceDescriptor> ListDevices() const = 0;
+    virtual SdkDeviceOpenResult GetDevice(const SdkDeviceOpenRequest& request) = 0;
     virtual SdkDeviceOpenResult OpenDevice(const SdkDeviceOpenRequest& request) = 0;
     virtual SdkCaptureResult CaptureStill(const SdkCaptureRequest& request) = 0;
-    virtual SdkVideoStartResult StartVideo(const SdkVideoStartRequest& request) = 0;
+    virtual SdkVideoStartResult StartVideo(const SdkVideoStartRequest& request, SdkVideoFrameCallback callback) = 0;
     virtual SdkVideoStopResult StopVideo(const SdkVideoStopRequest& request) = 0;
     virtual SdkVideoFormatResult SetVideoFormat(const SdkVideoFormatRequest& request) = 0;
 };

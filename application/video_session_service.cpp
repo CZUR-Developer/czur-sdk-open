@@ -47,6 +47,20 @@ VideoSessionService::StreamResult VideoSessionService::StopStream(const std::str
     return result;
 }
 
+VideoSessionService::StreamResult VideoSessionService::StopStreamById(const std::string& stream_id) {
+    StreamResult result;
+    std::lock_guard<std::mutex> lock(streams_mu_);
+    const std::map<std::string, StreamBinding>::iterator it = streams_.find(stream_id);
+    if (it == streams_.end()) {
+        result.code = ToCode(SdkStatusCode::StreamNotFound);
+        result.message = "stream not found";
+        return result;
+    }
+    result.binding = it->second;
+    streams_.erase(it);
+    return result;
+}
+
 VideoSessionService::StreamResult VideoSessionService::UpdateStreamFormat(const std::string& connection_id,
                                                                           const std::string& device_id,
                                                                           const std::string& pixel_format,
@@ -99,15 +113,18 @@ VideoSessionService::ValidationResult VideoSessionService::Validate(const std::s
     return result;
 }
 
-void VideoSessionService::ClearConnection(const std::string& connection_id) {
+std::vector<VideoSessionService::StreamBinding> VideoSessionService::ClearConnection(const std::string& connection_id) {
+    std::vector<StreamBinding> removed;
     std::lock_guard<std::mutex> lock(streams_mu_);
     for (std::map<std::string, StreamBinding>::iterator it = streams_.begin(); it != streams_.end();) {
         if (it->second.connection_id == connection_id) {
+            removed.push_back(it->second);
             it = streams_.erase(it);
         } else {
             ++it;
         }
     }
+    return removed;
 }
 
 std::size_t VideoSessionService::ActiveStreamCount() const {

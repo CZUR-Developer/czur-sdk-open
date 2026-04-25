@@ -93,6 +93,14 @@ void CommandApplicationService::SetStatusSupplier(StatusSupplier supplier) {
     status_supplier_ = std::move(supplier);
 }
 
+void CommandApplicationService::SetVideoFrameSink(VideoFrameSink sink) {
+    video_frame_sink_ = std::move(sink);
+}
+
+void CommandApplicationService::SetVideoStreamClosedSink(VideoStreamClosedSink sink) {
+    video_stream_closed_sink_ = std::move(sink);
+}
+
 Json CommandApplicationService::HandleRequest(const std::string& connection_id, const Json& request_json) {
     if (!request_json.is_object()) {
         return BuildWsResponse("", SdkStatusCode::InvalidRequest, "invalid request");
@@ -176,7 +184,19 @@ Json CommandApplicationService::HandleRequest(const std::string& connection_id, 
 
 void CommandApplicationService::OnConnectionClosed(const std::string& connection_id) {
     authorization_service_.ClearConnection(connection_id);
-    video_session_service_.ClearConnection(connection_id);
+    const std::vector<VideoSessionService::StreamBinding> removed = video_session_service_.ClearConnection(connection_id);
+    for (std::vector<VideoSessionService::StreamBinding>::const_iterator it = removed.begin();
+         it != removed.end();
+         ++it) {
+        if (providers_.device_provider) {
+            SdkVideoStopRequest stop_request;
+            stop_request.device_id = it->device_id;
+            providers_.device_provider->StopVideo(stop_request);
+        }
+        if (video_stream_closed_sink_) {
+            video_stream_closed_sink_(it->stream_id);
+        }
+    }
 }
 
 Json CommandApplicationService::BuildCapabilitiesJson() const {
@@ -287,16 +307,7 @@ Json CommandApplicationService::HandleDeviceList(const std::string& connection_i
 
     Json devices = Json::array();
     for (std::vector<SdkDeviceDescriptor>::const_iterator it = result.devices.begin(); it != result.devices.end(); ++it) {
-        devices.push_back(Json{
-            {"device_id", it->device_id},
-            {"model", it->model},
-            {"display_name", it->display_name},
-            {"vid", it->vid},
-            {"pid", it->pid},
-            {"status", it->status},
-            {"authorized", it->authorized},
-            {"supports_video", it->supports_video},
-        });
+        devices.push_back(BuildDeviceJson(*it));
     }
 
     return BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", Json{{"devices", devices}, {"count", devices.size()}});
@@ -316,18 +327,9 @@ Json CommandApplicationService::HandleDeviceGet(const std::string& connection_id
     if (!IsOkStatusCode(result.code)) {
         return BuildWsResponse(request.request_id, result.code, result.message);
     }
-    return BuildWsResponse(request.request_id,
-                           SdkStatusCode::Ok,
-                           "ok",
-                           Json{{"device_id", result.device.device_id},
-                                {"model", result.device.model},
-                                {"display_name", result.device.display_name},
-                                {"vid", result.device.vid},
-                                {"pid", result.device.pid},
-                                {"status", result.device.status},
-                                {"authorized", result.device.authorized},
-                                {"supports_video", result.device.supports_video},
-                                {"provider", providers_.device_provider ? providers_.device_provider->ProviderName() : ""}});
+    Json data = BuildDeviceJson(result.device);
+    data["provider"] = providers_.device_provider ? providers_.device_provider->ProviderName() : "";
+    return BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", data);
 }
 
 Json CommandApplicationService::HandleDeviceOpen(const std::string& connection_id, const Request& request) {
@@ -335,20 +337,27 @@ Json CommandApplicationService::HandleDeviceOpen(const std::string& connection_i
     if (!IsOkStatusCode(session_result.code)) {
         return BuildWsResponse(request.request_id, session_result.code, session_result.message);
     }
-    const std::string device_id = GetOptionalStringField(request.params, "device_id");
-    if (device_id.empty()) {
+    SdkDeviceOpenRequest open_request;
+    open_request.device_id = GetOptionalStringField(request.params, "device_id");
+    open_request.width = GetOptionalIntField(request.params, "width", 0);
+    open_request.height = GetOptionalIntField(request.params, "height", 0);
+    open_request.fps = GetOptionalIntField(request.params, "fps", 0);
+    open_request.pixel_format = GetOptionalStringField(request.params, "pixel_format");
+    if (open_request.pixel_format.empty()) {
+        open_request.pixel_format = "jpeg";
+    }
+    if (open_request.device_id.empty()) {
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "device_id required");
     }
-    const SdkDeviceOpenResult result = device_facade_.OpenDevice(session_result.auth_context, device_id);
+    const SdkDeviceOpenResult result = device_facade_.OpenDevice(session_result.auth_context, open_request);
     if (!IsOkStatusCode(result.code)) {
         return BuildWsResponse(request.request_id, result.code, result.message);
     }
-    return BuildWsResponse(request.request_id,
-                           SdkStatusCode::Ok,
-                           "ok",
-                           Json{{"device_id", result.device.device_id},
-                                {"opened", result.opened},
-                                {"provider", providers_.device_provider ? providers_.device_provider->ProviderName() : ""}});
+    Json data = BuildDeviceJson(result.device);
+    data["device_id"] = result.device.device_id.empty() ? open_request.device_id : result.device.device_id;
+    data["opened"] = result.opened;
+    data["provider"] = providers_.device_provider ? providers_.device_provider->ProviderName() : "";
+    return BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", data);
 }
 
 Json CommandApplicationService::HandleCaptureTake(const std::string& connection_id, const Request& request) {
@@ -392,33 +401,60 @@ Json CommandApplicationService::HandleVideoStart(const std::string& connection_i
 
     SdkVideoStartRequest start_request;
     start_request.device_id = GetOptionalStringField(request.params, "device_id");
+    start_request.width = GetOptionalIntField(request.params, "width", 0);
+    start_request.height = GetOptionalIntField(request.params, "height", 0);
+    start_request.fps = GetOptionalIntField(request.params, "fps", 0);
+    start_request.pixel_format = GetOptionalStringField(request.params, "pixel_format");
+    if (start_request.pixel_format.empty()) {
+        start_request.pixel_format = "jpeg";
+    }
     if (start_request.device_id.empty()) {
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "device_id required");
-    }
-
-    const SdkVideoStartResult start_result = device_facade_.StartVideo(session_result.auth_context, start_request);
-    if (!IsOkStatusCode(start_result.code)) {
-        return BuildWsResponse(request.request_id, start_result.code, start_result.message);
     }
 
     const VideoSessionService::StreamResult stream_result =
         video_session_service_.RegisterStream(connection_id,
                                               session_result.session_token,
                                               start_request.device_id,
-                                              start_result.pixel_format,
-                                              start_result.width,
-                                              start_result.height,
-                                              start_result.fps);
+                                              start_request.pixel_format,
+                                              start_request.width > 0 ? start_request.width : 1280,
+                                              start_request.height > 0 ? start_request.height : 720,
+                                              start_request.fps > 0 ? start_request.fps : 15);
+    start_request.stream_id = stream_result.binding.stream_id;
+
+    const SdkVideoStartResult start_result =
+        device_facade_.StartVideo(session_result.auth_context,
+                                  start_request,
+                                  [this](const SdkVideoFrame& frame) {
+                                      if (video_frame_sink_) {
+                                          video_frame_sink_(frame);
+                                      }
+                                  });
+    if (!IsOkStatusCode(start_result.code)) {
+        video_session_service_.StopStreamById(stream_result.binding.stream_id);
+        return BuildWsResponse(request.request_id, start_result.code, start_result.message);
+    }
+
+    const VideoSessionService::StreamResult updated_stream_result =
+        video_session_service_.UpdateStreamFormat(connection_id,
+                                                  start_request.device_id,
+                                                  start_result.pixel_format,
+                                                  start_result.width,
+                                                  start_result.height,
+                                                  start_result.fps);
+    if (!IsOkStatusCode(updated_stream_result.code)) {
+        return BuildWsResponse(request.request_id, updated_stream_result.code, updated_stream_result.message);
+    }
     return BuildWsResponse(request.request_id,
                            SdkStatusCode::Ok,
                            "ok",
                            Json{{"device_id", start_request.device_id},
-                                {"stream_id", stream_result.binding.stream_id},
-                                {"session_token", stream_result.binding.session_token},
-                                {"pixel_format", stream_result.binding.pixel_format},
-                                {"width", stream_result.binding.width},
-                                {"height", stream_result.binding.height},
-                                {"fps", stream_result.binding.fps}});
+                                {"stream_id", updated_stream_result.binding.stream_id},
+                                {"session_token", updated_stream_result.binding.session_token},
+                                {"pixel_format", updated_stream_result.binding.pixel_format},
+                                {"width", updated_stream_result.binding.width},
+                                {"height", updated_stream_result.binding.height},
+                                {"fps", updated_stream_result.binding.fps}});
 }
 
 Json CommandApplicationService::HandleVideoStop(const std::string& connection_id, const Request& request) {
@@ -440,6 +476,9 @@ Json CommandApplicationService::HandleVideoStop(const std::string& connection_id
     const VideoSessionService::StreamResult stream_result = video_session_service_.StopStream(connection_id, stop_request.device_id);
     if (!IsOkStatusCode(stream_result.code)) {
         return BuildWsResponse(request.request_id, stream_result.code, stream_result.message);
+    }
+    if (video_stream_closed_sink_) {
+        video_stream_closed_sink_(stream_result.binding.stream_id);
     }
     return BuildWsResponse(request.request_id,
                            SdkStatusCode::Ok,
@@ -648,6 +687,35 @@ Json CommandApplicationService::BuildAuthContextJson(const AuthContext& auth_con
         {"expires_at", auth_context.expires_at},
         {"capabilities", capabilities},
         {"quota_buckets", quota_buckets},
+    };
+}
+
+Json CommandApplicationService::BuildDeviceJson(const SdkDeviceDescriptor& device) const {
+    Json resolutions = Json::array();
+    for (std::vector<SdkVideoResolution>::const_iterator it = device.resolutions.begin();
+         it != device.resolutions.end();
+         ++it) {
+        resolutions.push_back(Json{
+            {"width", it->width},
+            {"height", it->height},
+            {"real_width", it->real_width},
+            {"real_height", it->real_height},
+            {"fps", it->fps},
+            {"pixel_format", it->pixel_format},
+            {"is_default", it->is_default},
+        });
+    }
+
+    return Json{
+        {"device_id", device.device_id},
+        {"model", device.model},
+        {"display_name", device.display_name},
+        {"vid", device.vid},
+        {"pid", device.pid},
+        {"status", device.status},
+        {"authorized", device.authorized},
+        {"supports_video", device.supports_video},
+        {"resolutions", resolutions},
     };
 }
 

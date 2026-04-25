@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -10,6 +12,16 @@
 
 namespace editor {
 namespace sdk {
+
+struct SdkVideoResolution {
+    int width = 0;
+    int height = 0;
+    int real_width = 0;
+    int real_height = 0;
+    int fps = 0;
+    std::string pixel_format = "jpeg";
+    bool is_default = false;
+};
 
 struct SdkDeviceDescriptor {
     std::string device_id;
@@ -20,10 +32,15 @@ struct SdkDeviceDescriptor {
     std::string status = "offline";
     bool authorized = false;
     bool supports_video = false;
+    std::vector<SdkVideoResolution> resolutions;
 };
 
 struct SdkDeviceOpenRequest {
     std::string device_id;
+    int width = 0;
+    int height = 0;
+    int fps = 0;
+    std::string pixel_format = "jpeg";
 };
 
 struct SdkDeviceOpenResult {
@@ -49,6 +66,11 @@ struct SdkCaptureResult {
 
 struct SdkVideoStartRequest {
     std::string device_id;
+    std::string stream_id;
+    int width = 0;
+    int height = 0;
+    int fps = 0;
+    std::string pixel_format = "jpeg";
 };
 
 struct SdkVideoStartResult {
@@ -60,6 +82,19 @@ struct SdkVideoStartResult {
     int height = 720;
     int fps = 15;
 };
+
+struct SdkVideoFrame {
+    std::string device_id;
+    std::string stream_id;
+    uint64_t frame_seq = 0;
+    int64_t timestamp_ms = 0;
+    int width = 0;
+    int height = 0;
+    std::string pixel_format = "jpeg";
+    std::vector<uint8_t> payload;
+};
+
+using SdkVideoFrameCallback = std::function<void(const SdkVideoFrame&)>;
 
 struct SdkVideoStopRequest {
     std::string device_id;

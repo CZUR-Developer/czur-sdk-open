@@ -64,29 +64,42 @@ DeviceGetResult DeviceFacade::LookupDevice(const AuthContext& auth_context, cons
         }
     }
 
-    result.code = ToCode(SdkStatusCode::ProviderCallFailed);
+    result.code = ToCode(SdkStatusCode::DeviceNotFound);
     result.message = "device not found";
     return result;
 }
 
 DeviceGetResult DeviceFacade::GetDevice(const AuthContext& auth_context, const std::string& device_id) const {
-    return LookupDevice(auth_context, device_id);
+    DeviceGetResult result = LookupDevice(auth_context, device_id);
+    if (!IsOkStatusCode(result.code)) {
+        return result;
+    }
+
+    SdkDeviceOpenRequest request;
+    request.device_id = device_id;
+    const SdkDeviceOpenResult provider_result = providers_.device_provider->GetDevice(request);
+    if (!IsOkStatusCode(provider_result.code)) {
+        result.code = provider_result.code;
+        result.message = provider_result.message;
+        return result;
+    }
+    result.device = provider_result.device;
+    result.device.authorized = true;
+    return result;
 }
 
-SdkDeviceOpenResult DeviceFacade::OpenDevice(const AuthContext& auth_context, const std::string& device_id) const {
+SdkDeviceOpenResult DeviceFacade::OpenDevice(const AuthContext& auth_context, const SdkDeviceOpenRequest& request) const {
     SdkDeviceOpenResult result;
-    const DeviceGetResult device_result = LookupDevice(auth_context, device_id);
+    const DeviceGetResult device_result = LookupDevice(auth_context, request.device_id);
     if (!IsOkStatusCode(device_result.code)) {
         result.code = device_result.code;
         result.message = device_result.message;
         return result;
     }
 
-    SdkDeviceOpenRequest request;
-    request.device_id = device_id;
     result = providers_.device_provider->OpenDevice(request);
     if (IsOkStatusCode(result.code)) {
-        result.device = device_result.device;
+        result.device.authorized = true;
     }
     return result;
 }
@@ -102,7 +115,9 @@ SdkCaptureResult DeviceFacade::CaptureStill(const AuthContext& auth_context, con
     return providers_.device_provider->CaptureStill(request);
 }
 
-SdkVideoStartResult DeviceFacade::StartVideo(const AuthContext& auth_context, const SdkVideoStartRequest& request) const {
+SdkVideoStartResult DeviceFacade::StartVideo(const AuthContext& auth_context,
+                                             const SdkVideoStartRequest& request,
+                                             SdkVideoFrameCallback callback) const {
     SdkVideoStartResult result;
     const DeviceGetResult device_result = LookupDevice(auth_context, request.device_id);
     if (!IsOkStatusCode(device_result.code)) {
@@ -110,7 +125,7 @@ SdkVideoStartResult DeviceFacade::StartVideo(const AuthContext& auth_context, co
         result.message = device_result.message;
         return result;
     }
-    return providers_.device_provider->StartVideo(request);
+    return providers_.device_provider->StartVideo(request, callback);
 }
 
 SdkVideoStopResult DeviceFacade::StopVideo(const AuthContext& auth_context, const SdkVideoStopRequest& request) const {

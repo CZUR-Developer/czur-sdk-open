@@ -3,7 +3,12 @@
 
 #include "mock_provider_factory.h"
 
+#include <atomic>
+#include <chrono>
+#include <map>
 #include <memory>
+#include <mutex>
+#include <thread>
 #include <utility>
 
 #include "sdk_logger.h"
@@ -193,6 +198,10 @@ public:
 
 class MockDeviceProvider : public ISdkDeviceProvider {
 public:
+    ~MockDeviceProvider() override {
+        StopAllStreams();
+    }
+
     std::string ProviderName() const override { return "mock-device-provider"; }
     std::vector<SdkDeviceDescriptor> ListDevices() const override {
         std::vector<SdkDeviceDescriptor> devices;
@@ -220,10 +229,33 @@ public:
         return devices;
     }
 
+    SdkDeviceOpenResult GetDevice(const SdkDeviceOpenRequest& request) override {
+        SdkDeviceOpenResult result;
+        const std::vector<SdkDeviceDescriptor> devices = ListDevices();
+        for (std::vector<SdkDeviceDescriptor>::const_iterator it = devices.begin(); it != devices.end(); ++it) {
+            if (it->device_id == request.device_id) {
+                result.opened = IsOpened(request.device_id);
+                result.device = *it;
+                result.device.resolutions = DefaultResolutions();
+                return result;
+            }
+        }
+        result.code = ToCode(SdkStatusCode::DeviceNotFound);
+        result.message = "device not found";
+        return result;
+    }
+
     SdkDeviceOpenResult OpenDevice(const SdkDeviceOpenRequest& request) override {
         SdkDeviceOpenResult result;
-        result.opened = !request.device_id.empty();
-        result.device.device_id = request.device_id;
+        result = GetDevice(request);
+        if (!IsOkStatusCode(result.code)) {
+            return result;
+        }
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            opened_devices_[request.device_id] = PickResolution(request.width, request.height, request.fps);
+        }
+        result.opened = true;
         return result;
     }
 
@@ -236,18 +268,72 @@ public:
         return result;
     }
 
-    SdkVideoStartResult StartVideo(const SdkVideoStartRequest&) override {
+    SdkVideoStartResult StartVideo(const SdkVideoStartRequest& request, SdkVideoFrameCallback callback) override {
         SdkVideoStartResult result;
+        SdkVideoResolution resolution;
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            const std::map<std::string, SdkVideoResolution>::const_iterator it = opened_devices_.find(request.device_id);
+            if (it == opened_devices_.end()) {
+                result.code = ToCode(SdkStatusCode::DeviceNotOpen);
+                result.message = "device not open";
+                return result;
+            }
+            resolution = PickResolution(request.width > 0 ? request.width : it->second.width,
+                                        request.height > 0 ? request.height : it->second.height,
+                                        request.fps > 0 ? request.fps : it->second.fps);
+            if (streams_.find(request.device_id) != streams_.end()) {
+                result.code = ToCode(SdkStatusCode::DeviceBusy);
+                result.message = "device already streaming";
+                return result;
+            }
+            std::shared_ptr<MockStreamState> state(new MockStreamState());
+            state->running.store(true);
+            state->thread = std::thread([request, resolution, callback, state]() {
+                while (state->running.load()) {
+                    SdkVideoFrame frame;
+                    frame.device_id = request.device_id;
+                    frame.stream_id = request.stream_id;
+                    frame.frame_seq = state->frame_seq.fetch_add(1);
+                    frame.timestamp_ms = NowMs();
+                    frame.width = resolution.width;
+                    frame.height = resolution.height;
+                    frame.pixel_format = "jpeg";
+                    frame.payload = TinyJpeg();
+                    if (callback) {
+                        callback(frame);
+                    }
+                    const int fps = resolution.fps > 0 ? resolution.fps : 15;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1000 / fps));
+                }
+            });
+            streams_[request.device_id] = state;
+        }
         result.accepted = true;
         result.pixel_format = "jpeg";
-        result.width = 1280;
-        result.height = 720;
-        result.fps = 15;
+        result.width = resolution.width;
+        result.height = resolution.height;
+        result.fps = resolution.fps;
         return result;
     }
 
-    SdkVideoStopResult StopVideo(const SdkVideoStopRequest&) override {
+    SdkVideoStopResult StopVideo(const SdkVideoStopRequest& request) override {
         SdkVideoStopResult result;
+        std::shared_ptr<MockStreamState> state;
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            const std::map<std::string, std::shared_ptr<MockStreamState>>::iterator it = streams_.find(request.device_id);
+            if (it != streams_.end()) {
+                state = it->second;
+                streams_.erase(it);
+            }
+        }
+        if (state) {
+            state->running.store(false);
+            if (state->thread.joinable()) {
+                state->thread.join();
+            }
+        }
         result.stopped = true;
         return result;
     }
@@ -257,6 +343,96 @@ public:
         result.applied = true;
         return result;
     }
+
+private:
+    struct MockStreamState {
+        std::atomic<bool> running{false};
+        std::atomic<uint64_t> frame_seq{1};
+        std::thread thread;
+    };
+
+    static int64_t NowMs() {
+        return static_cast<int64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+    }
+
+    static std::vector<uint8_t> TinyJpeg() {
+        static const uint8_t kJpeg[] = {
+            0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01,
+            0x01, 0x01, 0x00, 0x60, 0x00, 0x60, 0x00, 0x00, 0xff, 0xdb, 0x00, 0x43,
+            0x00, 0x08, 0x06, 0x06, 0x07, 0x06, 0x05, 0x08, 0x07, 0x07, 0x07, 0x09,
+            0x09, 0x08, 0x0a, 0x0c, 0x14, 0x0d, 0x0c, 0x0b, 0x0b, 0x0c, 0x19, 0x12,
+            0x13, 0x0f, 0x14, 0x1d, 0x1a, 0x1f, 0x1e, 0x1d, 0x1a, 0x1c, 0x1c, 0x20,
+            0x24, 0x2e, 0x27, 0x20, 0x22, 0x2c, 0x23, 0x1c, 0x1c, 0x28, 0x37, 0x29,
+            0x2c, 0x30, 0x31, 0x34, 0x34, 0x34, 0x1f, 0x27, 0x39, 0x3d, 0x38, 0x32,
+            0x3c, 0x2e, 0x33, 0x34, 0x32, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x01,
+            0x00, 0x01, 0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01,
+            0xff, 0xc4, 0x00, 0x14, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0xff, 0xc4,
+            0x00, 0x14, 0x10, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xda, 0x00, 0x0c,
+            0x03, 0x01, 0x00, 0x02, 0x11, 0x03, 0x11, 0x00, 0x3f, 0x00, 0xb2, 0xc0,
+            0x07, 0xff, 0xd9,
+        };
+        return std::vector<uint8_t>(kJpeg, kJpeg + sizeof(kJpeg));
+    }
+
+    static std::vector<SdkVideoResolution> DefaultResolutions() {
+        std::vector<SdkVideoResolution> resolutions;
+        SdkVideoResolution first;
+        first.width = 1280;
+        first.height = 720;
+        first.real_width = 1280;
+        first.real_height = 720;
+        first.fps = 15;
+        first.is_default = true;
+        resolutions.push_back(first);
+        SdkVideoResolution second;
+        second.width = 640;
+        second.height = 480;
+        second.real_width = 640;
+        second.real_height = 480;
+        second.fps = 15;
+        resolutions.push_back(second);
+        return resolutions;
+    }
+
+    static SdkVideoResolution PickResolution(int width, int height, int fps) {
+        std::vector<SdkVideoResolution> resolutions = DefaultResolutions();
+        for (std::vector<SdkVideoResolution>::const_iterator it = resolutions.begin(); it != resolutions.end(); ++it) {
+            if ((width <= 0 || it->width == width) && (height <= 0 || it->height == height)) {
+                SdkVideoResolution resolution = *it;
+                if (fps > 0) {
+                    resolution.fps = fps;
+                }
+                return resolution;
+            }
+        }
+        return resolutions.front();
+    }
+
+    bool IsOpened(const std::string& device_id) const {
+        std::lock_guard<std::mutex> lock(mu_);
+        return opened_devices_.find(device_id) != opened_devices_.end();
+    }
+
+    void StopAllStreams() {
+        std::map<std::string, std::shared_ptr<MockStreamState>> streams;
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            streams.swap(streams_);
+        }
+        for (std::map<std::string, std::shared_ptr<MockStreamState>>::iterator it = streams.begin(); it != streams.end(); ++it) {
+            it->second->running.store(false);
+            if (it->second->thread.joinable()) {
+                it->second->thread.join();
+            }
+        }
+    }
+
+    mutable std::mutex mu_;
+    std::map<std::string, SdkVideoResolution> opened_devices_;
+    std::map<std::string, std::shared_ptr<MockStreamState>> streams_;
 };
 
 class MockGraphicProvider : public ISdkGraphicProvider {

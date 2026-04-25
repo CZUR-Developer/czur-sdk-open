@@ -88,6 +88,15 @@ export function buildVideoEndpointLabel(): string {
   return `${protocol}://${resolveRuntimeHost()}:17091`;
 }
 
+export function buildVideoWsUrl(sessionToken: string, streamId: string): string {
+  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const params = new URLSearchParams({
+    session_token: sessionToken,
+    stream_id: streamId,
+  });
+  return `${protocol}://${resolveRuntimeHost()}:17091?${params.toString()}`;
+}
+
 export function extractSessionToken(data: Record<string, unknown> | null | undefined): string {
   if (!data) {
     return '';

@@ -5,7 +5,7 @@ import { authSessionState, sendBoundCommand } from './auth-session';
 import { isOkResponse } from './protocol';
 import { nowTimeLabel, recordRuntimeEvent } from './runtime-records';
 
-interface DeviceDescriptorPayload {
+export interface DeviceDescriptorPayload {
   device_id?: string;
   model?: string;
   display_name?: string;
@@ -18,6 +18,7 @@ interface DeviceDescriptorPayload {
 
 interface DeviceInventoryState {
   rows: TableRow[];
+  devices: DeviceDescriptorPayload[];
   count: number;
   listState: ExecutionState;
   lastLoadedAt: string;
@@ -26,6 +27,7 @@ interface DeviceInventoryState {
 
 const state = reactive<DeviceInventoryState>({
   rows: [],
+  devices: [],
   count: 0,
   listState: 'idle',
   lastLoadedAt: '',
@@ -62,6 +64,7 @@ export async function loadDeviceInventory(): Promise<void> {
     }
 
     const devices = asDeviceDescriptors(response.data.devices);
+    state.devices = devices;
     state.rows = devices.map((device) => ({
       id: device.device_id || `${device.vid || 0}:${device.pid || 0}`,
       cells: {
@@ -95,6 +98,7 @@ export async function loadDeviceInventory(): Promise<void> {
 export function resetDeviceInventory(): void {
   activeLoadToken += 1;
   state.rows = [];
+  state.devices = [];
   state.count = 0;
   state.listState = 'idle';
   state.lastLoadedAt = '';

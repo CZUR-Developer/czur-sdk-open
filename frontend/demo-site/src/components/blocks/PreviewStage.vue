@@ -1,7 +1,13 @@
 <template>
   <article class="overflow-hidden rounded-[32px] border border-white/70 bg-white/90 shadow-[var(--demo-shadow)]">
     <div class="relative min-h-[300px] bg-slate-950">
-      <div class="absolute inset-0 opacity-70" :class="variantClass" />
+      <img
+        v-if="imageUrl"
+        :src="imageUrl"
+        alt=""
+        class="absolute inset-0 h-full w-full object-contain"
+      />
+      <div v-else class="absolute inset-0 opacity-70" :class="variantClass" />
       <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.12),_transparent_38%)]" />
       <div class="absolute inset-x-0 top-0 h-px bg-cyan-300/50" />
 
@@ -45,12 +51,14 @@ const props = withDefaults(
     title: string;
     description: string;
     metrics: PreviewMetric[];
+    imageUrl?: string;
     badgeLabel?: string;
     badgeTone?: Tone;
     variant?: 'image' | 'video';
   }>(),
   {
     badgeLabel: undefined,
+    imageUrl: '',
     badgeTone: 'neutral',
     variant: 'image',
   },

@@ -12,6 +12,7 @@
 #include <mutex>
 #include <set>
 #include <thread>
+#include <vector>
 
 #include "sdk_json_utils.h"
 #include "sdk_logger.h"
@@ -53,10 +54,16 @@ public:
         std::string stream_id;
     };
 
+    struct ActiveConnection {
+        std::string stream_id;
+    };
+
     WsServer server;
     std::thread io_thread;
     std::set<ConnectionHdl, std::owner_less<ConnectionHdl>> connections;
     std::map<ConnectionHdl, PendingConnection, std::owner_less<ConnectionHdl>> pending;
+    std::map<ConnectionHdl, ActiveConnection, std::owner_less<ConnectionHdl>> active;
+    std::map<std::string, std::set<ConnectionHdl, std::owner_less<ConnectionHdl>>> stream_connections;
     std::mutex connections_mu;
     std::atomic<uint64_t> active_connections{0};
     std::atomic<uint64_t> auth_failed{0};
@@ -119,6 +126,10 @@ bool SdkWsVideoServer::Start() {
                 impl_->pending.find(hdl);
             if (it != impl_->pending.end()) {
                 stream_id = it->second.stream_id;
+                Impl::ActiveConnection active;
+                active.stream_id = stream_id;
+                impl_->active[hdl] = active;
+                impl_->stream_connections[stream_id].insert(hdl);
                 impl_->pending.erase(it);
             }
             impl_->active_connections.store(static_cast<uint64_t>(impl_->connections.size()));
@@ -132,6 +143,19 @@ bool SdkWsVideoServer::Start() {
 
     server.set_close_handler([this](ConnectionHdl hdl) {
         std::lock_guard<std::mutex> lock(impl_->connections_mu);
+        const std::map<ConnectionHdl, Impl::ActiveConnection, std::owner_less<ConnectionHdl>>::iterator active_it =
+            impl_->active.find(hdl);
+        if (active_it != impl_->active.end()) {
+            const std::map<std::string, std::set<ConnectionHdl, std::owner_less<ConnectionHdl>>>::iterator stream_it =
+                impl_->stream_connections.find(active_it->second.stream_id);
+            if (stream_it != impl_->stream_connections.end()) {
+                stream_it->second.erase(hdl);
+                if (stream_it->second.empty()) {
+                    impl_->stream_connections.erase(stream_it);
+                }
+            }
+            impl_->active.erase(active_it);
+        }
         impl_->connections.erase(hdl);
         impl_->pending.erase(hdl);
         impl_->active_connections.store(static_cast<uint64_t>(impl_->connections.size()));
@@ -195,6 +219,8 @@ void SdkWsVideoServer::Stop() {
         }
         impl_->connections.clear();
         impl_->pending.clear();
+        impl_->active.clear();
+        impl_->stream_connections.clear();
         impl_->active_connections.store(0);
     }
     impl_->server.stop();
@@ -203,6 +229,76 @@ void SdkWsVideoServer::Stop() {
     }
     impl_.reset();
     SDK_OPEN_LOG_INFO("[sdk_ws_video_server] stopped");
+}
+
+void SdkWsVideoServer::PublishFrame(const SdkVideoFrame& frame) {
+    if (!impl_ || frame.stream_id.empty() || frame.payload.empty()) {
+        return;
+    }
+
+    std::vector<ConnectionHdl> targets;
+    {
+        std::lock_guard<std::mutex> lock(impl_->connections_mu);
+        const std::map<std::string, std::set<ConnectionHdl, std::owner_less<ConnectionHdl>>>::const_iterator it =
+            impl_->stream_connections.find(frame.stream_id);
+        if (it == impl_->stream_connections.end()) {
+            return;
+        }
+        targets.assign(it->second.begin(), it->second.end());
+    }
+    if (targets.empty()) {
+        return;
+    }
+
+    const std::string meta_payload = DumpJson(BuildWsEvent(
+        "stream.frame_meta",
+        Json{{"device_id", frame.device_id},
+             {"stream_id", frame.stream_id},
+             {"frame_seq", frame.frame_seq},
+             {"timestamp_ms", frame.timestamp_ms},
+             {"width", frame.width},
+             {"height", frame.height},
+             {"pixel_format", frame.pixel_format}}));
+    const std::string binary_payload(reinterpret_cast<const char*>(frame.payload.data()), frame.payload.size());
+
+    impl_->server.get_io_service().post([this, targets, meta_payload, binary_payload]() {
+        for (std::vector<ConnectionHdl>::const_iterator it = targets.begin(); it != targets.end(); ++it) {
+            ErrorCode ec;
+            impl_->server.send(*it, meta_payload, websocketpp::frame::opcode::text, ec);
+            if (ec) {
+                continue;
+            }
+            impl_->server.send(*it, binary_payload, websocketpp::frame::opcode::binary, ec);
+            if (!ec) {
+                impl_->binary_frames.fetch_add(1);
+                impl_->binary_bytes.fetch_add(static_cast<uint64_t>(binary_payload.size()));
+            }
+        }
+    });
+}
+
+void SdkWsVideoServer::CloseStream(const std::string& stream_id) {
+    if (!impl_ || stream_id.empty()) {
+        return;
+    }
+
+    std::vector<ConnectionHdl> targets;
+    {
+        std::lock_guard<std::mutex> lock(impl_->connections_mu);
+        const std::map<std::string, std::set<ConnectionHdl, std::owner_less<ConnectionHdl>>>::const_iterator it =
+            impl_->stream_connections.find(stream_id);
+        if (it == impl_->stream_connections.end()) {
+            return;
+        }
+        targets.assign(it->second.begin(), it->second.end());
+    }
+
+    impl_->server.get_io_service().post([this, targets]() {
+        for (std::vector<ConnectionHdl>::const_iterator it = targets.begin(); it != targets.end(); ++it) {
+            ErrorCode ec;
+            impl_->server.close(*it, websocketpp::close::status::normal, "stream stopped", ec);
+        }
+    });
 }
 
 SdkWsVideoServer::Stats SdkWsVideoServer::GetStats() const {

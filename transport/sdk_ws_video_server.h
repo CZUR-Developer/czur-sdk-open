@@ -9,6 +9,8 @@
 #include <memory>
 #include <string>
 
+#include "sdk_provider_types.h"
+
 namespace editor {
 namespace sdk {
 
@@ -37,6 +39,8 @@ public:
     void SetConnectionAuthHandler(ConnectionAuthHandler handler);
     bool Start();
     void Stop();
+    void PublishFrame(const SdkVideoFrame& frame);
+    void CloseStream(const std::string& stream_id);
     Stats GetStats() const;
 
 private:
