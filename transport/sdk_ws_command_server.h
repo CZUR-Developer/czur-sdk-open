@@ -31,6 +31,7 @@ public:
     void SetRequestHandler(RequestHandler handler);
     void SetOpenHandler(ConnectionHandler handler);
     void SetCloseHandler(ConnectionHandler handler);
+    bool SendEvent(const std::string& connection_id, const Json& event);
     bool Start();
     void Stop();
     Stats GetStats() const;

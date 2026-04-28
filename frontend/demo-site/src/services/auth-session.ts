@@ -8,6 +8,7 @@ import {
   buildVideoEndpointLabel,
   extractSessionToken,
   isOkResponse,
+  type CommandEvent,
   type CommandResponse,
 } from './protocol';
 import { nowTimeLabel, recordAlert, recordCommandRequest, recordRuntimeEvent } from './runtime-records';
@@ -98,6 +99,7 @@ export async function initializeAuthSession(): Promise<void> {
     }
 
     state.lastConnectedAt = nowTimeLabel();
+    nextClient.onEvent(handleCommandEvent);
     recordRuntimeEvent({
       title: 'command.connected',
       detail: `Command channel connected at ${state.lastConnectedAt}.`,
@@ -318,6 +320,13 @@ export async function sendBoundCommand(
   return sendTrackedCommand(client, method, options);
 }
 
+export function onCommandEvent(listener: (event: CommandEvent<Record<string, unknown>>) => void): () => void {
+  if (!client) {
+    return () => {};
+  }
+  return client.onEvent(listener);
+}
+
 function clearRuntimeState(): void {
   clearSession();
   state.commandState = 'idle';
@@ -343,6 +352,19 @@ function clearSession(): void {
 function disconnectClient(reason: string): void {
   client?.disconnect(reason);
   client = null;
+}
+
+function handleCommandEvent(event: CommandEvent<Record<string, unknown>>): void {
+  if (!event.event) {
+    return;
+  }
+  if (/^(capture|device|video|stream)\./.test(event.event)) {
+    recordRuntimeEvent({
+      title: event.event,
+      detail: event.message || event.event,
+      tone: event.code === 0 ? 'info' : 'danger',
+    });
+  }
 }
 
 async function sendTrackedCommand(

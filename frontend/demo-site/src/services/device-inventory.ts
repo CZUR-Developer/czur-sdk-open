@@ -14,6 +14,9 @@ export interface DeviceDescriptorPayload {
   status?: string;
   authorized?: boolean;
   supports_video?: boolean;
+  features?: {
+    image_transfer_protocol?: boolean;
+  };
 }
 
 interface DeviceInventoryState {

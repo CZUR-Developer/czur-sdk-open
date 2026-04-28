@@ -25,6 +25,10 @@ interface FrameMeta {
   pixel_format?: string;
 }
 
+interface DeviceFeatures {
+  image_transfer_protocol: boolean;
+}
+
 interface DeviceVideoState {
   selectedDeviceId: string;
   detailState: ExecutionState;
@@ -34,6 +38,7 @@ interface DeviceVideoState {
   stopState: ExecutionState;
   videoState: ExecutionState;
   errorMessage: string;
+  features: DeviceFeatures;
   resolutions: DeviceResolution[];
   selectedResolutionKey: string;
   opened: boolean;
@@ -65,6 +70,7 @@ const state = reactive<DeviceVideoState>({
   stopState: 'idle',
   videoState: 'idle',
   errorMessage: '',
+  features: { image_transfer_protocol: false },
   resolutions: [],
   selectedResolutionKey: '',
   opened: false,
@@ -95,6 +101,7 @@ export async function selectDevice(deviceId: string): Promise<void> {
   state.selectedDeviceId = deviceId;
   state.opened = false;
   state.closeState = 'idle';
+  state.features = { image_transfer_protocol: false };
   state.resolutions = [];
   state.selectedResolutionKey = '';
   if (deviceId) {
@@ -118,6 +125,7 @@ export async function loadDeviceDetail(): Promise<void> {
     return;
   }
   state.resolutions = asResolutions(response.data.resolutions);
+  state.features = asFeatures(response.data.features);
   const defaultResolution = state.resolutions.find((resolution) => resolution.is_default) ?? state.resolutions[0];
   state.selectedResolutionKey = defaultResolution ? resolutionKey(defaultResolution) : '';
   state.detailState = 'success';
@@ -260,6 +268,7 @@ export function resetDeviceVideo(): void {
   state.videoState = 'idle';
   state.errorMessage = '';
   state.resolutions = [];
+  state.features = { image_transfer_protocol: false };
   state.selectedResolutionKey = '';
   state.opened = false;
   resetPreview();
@@ -275,6 +284,16 @@ export function attachVideoCanvas(canvas: HTMLCanvasElement | null): void {
 
 export function resolutionKey(resolution: DeviceResolution): string {
   return `${resolution.width}x${resolution.height}@${resolution.fps}`;
+}
+
+export async function applyCaptureAcquisitionResolution(): Promise<void> {
+  if (!state.features.image_transfer_protocol) {
+    return;
+  }
+  const captureResolution = ensureCaptureResolution();
+  if (state.selectedResolutionKey !== resolutionKey(captureResolution)) {
+    await setSelectedResolution(resolutionKey(captureResolution));
+  }
 }
 
 function buildVideoParams(resolution: DeviceResolution): Record<string, unknown> {
@@ -464,6 +483,24 @@ function selectedResolution(): DeviceResolution | null {
   return state.resolutions.find((resolution) => resolutionKey(resolution) === state.selectedResolutionKey) ?? null;
 }
 
+function ensureCaptureResolution(): DeviceResolution {
+  const existing = state.resolutions.find((resolution) => resolution.width === 1536 && resolution.height === 1152);
+  if (existing) {
+    return existing;
+  }
+  const fallback: DeviceResolution = {
+    width: 1536,
+    height: 1152,
+    real_width: 1536,
+    real_height: 1152,
+    fps: 15,
+    pixel_format: 'jpeg',
+    is_default: false,
+  };
+  state.resolutions = [fallback, ...state.resolutions];
+  return fallback;
+}
+
 function asResolutions(value: unknown): DeviceResolution[] {
   if (!Array.isArray(value)) {
     return [];
@@ -480,6 +517,16 @@ function asResolutions(value: unknown): DeviceResolution[] {
       is_default: Boolean(item.is_default),
     }))
     .filter((resolution) => resolution.width > 0 && resolution.height > 0);
+}
+
+function asFeatures(value: unknown): DeviceFeatures {
+  if (!value || typeof value !== 'object') {
+    return { image_transfer_protocol: false };
+  }
+  const features = value as Record<string, unknown>;
+  return {
+    image_transfer_protocol: Boolean(features.image_transfer_protocol),
+  };
 }
 
 function asString(value: unknown): string {

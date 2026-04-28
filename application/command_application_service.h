@@ -12,6 +12,7 @@
 
 #include "admin_application_service.h"
 #include "authorization_service.h"
+#include "capture_task_service.h"
 #include "device_facade.h"
 #include "graphic_facade.h"
 #include "ocr_facade.h"
@@ -29,6 +30,7 @@ public:
     using StatusSupplier = std::function<Json()>;
     using VideoFrameSink = std::function<void(const SdkVideoFrame&)>;
     using VideoStreamClosedSink = std::function<void(const std::string&)>;
+    using CommandEventSink = std::function<void(const std::string&, const Json&)>;
 
     struct MethodDescriptor {
         std::string method;
@@ -41,6 +43,7 @@ public:
     void SetStatusSupplier(StatusSupplier supplier);
     void SetVideoFrameSink(VideoFrameSink sink);
     void SetVideoStreamClosedSink(VideoStreamClosedSink sink);
+    void SetCommandEventSink(CommandEventSink sink);
     Json HandleRequest(const std::string& connection_id, const Json& request_json);
     void OnConnectionClosed(const std::string& connection_id);
     Json BuildCapabilitiesJson() const;
@@ -70,6 +73,7 @@ private:
     Json HandleDeviceOpen(const std::string& connection_id, const Request& request);
     Json HandleDeviceClose(const std::string& connection_id, const Request& request);
     Json HandleCaptureTake(const std::string& connection_id, const Request& request);
+    Json HandleCaptureGet(const std::string& connection_id, const Request& request);
     Json HandleVideoStart(const std::string& connection_id, const Request& request);
     Json HandleVideoStop(const std::string& connection_id, const Request& request);
     Json HandleVideoSetFormat(const std::string& connection_id, const Request& request);
@@ -99,6 +103,7 @@ private:
     GraphicFacade graphic_facade_;
     OcrFacade ocr_facade_;
     OfdFacade ofd_facade_;
+    CaptureTaskService capture_task_service_;
     StatusSupplier status_supplier_;
     VideoFrameSink video_frame_sink_;
     VideoStreamClosedSink video_stream_closed_sink_;

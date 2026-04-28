@@ -1,6 +1,6 @@
 <template>
   <article class="overflow-hidden rounded-[32px] border border-white/70 bg-white/90 shadow-[var(--demo-shadow)]">
-    <div class="relative min-h-[300px] bg-slate-950">
+    <div class="relative bg-slate-950" :class="stageSizeClass">
       <canvas
         v-if="variant === 'video'"
         ref="videoCanvas"
@@ -16,12 +16,12 @@
       <div v-if="showOverlay" class="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.12),_transparent_38%)]" />
       <div v-if="showOverlay" class="absolute inset-x-0 top-0 h-px bg-cyan-300/50" />
 
-      <div class="relative flex min-h-[300px] flex-col justify-between p-6">
+      <div class="relative flex flex-col justify-between p-6" :class="stageSizeClass">
         <div class="flex flex-wrap gap-2">
           <StatusPill v-if="badgeLabel" :label="badgeLabel" :tone="badgeTone" />
         </div>
 
-        <div>
+        <div v-if="showTextOverlay">
           <p class="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">{{ eyebrow }}</p>
           <h3 class="mt-3 text-2xl font-semibold tracking-tight text-white">{{ title }}</h3>
           <p class="mt-3 max-w-xl text-sm leading-6 text-slate-300">{{ description }}</p>
@@ -29,7 +29,7 @@
       </div>
     </div>
 
-    <div class="grid gap-3 p-5 sm:grid-cols-2">
+    <div v-if="metrics.length > 0" class="grid gap-3 p-5 sm:grid-cols-2">
       <div
         v-for="metric in metrics"
         :key="metric.label"
@@ -60,12 +60,16 @@ const props = withDefaults(
     badgeLabel?: string;
     badgeTone?: Tone;
     variant?: 'image' | 'video';
+    stageSize?: 'normal' | 'large';
+    showTextOverlay?: boolean;
   }>(),
   {
     badgeLabel: undefined,
     imageUrl: '',
     badgeTone: 'neutral',
     variant: 'image',
+    stageSize: 'normal',
+    showTextOverlay: true,
   },
 );
 
@@ -83,6 +87,7 @@ const variantClass = computed(() =>
 
 const showPlaceholder = computed(() => props.variant !== 'video' && !props.imageUrl);
 const showOverlay = computed(() => props.variant !== 'video');
+const stageSizeClass = computed(() => (props.stageSize === 'large' ? 'min-h-[460px]' : 'min-h-[300px]'));
 
 watch(
   videoCanvas,

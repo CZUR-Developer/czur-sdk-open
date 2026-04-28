@@ -69,6 +69,35 @@ void SdkWsCommandServer::SetCloseHandler(ConnectionHandler handler) {
     close_handler_ = handler;
 }
 
+bool SdkWsCommandServer::SendEvent(const std::string& connection_id, const Json& event) {
+    if (!impl_ || connection_id.empty()) {
+        return false;
+    }
+    ConnectionHdl target;
+    bool found = false;
+    {
+        std::lock_guard<std::mutex> lock(impl_->connections_mu);
+        for (std::map<ConnectionHdl, std::string, std::owner_less<ConnectionHdl>>::const_iterator it =
+                 impl_->connection_ids.begin();
+             it != impl_->connection_ids.end();
+             ++it) {
+            if (it->second == connection_id) {
+                target = it->first;
+                found = true;
+                break;
+            }
+        }
+    }
+    if (!found) {
+        return false;
+    }
+    impl_->server.get_io_service().post([this, target, event]() {
+        ErrorCode ec;
+        impl_->server.send(target, DumpJson(event), websocketpp::frame::opcode::text, ec);
+    });
+    return true;
+}
+
 bool SdkWsCommandServer::Start() {
     if (running_.load()) {
         return true;

@@ -14,6 +14,10 @@ public:
     explicit GraphicFacade(const ProviderBundle& providers);
 
     SdkImageProcessResult Process(const SdkImageProcessRequest& request) const;
+    SdkPageProcessResult ProcessPage(const SdkPageProcessRequest& request) const;
+    SdkColorModeResult ApplyColorMode(const SdkColorModeRequest& request) const;
+    SdkFormatConvertResult ConvertImageFormat(const SdkFormatConvertRequest& request) const;
+    SdkThumbnailResult GenerateThumbnail(const SdkThumbnailRequest& request) const;
 
 private:
     ProviderBundle providers_;

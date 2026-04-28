@@ -45,6 +45,9 @@ SdkApp::SdkApp(const SdkConfig& config, ProviderBundle providers)
     command_application_service_->SetVideoStreamClosedSink([this](const std::string& stream_id) {
         video_ws_server_.CloseStream(stream_id);
     });
+    command_application_service_->SetCommandEventSink([this](const std::string& connection_id, const Json& event) {
+        command_ws_server_.SendEvent(connection_id, event);
+    });
     command_ws_server_.SetRequestHandler(
         [this](const std::string& connection_id, const Json& request) { return command_application_service_->HandleRequest(connection_id, request); });
     command_ws_server_.SetCloseHandler([this](const std::string& connection_id) {

@@ -10,6 +10,7 @@ set(SDK_OPEN_WEBSOCKETPP_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/websocketpp")
 set(SDK_OPEN_ASIO_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/asio/asio/include")
 set(SDK_OPEN_NLOHMANN_JSON_DIR "${SDK_OPEN_THIRD_PARTY_DIR}")
 set(SDK_OPEN_SPDLOG_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/spdlog")
+set(SDK_OPEN_CGRAPH_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/CGraph")
 
 if(NOT EXISTS "${SDK_OPEN_CPP_HTTPLIB_DIR}/httplib.h")
     message(FATAL_ERROR "Missing third_party/cpp-httplib/httplib.h")
@@ -25,6 +26,9 @@ if(NOT EXISTS "${SDK_OPEN_NLOHMANN_JSON_DIR}/nlohmann/json.hpp")
 endif()
 if(NOT EXISTS "${SDK_OPEN_SPDLOG_DIR}/spdlog.h")
     message(FATAL_ERROR "Missing third_party/spdlog/spdlog.h")
+endif()
+if(NOT EXISTS "${SDK_OPEN_CGRAPH_DIR}/src/CGraph.h")
+    message(FATAL_ERROR "Missing third_party/CGraph/src/CGraph.h")
 endif()
 
 add_library(sdk_open_third_party INTERFACE)
@@ -44,6 +48,16 @@ target_include_directories(sdk_open_interfaces INTERFACE
     "${CMAKE_CURRENT_SOURCE_DIR}/interfaces"
 )
 
+file(GLOB_RECURSE SDK_OPEN_CGRAPH_SRCS
+    "${SDK_OPEN_CGRAPH_DIR}/src/*.cpp"
+)
+
+add_library(sdk_open_cgraph STATIC ${SDK_OPEN_CGRAPH_SRCS})
+target_include_directories(sdk_open_cgraph PUBLIC
+    "${SDK_OPEN_CGRAPH_DIR}/src"
+)
+target_link_libraries(sdk_open_cgraph PUBLIC pthread)
+
 set(SDK_OPEN_RUNTIME_SRCS
     runtime/sdk_app.cpp
     runtime/sdk_json_utils.cpp
@@ -53,6 +67,8 @@ set(SDK_OPEN_RUNTIME_SRCS
     transport/sdk_ws_video_server.cpp
     application/admin_application_service.cpp
     application/authorization_service.cpp
+    application/capture_pipeline_service.cpp
+    application/capture_task_service.cpp
     application/command_application_service.cpp
     application/video_session_service.cpp
     facade/device_facade.cpp
@@ -63,6 +79,7 @@ set(SDK_OPEN_RUNTIME_SRCS
 
 add_library(sdk_open_logging STATIC
     runtime/sdk_logger.cpp
+    runtime/sdk_runtime_paths.cpp
 )
 target_include_directories(sdk_open_logging PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/runtime"
@@ -85,6 +102,7 @@ target_compile_definitions(sdk_open_runtime PUBLIC
 )
 target_link_libraries(sdk_open_runtime PUBLIC
     sdk_open_interfaces
+    sdk_open_cgraph
     sdk_open_logging
     sdk_open_third_party
 )

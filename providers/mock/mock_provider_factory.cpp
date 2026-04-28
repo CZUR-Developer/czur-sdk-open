@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <fstream>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -12,6 +13,7 @@
 #include <utility>
 
 #include "sdk_logger.h"
+#include "sdk_runtime_paths.h"
 #include "sdk_status_code.h"
 
 namespace editor {
@@ -87,6 +89,7 @@ public:
             "device.open",
             "device.close",
             "capture.take",
+            "capture.get",
             "video.start",
             "video.stop",
             "video.set_format",
@@ -215,6 +218,7 @@ public:
         first.status = "online";
         first.authorized = true;
         first.supports_video = true;
+        first.image_transfer_protocol = true;
         devices.push_back(first);
 
         SdkDeviceDescriptor second;
@@ -226,6 +230,7 @@ public:
         second.status = "online";
         second.authorized = true;
         second.supports_video = true;
+        second.image_transfer_protocol = false;
         devices.push_back(second);
         return devices;
     }
@@ -282,13 +287,38 @@ public:
         return result;
     }
 
-    SdkCaptureResult CaptureStill(const SdkCaptureRequest& request) override {
+    void CaptureStill(const SdkCaptureRequest& request, SdkCaptureCallback callback) override {
         SdkCaptureResult result;
+        if (!IsOpened(request.device_id)) {
+            result.code = ToCode(SdkStatusCode::DeviceNotOpen);
+            result.message = "device not open";
+            if (callback) {
+                callback(result);
+            }
+            return;
+        }
+        const std::string output_dir = request.output_dir.empty() ? JoinPath(GetSdkOpenCaptureDir(), "mock") : request.output_dir;
+        if (!EnsureDirectoryRecursive(output_dir)) {
+            result.code = ToCode(SdkStatusCode::ProviderCallFailed);
+            result.message = "failed to create capture output directory";
+            if (callback) {
+                callback(result);
+            }
+            return;
+        }
+        const std::string output_path = JoinPath(output_dir, "mock-original-" + request.device_id + ".jpg");
+        WriteBytes(output_path, TinyJpeg());
         result.captured = true;
         result.content_type = request.include_base64 ? "image/base64" : "image/file";
         result.payload = request.include_base64 ? "c2RrX29wZW5fY2FwdHVyZV9wbGFjZWhvbGRlcg==" : "";
-        result.output_path = request.include_base64 ? "" : "/tmp/mock-capture-" + request.device_id + ".jpg";
-        return result;
+        result.output_path = output_path;
+        result.original_path = output_path;
+        result.width = 1;
+        result.height = 1;
+        result.size = TinyJpeg().size();
+        if (callback) {
+            callback(result);
+        }
     }
 
     SdkVideoStartResult StartVideo(const SdkVideoStartRequest& request, SdkVideoFrameCallback callback) override {
@@ -400,15 +430,29 @@ private:
         return std::vector<uint8_t>(kJpeg, kJpeg + sizeof(kJpeg));
     }
 
+    static void WriteBytes(const std::string& path, const std::vector<uint8_t>& bytes) {
+        std::ofstream out(path.c_str(), std::ios::binary);
+        if (out.good() && !bytes.empty()) {
+            out.write(reinterpret_cast<const char*>(&bytes[0]), static_cast<std::streamsize>(bytes.size()));
+        }
+    }
+
     static std::vector<SdkVideoResolution> DefaultResolutions() {
         std::vector<SdkVideoResolution> resolutions;
         SdkVideoResolution first;
+        SdkVideoResolution capture;
+        capture.width = 1536;
+        capture.height = 1152;
+        capture.real_width = 1536;
+        capture.real_height = 1152;
+        capture.fps = 15;
+        capture.is_default = true;
+        resolutions.push_back(capture);
         first.width = 1280;
         first.height = 720;
         first.real_width = 1280;
         first.real_height = 720;
         first.fps = 15;
-        first.is_default = true;
         resolutions.push_back(first);
         SdkVideoResolution second;
         second.width = 640;
@@ -465,6 +509,47 @@ public:
         SdkImageProcessResult result;
         result.processed = true;
         return result;
+    }
+
+    SdkPageProcessResult ProcessPage(const SdkPageProcessRequest& request) override {
+        SdkPageProcessResult result;
+        CopyFile(request.input_path, request.output_path);
+        result.processed = true;
+        result.output_path = request.output_path;
+        return result;
+    }
+
+    SdkColorModeResult ApplyColorMode(const SdkColorModeRequest& request) override {
+        SdkColorModeResult result;
+        CopyFile(request.input_path, request.output_path);
+        result.processed = true;
+        result.output_path = request.output_path;
+        return result;
+    }
+
+    SdkFormatConvertResult ConvertImageFormat(const SdkFormatConvertRequest& request) override {
+        SdkFormatConvertResult result;
+        CopyFile(request.input_path, request.output_path);
+        result.converted = true;
+        result.output_path = request.output_path;
+        return result;
+    }
+
+    SdkThumbnailResult GenerateThumbnail(const SdkThumbnailRequest& request) override {
+        SdkThumbnailResult result;
+        CopyFile(request.input_path, request.output_path);
+        result.generated = true;
+        result.output_path = request.output_path;
+        result.width = 1;
+        result.height = 1;
+        return result;
+    }
+
+private:
+    static void CopyFile(const std::string& input_path, const std::string& output_path) {
+        std::ifstream in(input_path.c_str(), std::ios::binary);
+        std::ofstream out(output_path.c_str(), std::ios::binary);
+        out << in.rdbuf();
     }
 };
 

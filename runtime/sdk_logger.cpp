@@ -7,14 +7,11 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
-#include <limits.h>
 #include <mutex>
 #include <string>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
 #include <vector>
 
+#include "sdk_runtime_paths.h"
 #include "spdlog/sinks/rotating_file_sink.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
 
@@ -32,77 +29,6 @@ std::shared_ptr<spdlog::logger> g_sdk_open_logger;
 std::string g_sdk_open_log_dir;
 std::string g_sdk_open_log_path;
 std::mutex g_sdk_open_logger_mu;
-
-bool IsAbsolutePath(const std::string& path) {
-    return !path.empty() && path[0] == '/';
-}
-
-std::string JoinPath(const std::string& base, const std::string& leaf) {
-    if (base.empty()) {
-        return leaf;
-    }
-    if (leaf.empty()) {
-        return base;
-    }
-    if (base[base.size() - 1] == '/') {
-        return base + leaf;
-    }
-    return base + "/" + leaf;
-}
-
-bool DirectoryExists(const std::string& path) {
-    if (path.empty()) {
-        return false;
-    }
-    struct stat st;
-    return ::stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
-}
-
-std::string CurrentWorkingDirectory() {
-    char buffer[PATH_MAX];
-    if (::getcwd(buffer, sizeof(buffer)) != NULL) {
-        return std::string(buffer);
-    }
-    return ".";
-}
-
-bool EnsureDirectoryRecursive(const std::string& path) {
-    if (path.empty()) {
-        return false;
-    }
-    if (DirectoryExists(path)) {
-        return true;
-    }
-
-    std::string current;
-    size_t pos = 0;
-    if (IsAbsolutePath(path)) {
-        current = "/";
-        pos = 1;
-    }
-
-    while (pos <= path.size()) {
-        const size_t slash = path.find('/', pos);
-        const std::string part = path.substr(pos, slash == std::string::npos ? std::string::npos : slash - pos);
-        if (!part.empty()) {
-            if (!current.empty() && current[current.size() - 1] != '/') {
-                current += "/";
-            }
-            current += part;
-            if (!DirectoryExists(current)) {
-                if (::mkdir(current.c_str(), 0755) != 0 && errno != EEXIST) {
-                    return false;
-                }
-            }
-        }
-        if (slash == std::string::npos) {
-            break;
-        }
-        pos = slash + 1;
-    }
-
-    return DirectoryExists(path);
-}
 
 std::string ToLowerAscii(const std::string& value) {
     std::string normalized = value;
@@ -142,17 +68,6 @@ spdlog::level::level_enum ResolveSdkOpenLogLevel() {
 #else
     return spdlog::level::debug;
 #endif
-}
-
-std::string ResolveSdkOpenLogDir() {
-    const char* override_dir = std::getenv("SDK_OPEN_LOG_DIR");
-    if (override_dir != NULL && override_dir[0] != '\0') {
-        return std::string(override_dir);
-    }
-
-    const char* home = std::getenv("HOME");
-    const std::string base = (home != NULL && home[0] != '\0') ? std::string(home) : CurrentWorkingDirectory();
-    return JoinPath(JoinPath(base, ".czur"), "sdk");
 }
 
 std::shared_ptr<spdlog::logger> BuildSdkOpenLogger(std::string* init_warning) {

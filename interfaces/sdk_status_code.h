@@ -35,6 +35,7 @@ enum class SdkStatusCode : int {
     StreamNotReady = 1300,
     CaptureFailed = 1301,
     PreviewResolutionUnsupported = 1302,
+    CaptureTimeout = 1303,
     InternalError = 1900,
     ProviderNotReady = 1901,
     ProviderCallFailed = 1902,

@@ -49,6 +49,103 @@ int GetOptionalIntField(const Json& obj, const char* key, int default_value) {
     return default_value;
 }
 
+bool GetOptionalBoolField(const Json& obj, const char* key, bool default_value) {
+    const auto it = obj.find(key);
+    if (it != obj.end() && it->is_boolean()) {
+        return it->get<bool>();
+    }
+    return default_value;
+}
+
+SdkCaptureProfile ParseCaptureProfile(const Json& params, const std::string& device_id) {
+    SdkCaptureProfile profile;
+    profile.device_id = device_id;
+    const Json profile_json = GetOptionalObjectField(params, "profile");
+    if (profile_json.empty()) {
+        return profile;
+    }
+    profile.profile_version = GetOptionalStringField(profile_json, "profile_version");
+    if (profile.profile_version.empty()) {
+        profile.profile_version = "capture.profile.v1";
+    }
+    profile.revision = GetOptionalIntField(profile_json, "revision", 1);
+
+    const Json device_json = GetOptionalObjectField(profile_json, "device");
+    if (!device_json.empty()) {
+        const std::string profile_device_id = GetOptionalStringField(device_json, "device_id");
+        if (!profile_device_id.empty()) {
+            profile.device_id = profile_device_id;
+        }
+        const Json resolution_json = GetOptionalObjectField(device_json, "resolution");
+        profile.width = GetOptionalIntField(resolution_json, "width", 0);
+        profile.height = GetOptionalIntField(resolution_json, "height", 0);
+        profile.fps = GetOptionalIntField(resolution_json, "fps", 0);
+    }
+
+    const Json capture_json = GetOptionalObjectField(profile_json, "capture");
+    if (!capture_json.empty()) {
+        const std::string page_processing = GetOptionalStringField(capture_json, "page_processing");
+        const std::string color_mode = GetOptionalStringField(capture_json, "color_mode");
+        if (!page_processing.empty()) {
+            profile.page_processing = page_processing;
+        }
+        if (!color_mode.empty()) {
+            profile.color_mode = color_mode;
+        }
+    }
+
+    const Json output_json = GetOptionalObjectField(profile_json, "output");
+    if (!output_json.empty()) {
+        const std::string format = GetOptionalStringField(output_json, "format");
+        if (!format.empty()) {
+            profile.output_format = format;
+        }
+        const Json thumbnails_json = GetOptionalObjectField(output_json, "thumbnails");
+        profile.thumbnail_original = GetOptionalBoolField(thumbnails_json, "original", profile.thumbnail_original);
+        profile.thumbnail_page_processed = GetOptionalBoolField(thumbnails_json, "page_processed", profile.thumbnail_page_processed);
+        profile.thumbnail_color_processed = GetOptionalBoolField(thumbnails_json, "color_processed", profile.thumbnail_color_processed);
+    }
+    return profile;
+}
+
+Json BuildAssetJson(const SdkCaptureAsset& asset) {
+    return Json{{"asset_id", asset.asset_id},
+                {"kind", asset.kind},
+                {"path", asset.path},
+                {"content_type", asset.content_type},
+                {"width", asset.width},
+                {"height", asset.height},
+                {"size", asset.size}};
+}
+
+Json BuildStageJson(const SdkCaptureStageResult& stage) {
+    return Json{{"name", stage.name},
+                {"status", stage.status},
+                {"input", stage.input_assets},
+                {"output", stage.output_assets},
+                {"provider", stage.provider},
+                {"message", stage.message}};
+}
+
+Json BuildCaptureTaskJson(const CaptureTaskSnapshot& task) {
+    Json stages = Json::array();
+    for (std::vector<SdkCaptureStageResult>::const_iterator it = task.stages.begin(); it != task.stages.end(); ++it) {
+        stages.push_back(BuildStageJson(*it));
+    }
+    Json assets = Json::array();
+    for (std::vector<SdkCaptureAsset>::const_iterator it = task.assets.begin(); it != task.assets.end(); ++it) {
+        assets.push_back(BuildAssetJson(*it));
+    }
+    return Json{{"task_id", task.task_id},
+                {"status", task.status},
+                {"device_id", task.device_id},
+                {"profile_revision", task.profile_revision},
+                {"stages", stages},
+                {"assets", assets},
+                {"warnings", task.warnings},
+                {"error", task.error}};
+}
+
 CommandApplicationService::MethodDescriptor MakeMethod(const std::string& method,
                                                        bool requires_session,
                                                        const std::string& summary) {
@@ -68,7 +165,8 @@ CommandApplicationService::CommandApplicationService(const SdkConfig& config, co
       device_facade_(providers_),
       graphic_facade_(providers_),
       ocr_facade_(providers_),
-      ofd_facade_(providers_) {
+      ofd_facade_(providers_),
+      capture_task_service_(providers_) {
     methods_.push_back(MakeMethod("system.ping", false, "SDK heartbeat probe"));
     methods_.push_back(MakeMethod("system.info", false, "SDK runtime status snapshot"));
     methods_.push_back(MakeMethod("system.capabilities", false, "List public methods and auth model"));
@@ -82,6 +180,7 @@ CommandApplicationService::CommandApplicationService(const SdkConfig& config, co
     methods_.push_back(MakeMethod("device.open", true, "Open a device"));
     methods_.push_back(MakeMethod("device.close", true, "Close a device and release active preview resources"));
     methods_.push_back(MakeMethod("capture.take", true, "Capture a still image"));
+    methods_.push_back(MakeMethod("capture.get", true, "Get one capture task snapshot"));
     methods_.push_back(MakeMethod("video.start", true, "Create one video stream session"));
     methods_.push_back(MakeMethod("video.stop", true, "Stop one video stream session"));
     methods_.push_back(MakeMethod("video.set_format", true, "Update one video stream format"));
@@ -100,6 +199,10 @@ void CommandApplicationService::SetVideoFrameSink(VideoFrameSink sink) {
 
 void CommandApplicationService::SetVideoStreamClosedSink(VideoStreamClosedSink sink) {
     video_stream_closed_sink_ = std::move(sink);
+}
+
+void CommandApplicationService::SetCommandEventSink(CommandEventSink sink) {
+    capture_task_service_.SetEventSink(std::move(sink));
 }
 
 Json CommandApplicationService::HandleRequest(const std::string& connection_id, const Json& request_json) {
@@ -163,6 +266,9 @@ Json CommandApplicationService::HandleRequest(const std::string& connection_id, 
     }
     if (request.method == "capture.take") {
         return HandleCaptureTake(connection_id, request);
+    }
+    if (request.method == "capture.get") {
+        return HandleCaptureGet(connection_id, request);
     }
     if (request.method == "video.start") {
         return HandleVideoStart(connection_id, request);
@@ -451,27 +557,53 @@ Json CommandApplicationService::HandleCaptureTake(const std::string& connection_
         return BuildWsResponse(request.request_id, quota_result.code, quota_result.message);
     }
 
-    SdkCaptureRequest capture_request;
-    capture_request.device_id = GetOptionalStringField(request.params, "device_id");
-    capture_request.include_base64 = false;
-    if (capture_request.device_id.empty()) {
+    const std::string device_id = GetOptionalStringField(request.params, "device_id");
+    if (device_id.empty()) {
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "device_id required");
     }
+    const Json profile_json = GetOptionalObjectField(request.params, "profile");
+    if (profile_json.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "profile required");
+    }
 
-    const SdkCaptureResult result = device_facade_.CaptureStill(session_result.auth_context, capture_request);
+    CaptureTaskStartRequest start_request;
+    start_request.connection_id = connection_id;
+    start_request.device_id = device_id;
+    start_request.output_dir = GetOptionalStringField(request.params, "output_dir");
+    start_request.include_base64 = GetOptionalBoolField(request.params, "include_base64", false);
+    start_request.timeout_ms = GetOptionalIntField(request.params, "timeout_ms", 15000);
+    start_request.auth_context = session_result.auth_context;
+    start_request.profile = ParseCaptureProfile(request.params, device_id);
+    if (start_request.profile.device_id.empty()) {
+        start_request.profile.device_id = device_id;
+    }
+
+    const CaptureTaskStartResult result = capture_task_service_.StartTask(start_request);
     if (!IsOkStatusCode(result.code)) {
         return BuildWsResponse(request.request_id, result.code, result.message);
     }
-    Json data{
-        {"device_id", capture_request.device_id},
-        {"captured", result.captured},
-        {"content_type", result.content_type},
-        {"output_path", result.output_path},
-    };
-    if (!result.payload.empty()) {
-        data["payload"] = result.payload;
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"accepted", result.accepted},
+                                {"task_id", result.task.task_id},
+                                {"status", result.task.status}});
+}
+
+Json CommandApplicationService::HandleCaptureGet(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
     }
-    return BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", data);
+    const std::string task_id = GetOptionalStringField(request.params, "task_id");
+    if (task_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "task_id required");
+    }
+    const CaptureTaskSnapshot task = capture_task_service_.GetTask(connection_id, task_id);
+    if (!IsOkStatusCode(task.code)) {
+        return BuildWsResponse(request.request_id, task.code, task.message);
+    }
+    return BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", BuildCaptureTaskJson(task));
 }
 
 Json CommandApplicationService::HandleVideoStart(const std::string& connection_id, const Request& request) {
@@ -796,6 +928,7 @@ Json CommandApplicationService::BuildDeviceJson(const SdkDeviceDescriptor& devic
         {"status", device.status},
         {"authorized", device.authorized},
         {"supports_video", device.supports_video},
+        {"features", Json{{"image_transfer_protocol", device.image_transfer_protocol}}},
         {"resolutions", resolutions},
     };
 }

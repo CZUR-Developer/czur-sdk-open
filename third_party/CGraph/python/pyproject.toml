@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools", "wheel", "pybind11"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pycgraph"
+dynamic = ["version", "description", "authors", "license", "readme", "requires-python", "keywords", "classifiers"]
+
+dependencies = [
+    "pybind11",
+]
+
+[tool.setuptools]
+package-dir = {"" = "."}
