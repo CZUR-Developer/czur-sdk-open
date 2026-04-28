@@ -18,6 +18,7 @@ public:
     virtual std::vector<SdkDeviceDescriptor> ListDevices() const = 0;
     virtual SdkDeviceOpenResult GetDevice(const SdkDeviceOpenRequest& request) = 0;
     virtual SdkDeviceOpenResult OpenDevice(const SdkDeviceOpenRequest& request) = 0;
+    virtual SdkDeviceCloseResult CloseDevice(const SdkDeviceCloseRequest& request) = 0;
     virtual SdkCaptureResult CaptureStill(const SdkCaptureRequest& request) = 0;
     virtual SdkVideoStartResult StartVideo(const SdkVideoStartRequest& request, SdkVideoFrameCallback callback) = 0;
     virtual SdkVideoStopResult StopVideo(const SdkVideoStopRequest& request) = 0;

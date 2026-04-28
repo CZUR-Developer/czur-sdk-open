@@ -1,15 +1,20 @@
 <template>
   <article class="overflow-hidden rounded-[32px] border border-white/70 bg-white/90 shadow-[var(--demo-shadow)]">
     <div class="relative min-h-[300px] bg-slate-950">
+      <canvas
+        v-if="variant === 'video'"
+        ref="videoCanvas"
+        class="absolute inset-0 h-full w-full object-contain"
+      />
       <img
-        v-if="imageUrl"
+        v-else-if="imageUrl"
         :src="imageUrl"
         alt=""
         class="absolute inset-0 h-full w-full object-contain"
       />
-      <div v-else class="absolute inset-0 opacity-70" :class="variantClass" />
-      <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.12),_transparent_38%)]" />
-      <div class="absolute inset-x-0 top-0 h-px bg-cyan-300/50" />
+      <div v-if="showPlaceholder" class="absolute inset-0 opacity-70" :class="variantClass" />
+      <div v-if="showOverlay" class="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.12),_transparent_38%)]" />
+      <div v-if="showOverlay" class="absolute inset-x-0 top-0 h-px bg-cyan-300/50" />
 
       <div class="relative flex min-h-[300px] flex-col justify-between p-6">
         <div class="flex flex-wrap gap-2">
@@ -40,7 +45,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
 import type { PreviewMetric, Tone } from '../../types/demo';
 import StatusPill from '../cards/StatusPill.vue';
@@ -64,9 +69,39 @@ const props = withDefaults(
   },
 );
 
+const emit = defineEmits<{
+  'video-canvas': [canvas: HTMLCanvasElement | null];
+}>();
+
+const videoCanvas = ref<HTMLCanvasElement | null>(null);
+
 const variantClass = computed(() =>
   props.variant === 'video'
     ? 'bg-[linear-gradient(135deg,_rgba(14,116,144,0.72),_rgba(15,23,42,0.95))]'
     : 'bg-[linear-gradient(135deg,_rgba(8,145,178,0.62),_rgba(15,23,42,0.92))]',
 );
+
+const showPlaceholder = computed(() => props.variant !== 'video' && !props.imageUrl);
+const showOverlay = computed(() => props.variant !== 'video');
+
+watch(
+  videoCanvas,
+  (canvas) => {
+    if (props.variant === 'video') {
+      emit('video-canvas', canvas);
+    }
+  },
+  { immediate: true },
+);
+
+watch(
+  () => props.variant,
+  (variant) => {
+    emit('video-canvas', variant === 'video' ? videoCanvas.value : null);
+  },
+);
+
+onBeforeUnmount(() => {
+  emit('video-canvas', null);
+});
 </script>

@@ -179,6 +179,7 @@
 - `device.list`
 - `device.get`
 - `device.open`
+- `device.close`
 - `capture.take`
 - `video.start`
 - `video.stop`
@@ -198,7 +199,7 @@
 最终模型：
 
 - video 控制不再走 video WS 文本控制消息
-- `video.start`、`video.stop`、`video.set_format` 全部走 command WS
+- `device.close`、`video.start`、`video.stop`、`video.set_format` 全部走 command WS
 - video WS 只承载视频帧和必要事件
 
 默认地址：

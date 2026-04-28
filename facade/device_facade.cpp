@@ -104,6 +104,17 @@ SdkDeviceOpenResult DeviceFacade::OpenDevice(const AuthContext& auth_context, co
     return result;
 }
 
+SdkDeviceCloseResult DeviceFacade::CloseDevice(const AuthContext& auth_context, const SdkDeviceCloseRequest& request) const {
+    SdkDeviceCloseResult result;
+    const DeviceGetResult device_result = LookupDevice(auth_context, request.device_id);
+    if (!IsOkStatusCode(device_result.code)) {
+        result.code = device_result.code;
+        result.message = device_result.message;
+        return result;
+    }
+    return providers_.device_provider->CloseDevice(request);
+}
+
 SdkCaptureResult DeviceFacade::CaptureStill(const AuthContext& auth_context, const SdkCaptureRequest& request) const {
     SdkCaptureResult result;
     const DeviceGetResult device_result = LookupDevice(auth_context, request.device_id);

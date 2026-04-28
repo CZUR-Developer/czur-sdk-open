@@ -257,7 +257,7 @@ Common auth failures:
 
 ## Relation to Video WS
 
-- `video.start`, `video.stop`, and `video.set_format` stay on the command lane
+- `device.close`, `video.start`, `video.stop`, and `video.set_format` stay on the command lane
 - the video lane is reserved for stream output and stream-related events
 - video WebSocket still uses `session_token + stream_id`
 

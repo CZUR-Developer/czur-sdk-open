@@ -257,7 +257,7 @@ ws://127.0.0.1:17090
 
 ## 与 Video WS 的关系
 
-- `video.start`、`video.stop`、`video.set_format` 仍然走 command WS
+- `device.close`、`video.start`、`video.stop`、`video.set_format` 仍然走 command WS
 - video WS 只负责视频帧输出和流相关事件
 - video WS 使用 `session_token + stream_id` 建连
 

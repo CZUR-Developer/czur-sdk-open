@@ -74,6 +74,7 @@ The current runtime exposes:
 - `device.list`
 - `device.get`
 - `device.open`
+- `device.close`
 - `capture.take`
 - `video.start`
 - `video.stop`
@@ -141,7 +142,7 @@ Response shape:
 
 ### Video WS
 
-- `video.start`, `video.stop`, and `video.set_format` go through command WS
+- `device.close`, `video.start`, `video.stop`, and `video.set_format` go through command WS
 - video WS is reserved for frame output and related events
 - video WS connects with `session_token + stream_id`
 

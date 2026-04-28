@@ -50,6 +50,17 @@ struct SdkDeviceOpenResult {
     SdkDeviceDescriptor device;
 };
 
+struct SdkDeviceCloseRequest {
+    std::string device_id;
+};
+
+struct SdkDeviceCloseResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool closed = false;
+    bool was_opened = false;
+};
+
 struct SdkCaptureRequest {
     std::string device_id;
     bool include_base64 = false;

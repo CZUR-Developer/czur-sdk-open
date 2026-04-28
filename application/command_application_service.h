@@ -4,6 +4,9 @@
 #pragma once
 
 #include <functional>
+#include <map>
+#include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -65,6 +68,7 @@ private:
     Json HandleDeviceList(const std::string& connection_id, const Request& request);
     Json HandleDeviceGet(const std::string& connection_id, const Request& request);
     Json HandleDeviceOpen(const std::string& connection_id, const Request& request);
+    Json HandleDeviceClose(const std::string& connection_id, const Request& request);
     Json HandleCaptureTake(const std::string& connection_id, const Request& request);
     Json HandleVideoStart(const std::string& connection_id, const Request& request);
     Json HandleVideoStop(const std::string& connection_id, const Request& request);
@@ -83,6 +87,9 @@ private:
     Json BuildAuthContextJson(const AuthContext& auth_context) const;
     Json BuildDeviceJson(const SdkDeviceDescriptor& device) const;
     const MethodDescriptor* FindMethod(const std::string& method) const;
+    void RememberOpenedDevice(const std::string& connection_id, const std::string& device_id);
+    void ForgetOpenedDevice(const std::string& connection_id, const std::string& device_id);
+    std::vector<std::string> ClearOpenedDevices(const std::string& connection_id);
 
     SdkConfig config_;
     ProviderBundle providers_;
@@ -96,6 +103,8 @@ private:
     VideoFrameSink video_frame_sink_;
     VideoStreamClosedSink video_stream_closed_sink_;
     std::vector<MethodDescriptor> methods_;
+    mutable std::mutex opened_devices_mu_;
+    std::map<std::string, std::set<std::string> > opened_devices_by_connection_;
 };
 
 } // namespace sdk

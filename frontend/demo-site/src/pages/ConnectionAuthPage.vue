@@ -15,7 +15,7 @@
           >
             <template #footer>
               <StatusPill
-                :label="t(action.id === 'validate' ? 'actions.validate' : action.id === 'refresh' ? 'actions.refresh' : 'actions.getContext')"
+                :label="t(action.id === 'validate' ? 'actions.healthCheck' : action.id === 'refresh' ? 'actions.refresh' : 'actions.getContext')"
                 :tone="action.tone ?? 'neutral'"
               />
             </template>
@@ -58,7 +58,9 @@ import SectionPanel from '../components/blocks/SectionPanel.vue';
 import InfoCard from '../components/cards/InfoCard.vue';
 import StatusPill from '../components/cards/StatusPill.vue';
 import { authSessionState } from '../services/auth-session';
+import { deviceVideoState } from '../services/device-video';
 import { runtimeRecordState } from '../services/runtime-records';
+import type { ExecutionState } from '../types/demo';
 import { executionStateLabelKey, executionStateTone } from '../utils/presentation';
 
 const { t } = useI18n();
@@ -66,14 +68,10 @@ const { t } = useI18n();
 const authActions = computed(() => [
   {
     id: 'validate',
-    eyebrow: 'auth.create_session',
+    eyebrow: 'system.ping',
     title: 'Command connect',
-    description: authSessionState.token
-      ? 'The command lane connects anonymously and creates a bound session through auth.create_session.'
-      : 'The command lane stays idle until the browser has a locally stored token.',
-    meta: authSessionState.lastConnectedAt
-      ? `connected at ${authSessionState.lastConnectedAt}`
-      : 'connect first, then create the session in-band',
+    description: commandLaneDescription.value,
+    meta: commandLaneMeta.value,
     tone: 'primary',
     state: authSessionState.commandState,
   },
@@ -102,16 +100,26 @@ const authActions = computed(() => [
 ]);
 
 const authFormItems = computed(() => [
-  { label: t('labels.endpoint'), value: authSessionState.connectionEndpoint, monospace: true },
+  {
+    label: 'Command endpoint',
+    value: authSessionState.connectionEndpoint,
+    hint: commandLaneHint.value,
+    monospace: true,
+  },
+  {
+    label: 'Video endpoint',
+    value: authSessionState.videoEndpoint,
+    hint: videoLaneHint.value,
+    monospace: true,
+  },
   {
     label: t('labels.apiKey'),
     value: authSessionState.token ? maskSecret(authSessionState.token) : t('common.notSet'),
     monospace: true,
   },
   { label: t('labels.sessionKey'), value: authSessionState.sessionToken ? maskSecret(authSessionState.sessionToken) : t('common.notSet'), monospace: true },
-  { label: t('labels.providerMode'), value: 'runtime auth provider / command ws' },
-  { label: t('labels.handshake'), value: 'anonymous ws + auth.create_session' },
-  { label: t('common.status'), value: t(executionStateLabelKey(authSessionState.commandState)) },
+  { label: 'Command status', value: t(executionStateLabelKey(authSessionState.commandState)) },
+  { label: 'Video status', value: t(executionStateLabelKey(videoLaneState.value)) },
 ]);
 
 const authContextItems = computed(() => {
@@ -150,9 +158,65 @@ const authContextItems = computed(() => {
 
 const authFailureItems = computed(() =>
   runtimeRecordState.errors
-    .filter((error) => error.method.startsWith('auth.') || error.method.startsWith('command.'))
+    .filter((error) => error.method.startsWith('auth.') || error.method.startsWith('command.') || error.method.startsWith('system.'))
     .slice(0, 3),
 );
+
+const commandLaneDescription = computed(() => {
+  if (authSessionState.commandState === 'success') {
+    return 'The command lane is reachable and system.ping returned pong=true.';
+  }
+  if (authSessionState.commandState === 'running') {
+    return 'Checking the anonymous command lane with system.ping.';
+  }
+  if (authSessionState.commandState === 'error') {
+    return authSessionState.commandErrorMessage || 'The command lane did not pass system.ping.';
+  }
+  return 'The command lane uses anonymous WebSocket connect, then system.ping verifies reachability.';
+});
+
+const commandLaneMeta = computed(() => {
+  if (authSessionState.commandCheckedAt) {
+    return `checked at ${authSessionState.commandCheckedAt} · ${authSessionState.commandLatencyMs}ms`;
+  }
+  if (authSessionState.lastConnectedAt) {
+    return `connected at ${authSessionState.lastConnectedAt}`;
+  }
+  return 'waiting for command-channel check';
+});
+
+const commandLaneHint = computed(() => {
+  if (authSessionState.commandState === 'error') {
+    return authSessionState.commandErrorMessage || 'system.ping failed';
+  }
+  if (authSessionState.commandCheckedAt) {
+    return `system.ping · ${authSessionState.commandLatencyMs}ms · ${authSessionState.commandCheckedAt}`;
+  }
+  return 'anonymous ws + system.ping';
+});
+
+const videoLaneState = computed<ExecutionState>(() => {
+  if (!authSessionState.sessionToken) {
+    return 'blocked';
+  }
+  if (!deviceVideoState.streamId) {
+    return 'idle';
+  }
+  return deviceVideoState.videoState;
+});
+
+const videoLaneHint = computed(() => {
+  if (!authSessionState.sessionToken) {
+    return 'session_token required before video stream binding';
+  }
+  if (!deviceVideoState.streamId) {
+    return 'waiting for video.start to create stream_id';
+  }
+  if (deviceVideoState.videoState === 'success') {
+    return `subscribed stream_id=${deviceVideoState.streamId}`;
+  }
+  return `stream_id=${deviceVideoState.streamId}`;
+});
 
 function maskSecret(value: string): string {
   if (!value) {

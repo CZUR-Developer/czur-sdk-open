@@ -80,6 +80,7 @@ CommandApplicationService::CommandApplicationService(const SdkConfig& config, co
     methods_.push_back(MakeMethod("device.list", true, "List devices visible to the current session"));
     methods_.push_back(MakeMethod("device.get", true, "Get one device visible to the current session"));
     methods_.push_back(MakeMethod("device.open", true, "Open a device"));
+    methods_.push_back(MakeMethod("device.close", true, "Close a device and release active preview resources"));
     methods_.push_back(MakeMethod("capture.take", true, "Capture a still image"));
     methods_.push_back(MakeMethod("video.start", true, "Create one video stream session"));
     methods_.push_back(MakeMethod("video.stop", true, "Stop one video stream session"));
@@ -157,6 +158,9 @@ Json CommandApplicationService::HandleRequest(const std::string& connection_id, 
     if (request.method == "device.open") {
         return HandleDeviceOpen(connection_id, request);
     }
+    if (request.method == "device.close") {
+        return HandleDeviceClose(connection_id, request);
+    }
     if (request.method == "capture.take") {
         return HandleCaptureTake(connection_id, request);
     }
@@ -196,6 +200,12 @@ void CommandApplicationService::OnConnectionClosed(const std::string& connection
         if (video_stream_closed_sink_) {
             video_stream_closed_sink_(it->stream_id);
         }
+    }
+    const std::vector<std::string> opened_devices = ClearOpenedDevices(connection_id);
+    for (std::vector<std::string>::const_iterator it = opened_devices.begin(); it != opened_devices.end(); ++it) {
+        SdkDeviceCloseRequest close_request;
+        close_request.device_id = *it;
+        device_facade_.CloseDevice(AuthContext(), close_request);
     }
 }
 
@@ -290,6 +300,25 @@ Json CommandApplicationService::HandleAuthActivateOffline(const std::string& con
 }
 
 Json CommandApplicationService::HandleAuthDestroySession(const std::string& connection_id, const Request& request) {
+    const std::vector<VideoSessionService::StreamBinding> removed = video_session_service_.ClearConnection(connection_id);
+    for (std::vector<VideoSessionService::StreamBinding>::const_iterator it = removed.begin();
+         it != removed.end();
+         ++it) {
+        if (providers_.device_provider) {
+            SdkVideoStopRequest stop_request;
+            stop_request.device_id = it->device_id;
+            providers_.device_provider->StopVideo(stop_request);
+        }
+        if (video_stream_closed_sink_) {
+            video_stream_closed_sink_(it->stream_id);
+        }
+    }
+    const std::vector<std::string> opened_devices = ClearOpenedDevices(connection_id);
+    for (std::vector<std::string>::const_iterator it = opened_devices.begin(); it != opened_devices.end(); ++it) {
+        SdkDeviceCloseRequest close_request;
+        close_request.device_id = *it;
+        device_facade_.CloseDevice(AuthContext(), close_request);
+    }
     const AuthorizationService::SessionResult session_result = authorization_service_.DestroySession(connection_id);
     return BuildWsResponse(request.request_id, session_result.code, session_result.message, Json{{"destroyed", true}});
 }
@@ -357,7 +386,59 @@ Json CommandApplicationService::HandleDeviceOpen(const std::string& connection_i
     data["device_id"] = result.device.device_id.empty() ? open_request.device_id : result.device.device_id;
     data["opened"] = result.opened;
     data["provider"] = providers_.device_provider ? providers_.device_provider->ProviderName() : "";
+    if (result.opened) {
+        RememberOpenedDevice(connection_id, open_request.device_id);
+    }
     return BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", data);
+}
+
+Json CommandApplicationService::HandleDeviceClose(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+
+    SdkDeviceCloseRequest close_request;
+    close_request.device_id = GetOptionalStringField(request.params, "device_id");
+    if (close_request.device_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "device_id required");
+    }
+
+    bool stopped_stream = false;
+    std::string stopped_stream_id;
+    SdkVideoStopRequest stop_request;
+    stop_request.device_id = close_request.device_id;
+    const SdkVideoStopResult stop_result = device_facade_.StopVideo(session_result.auth_context, stop_request);
+    if (!IsOkStatusCode(stop_result.code)) {
+        return BuildWsResponse(request.request_id, stop_result.code, stop_result.message);
+    }
+    const VideoSessionService::StreamResult stream_result =
+        video_session_service_.StopStream(connection_id, close_request.device_id);
+    if (IsOkStatusCode(stream_result.code)) {
+        stopped_stream = true;
+        stopped_stream_id = stream_result.binding.stream_id;
+        if (video_stream_closed_sink_) {
+            video_stream_closed_sink_(stream_result.binding.stream_id);
+        }
+    } else if (stream_result.code != ToCode(SdkStatusCode::StreamNotFound)) {
+        return BuildWsResponse(request.request_id, stream_result.code, stream_result.message);
+    }
+
+    const SdkDeviceCloseResult close_result = device_facade_.CloseDevice(session_result.auth_context, close_request);
+    if (!IsOkStatusCode(close_result.code)) {
+        return BuildWsResponse(request.request_id, close_result.code, close_result.message);
+    }
+    ForgetOpenedDevice(connection_id, close_request.device_id);
+
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"device_id", close_request.device_id},
+                                {"closed", close_result.closed},
+                                {"was_opened", close_result.was_opened},
+                                {"stopped_stream", stopped_stream},
+                                {"stream_id", stopped_stream_id},
+                                {"provider", providers_.device_provider ? providers_.device_provider->ProviderName() : ""}});
 }
 
 Json CommandApplicationService::HandleCaptureTake(const std::string& connection_id, const Request& request) {
@@ -726,6 +807,40 @@ const CommandApplicationService::MethodDescriptor* CommandApplicationService::Fi
         }
     }
     return NULL;
+}
+
+void CommandApplicationService::RememberOpenedDevice(const std::string& connection_id, const std::string& device_id) {
+    if (connection_id.empty() || device_id.empty()) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(opened_devices_mu_);
+    opened_devices_by_connection_[connection_id].insert(device_id);
+}
+
+void CommandApplicationService::ForgetOpenedDevice(const std::string& connection_id, const std::string& device_id) {
+    std::lock_guard<std::mutex> lock(opened_devices_mu_);
+    std::map<std::string, std::set<std::string> >::iterator it = opened_devices_by_connection_.find(connection_id);
+    if (it == opened_devices_by_connection_.end()) {
+        return;
+    }
+    it->second.erase(device_id);
+    if (it->second.empty()) {
+        opened_devices_by_connection_.erase(it);
+    }
+}
+
+std::vector<std::string> CommandApplicationService::ClearOpenedDevices(const std::string& connection_id) {
+    std::vector<std::string> devices;
+    std::lock_guard<std::mutex> lock(opened_devices_mu_);
+    std::map<std::string, std::set<std::string> >::iterator it = opened_devices_by_connection_.find(connection_id);
+    if (it == opened_devices_by_connection_.end()) {
+        return devices;
+    }
+    for (std::set<std::string>::const_iterator device_it = it->second.begin(); device_it != it->second.end(); ++device_it) {
+        devices.push_back(*device_it);
+    }
+    opened_devices_by_connection_.erase(it);
+    return devices;
 }
 
 } // namespace sdk

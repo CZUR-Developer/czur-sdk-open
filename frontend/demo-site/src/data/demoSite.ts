@@ -221,14 +221,14 @@ export const quickStartChecks: QuickCheckItem[] = [
     latency: '22ms',
     note: 'Capability matrix loaded for 9 operational domains',
     state: 'success',
-    payload: `{"method":"system.capabilities","result":{"ga":23,"beta":8,"planned":4}}`,
+    payload: `{"method":"system.capabilities","result":{"ga":24,"beta":8,"planned":4}}`,
   },
 ];
 
 export const quickStartCapabilities: CapabilityItem[] = [
   { id: 'system', domain: 'system', coverage: '3 / 3 routes', status: 'ga', tags: [] },
   { id: 'auth', domain: 'auth', coverage: '3 / 4 routes', status: 'ga', tags: [] },
-  { id: 'device', domain: 'device', coverage: '4 / 5 routes', status: 'ga', tags: ['device'] },
+  { id: 'device', domain: 'device', coverage: '4 / 4 routes', status: 'ga', tags: ['device'] },
   { id: 'stream', domain: 'stream / event', coverage: '3 / 4 routes', status: 'beta', tags: ['device'] },
   { id: 'capture', domain: 'capture', coverage: '5 / 5 routes', status: 'ga', tags: ['device'] },
   { id: 'image', domain: 'image', coverage: '8 / 10 routes', status: 'beta', tags: ['provider'] },
@@ -322,159 +322,6 @@ export const authFailureItems: ErrorItem[] = [
     message: 'Requested device is outside the current scope grant.',
     traceId: 'trc-demo-20260407-1744',
     occurredAt: '17:44:58',
-  },
-];
-
-export const deviceVideoMetrics: MetricCardItem[] = [
-  {
-    id: 'online-devices',
-    value: '2',
-    labelKey: 'common.preview',
-    detail: 'Devices currently reachable from demo runtime',
-    trend: '1 active preview lane',
-    tone: 'success',
-  },
-  {
-    id: 'frame-rate',
-    value: '29.7fps',
-    labelKey: 'labels.resolution',
-    detail: 'Current stream cadence measured on frame meta events',
-    trend: '1920 x 1080',
-    tone: 'primary',
-  },
-  {
-    id: 'event-lag',
-    value: '18ms',
-    labelKey: 'common.timeline',
-    detail: 'Synthetic event fan-out delay from provider to demo page',
-    trend: 'well within target',
-    tone: 'warning',
-  },
-];
-
-export const deviceRows: TableRow[] = [
-  {
-    id: 'dev-01',
-    cells: {
-      deviceId: 'dev-01',
-      model: 'ET18 Pro',
-      displayName: 'CZUR ET18 Pro',
-      vid: '0x2E17',
-      pid: '0x0007',
-      status: 'opened',
-      authorized: 'true',
-      cameras: 'main, overhead',
-    },
-  },
-  {
-    id: 'dev-02',
-    cells: {
-      deviceId: 'dev-02',
-      model: 'Aura X',
-      displayName: 'CZUR Aura X',
-      vid: '0x2E17',
-      pid: '0x0009',
-      status: 'standby',
-      authorized: 'true',
-      cameras: 'main',
-    },
-  },
-];
-
-export const deviceControlCards: InfoCardItem[] = [
-  {
-    id: 'open',
-    eyebrow: 'device.open',
-    title: 'Open device',
-    description: 'target=dev-01 · warmup=preview-ready · auth_scope=device',
-    meta: 'enabled',
-    tone: 'success',
-    state: 'success',
-    tags: ['device'],
-  },
-  {
-    id: 'close',
-    eyebrow: 'device.close',
-    title: 'Close device',
-    description: 'drain active preview subscription before releasing handles',
-    meta: 'safe rollback path',
-    tone: 'neutral',
-    state: 'idle',
-    tags: ['device'],
-  },
-  {
-    id: 'resolution',
-    eyebrow: 'device.set_preview_resolution',
-    title: 'Preview resolution',
-    description: 'current=1920x1080 · presets=1080p / 720p / 540p',
-    meta: 'applies to video lane',
-    tone: 'primary',
-    state: 'running',
-    tags: ['device'],
-  },
-];
-
-export const streamCards: InfoCardItem[] = [
-  {
-    id: 'subscribe',
-    eyebrow: 'stream.subscribe',
-    title: 'Subscribe preview stream',
-    description: 'codec=jpeg-sequence · qos=balanced · buffer=3',
-    meta: 'active on dev-01',
-    tone: 'primary',
-    state: 'running',
-    tags: ['device'],
-  },
-  {
-    id: 'unsubscribe',
-    eyebrow: 'stream.unsubscribe',
-    title: 'Drain preview lane',
-    description: 'used before switching device or tearing down session',
-    meta: 'standby helper',
-    tone: 'neutral',
-    state: 'idle',
-    tags: ['device'],
-  },
-  {
-    id: 'options',
-    eyebrow: 'stream.set_options',
-    title: 'Preview stream options',
-    description: 'exposure=auto · sharpen=balanced · frame_meta=true',
-    meta: 'applies without reconnect',
-    tone: 'info',
-    state: 'success',
-    tags: ['device', 'provider'],
-  },
-];
-
-export const videoPreviewMetrics: PreviewMetric[] = [
-  { label: 'Frame', value: '#004289', monospace: true },
-  { label: 'Resolution', value: '1920 x 1080' },
-  { label: 'Last frame', value: '12ms ago' },
-  { label: 'Pipeline', value: 'preview-ready' },
-];
-
-export const deviceVideoEvents: TimelineItem[] = [
-  {
-    id: 'dev-event-1',
-    title: 'device.online',
-    detail: 'dev-01 registered with main + overhead cameras',
-    meta: '18:20:14',
-    tone: 'success',
-  },
-  {
-    id: 'dev-event-2',
-    title: 'stream.frame_meta',
-    detail: 'frame=4289 · exp=10ms · iso=120',
-    meta: '18:21:02',
-    tone: 'primary',
-  },
-  {
-    id: 'dev-event-3',
-    title: 'device.offline',
-    detail: 'dev-02 moved to standby after USB detach simulation',
-    meta: '18:22:40',
-    tone: 'warning',
   },
 ];
 
@@ -999,12 +846,6 @@ export const sharedJsonSnippets: Record<string, JsonSnippet> = {
     title: 'system.capabilities sample',
     caption: 'Quick start keeps the friendly cards and raw JSON side by side.',
     payload: `{"ga":["system","auth","capture","ocr"],"beta":["stream","image","file"],"planned":["sane"]}`,
-  },
-  deviceVideo: {
-    id: 'device-video-json',
-    title: 'stream.frame_meta sample',
-    caption: 'Useful when comparing UI preview with transport payload.',
-    payload: `{"event":"stream.frame_meta","frame_id":4289,"resolution":"1920x1080","exposure":"auto","ts":"2026-04-07T18:21:02Z"}`,
   },
   capture: {
     id: 'capture-json',

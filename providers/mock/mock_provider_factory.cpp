@@ -85,6 +85,7 @@ public:
             "device.list",
             "device.get",
             "device.open",
+            "device.close",
             "capture.take",
             "video.start",
             "video.stop",
@@ -256,6 +257,28 @@ public:
             opened_devices_[request.device_id] = PickResolution(request.width, request.height, request.fps);
         }
         result.opened = true;
+        return result;
+    }
+
+    SdkDeviceCloseResult CloseDevice(const SdkDeviceCloseRequest& request) override {
+        SdkDeviceCloseResult result;
+        SdkDeviceOpenRequest get_request;
+        get_request.device_id = request.device_id;
+        const SdkDeviceOpenResult device_result = GetDevice(get_request);
+        if (!IsOkStatusCode(device_result.code)) {
+            result.code = device_result.code;
+            result.message = device_result.message;
+            return result;
+        }
+
+        SdkVideoStopRequest stop_request;
+        stop_request.device_id = request.device_id;
+        StopVideo(stop_request);
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            result.was_opened = opened_devices_.erase(request.device_id) > 0;
+        }
+        result.closed = true;
         return result;
     }
 

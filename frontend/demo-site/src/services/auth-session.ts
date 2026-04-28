@@ -40,6 +40,9 @@ interface AuthSessionState {
   videoEndpoint: string;
   authContext: AuthContextPayload | null;
   lastConnectedAt: string;
+  commandCheckedAt: string;
+  commandLatencyMs: number;
+  commandErrorMessage: string;
 }
 
 const STORAGE_KEYS = {
@@ -58,6 +61,9 @@ const state = reactive<AuthSessionState>({
   videoEndpoint: buildVideoEndpointLabel(),
   authContext: null,
   lastConnectedAt: '',
+  commandCheckedAt: '',
+  commandLatencyMs: 0,
+  commandErrorMessage: '',
 });
 
 let client: CommandWsClient | null = null;
@@ -73,23 +79,10 @@ export async function initializeAuthSession(): Promise<void> {
   state.videoEndpoint = buildVideoEndpointLabel();
   clearRuntimeState();
 
-  if (!state.token) {
-    state.commandState = 'blocked';
-    state.refreshState = 'blocked';
-    state.contextState = 'blocked';
-    recordRuntimeEvent({
-      title: 'command.idle',
-      detail: 'Waiting for a locally stored token before creating a bound session.',
-      tone: 'warning',
-    });
-    disconnectClient('token missing');
-    return;
-  }
-
   state.commandState = 'running';
   recordRuntimeEvent({
     title: 'command.connecting',
-    detail: `Opening ${state.connectionEndpoint} with anonymous command-channel connect.`,
+    detail: `Checking ${state.connectionEndpoint} with anonymous command-channel ping.`,
     tone: 'primary',
   });
   disconnectClient('reconnect');
@@ -104,13 +97,34 @@ export async function initializeAuthSession(): Promise<void> {
       return;
     }
 
-    state.commandState = 'success';
     state.lastConnectedAt = nowTimeLabel();
     recordRuntimeEvent({
       title: 'command.connected',
       detail: `Command channel connected at ${state.lastConnectedAt}.`,
       tone: 'success',
     });
+
+    const pingOk = await checkCommandConnectivity(nextClient);
+    if (runToken !== activeRunToken) {
+      nextClient.disconnect('stale auth run');
+      return;
+    }
+    if (!pingOk) {
+      state.refreshState = 'blocked';
+      state.contextState = 'blocked';
+      return;
+    }
+
+    if (!state.token) {
+      state.refreshState = 'blocked';
+      state.contextState = 'blocked';
+      recordRuntimeEvent({
+        title: 'auth.blocked',
+        detail: 'Command channel is reachable, but token is required before creating a bound session.',
+        tone: 'warning',
+      });
+      return;
+    }
 
     state.refreshState = 'running';
     const createResponse = await sendTrackedCommand(nextClient, 'auth.create_session', {
@@ -155,6 +169,7 @@ export async function initializeAuthSession(): Promise<void> {
 
     clearSession();
     state.commandState = 'error';
+    state.commandErrorMessage = errorMessage(error);
     state.refreshState = 'blocked';
     state.contextState = 'blocked';
     recordAlert({
@@ -221,6 +236,44 @@ export async function loadAuthContext(activeClient: CommandWsClient | null = cli
   });
 }
 
+export async function checkCommandConnectivity(activeClient: CommandWsClient | null = client): Promise<boolean> {
+  if (!activeClient) {
+    state.commandState = 'error';
+    state.commandErrorMessage = 'command channel not connected';
+    return false;
+  }
+
+  state.commandState = 'running';
+  state.commandErrorMessage = '';
+  const startedAt = performance.now();
+
+  try {
+    const response = await sendTrackedCommand(activeClient, 'system.ping');
+    state.commandLatencyMs = Math.round(performance.now() - startedAt);
+    state.commandCheckedAt = nowTimeLabel();
+    if (!isOkResponse(response) || response.data.pong !== true) {
+      state.commandState = 'error';
+      state.commandErrorMessage = response.message || 'system.ping failed';
+      return false;
+    }
+
+    state.commandState = 'success';
+    recordRuntimeEvent({
+      title: 'command.ping_ok',
+      detail: `system.ping returned pong=true in ${state.commandLatencyMs}ms.`,
+      tone: 'success',
+      meta: state.commandCheckedAt,
+    });
+    return true;
+  } catch (error) {
+    state.commandLatencyMs = Math.round(performance.now() - startedAt);
+    state.commandCheckedAt = nowTimeLabel();
+    state.commandState = 'error';
+    state.commandErrorMessage = errorMessage(error);
+    return false;
+  }
+}
+
 export function saveApiKey(value: string): void {
   state.token = value.trim();
   persistValue(STORAGE_KEYS.token, state.token);
@@ -231,6 +284,7 @@ export function clearApiKey(): void {
   state.token = '';
   persistValue(STORAGE_KEYS.token, '');
   clearSession();
+  clearCommandConnectivity();
   disconnectClient('token cleared');
   state.commandState = 'blocked';
   state.refreshState = 'blocked';
@@ -245,6 +299,7 @@ export function clearApiKey(): void {
 export function disconnectCommandChannel(): void {
   activeRunToken += 1;
   disconnectClient('manual disconnect');
+  clearCommandConnectivity();
   state.commandState = state.token ? 'idle' : 'blocked';
 }
 
@@ -268,7 +323,14 @@ function clearRuntimeState(): void {
   state.commandState = 'idle';
   state.refreshState = 'idle';
   state.contextState = 'idle';
+  clearCommandConnectivity();
+}
+
+function clearCommandConnectivity(): void {
   state.lastConnectedAt = '';
+  state.commandCheckedAt = '';
+  state.commandLatencyMs = 0;
+  state.commandErrorMessage = '';
 }
 
 function clearSession(): void {

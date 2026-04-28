@@ -73,6 +73,7 @@
 - `device.list`
 - `device.get`
 - `device.open`
+- `device.close`
 - `capture.take`
 - `video.start`
 - `video.stop`
@@ -140,7 +141,7 @@
 
 ### Video WS
 
-- `video.start`、`video.stop`、`video.set_format` 走 command WS
+- `device.close`、`video.start`、`video.stop`、`video.set_format` 走 command WS
 - video WS 只用于视频流输出与相关事件
 - video WS 使用 `session_token + stream_id` 建连
 

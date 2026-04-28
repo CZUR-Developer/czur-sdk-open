@@ -32,6 +32,7 @@ public:
     DeviceListResult ListDevices(const AuthContext& auth_context) const;
     DeviceGetResult GetDevice(const AuthContext& auth_context, const std::string& device_id) const;
     SdkDeviceOpenResult OpenDevice(const AuthContext& auth_context, const SdkDeviceOpenRequest& request) const;
+    SdkDeviceCloseResult CloseDevice(const AuthContext& auth_context, const SdkDeviceCloseRequest& request) const;
     SdkCaptureResult CaptureStill(const AuthContext& auth_context, const SdkCaptureRequest& request) const;
     SdkVideoStartResult StartVideo(const AuthContext& auth_context,
                                    const SdkVideoStartRequest& request,
