@@ -37,6 +37,7 @@ private:
     AdminApplicationService admin_application_service_;
     SdkHttpServer admin_http_server_;
     SdkHttpServer demo_http_server_;
+    SdkHttpServer asset_http_server_;
     SdkWsCommandServer command_ws_server_;
     SdkWsVideoServer video_ws_server_;
     std::atomic<bool> running_;

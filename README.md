@@ -55,6 +55,8 @@ Default runtime endpoints:
   - admin site
 - `http://127.0.0.1:17081`
   - demo site
+- `http://127.0.0.1:17082`
+  - asset API for captured images, thumbnails, and document outputs
 - `ws://127.0.0.1:17090`
   - command channel
 - `ws://127.0.0.1:17091`
@@ -194,9 +196,18 @@ cmake --build build --target sdk_open_app sdk_app -j4
 
 - `SDK_ADMIN_HTTP_PORT`
 - `SDK_DEMO_HTTP_PORT`
+- `SDK_ASSET_HTTP_PORT`
+- `SDK_ASSET_BASE_URL`
 - `SDK_COMMAND_WS_PORT`
 - `SDK_VIDEO_WS_PORT`
 - `SDK_AUTH_TOKEN`
+
+Asset API responses require session authorization:
+
+```bash
+curl -H "Authorization: Bearer <session_token>" \
+  http://127.0.0.1:17082/api/assets/<task_id>/<asset_id>
+```
 
 ## Documentation
 

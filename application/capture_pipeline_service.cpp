@@ -7,7 +7,10 @@
 #include <cctype>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
+#include <fstream>
 #include <mutex>
+#include <sys/stat.h>
 
 #include "CGraph.h"
 #include "sdk_logger.h"
@@ -48,6 +51,32 @@ bool HasExtension(const std::string& path, const std::string& format) {
     return suffix == ext;
 }
 
+bool FileExists(const std::string& path) {
+    struct stat st;
+    return !path.empty() && ::stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+}
+
+uint64_t FileSize(const std::string& path) {
+    struct stat st;
+    if (path.empty() || ::stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
+        return 0;
+    }
+    return static_cast<uint64_t>(st.st_size);
+}
+
+bool CopyFileBinary(const std::string& input_path, const std::string& output_path) {
+    std::ifstream input(input_path.c_str(), std::ios::binary);
+    if (!input.is_open()) {
+        return false;
+    }
+    std::ofstream output(output_path.c_str(), std::ios::binary | std::ios::trunc);
+    if (!output.is_open()) {
+        return false;
+    }
+    output << input.rdbuf();
+    return output.good();
+}
+
 SdkCaptureAsset MakeAsset(const std::string& id,
                           const std::string& kind,
                           const std::string& path,
@@ -65,6 +94,21 @@ SdkCaptureAsset MakeAsset(const std::string& id,
     asset.size = size;
     return asset;
 }
+
+enum class ThumbnailTarget {
+    Original,
+    PageProcessed,
+    ColorProcessed
+};
+
+struct ThumbnailSpec {
+    bool enabled = false;
+    std::string stage_name;
+    std::string kind;
+    std::string input_asset_id;
+    std::string output_asset_id;
+    std::string input_path;
+};
 
 class CapturePipelineContext {
 public:
@@ -138,13 +182,6 @@ public:
         return CStatus();
     }
 
-    CStatus OriginalThumbnail() {
-        if (!request_.profile.thumbnail_original) {
-            return CStatus();
-        }
-        return GenerateThumbnail("original_thumbnail", "original_thumbnail", original_path_, "asset-thumbnail-original");
-    }
-
     CStatus PageProcess() {
         StartStage("page_process");
         page_path_ = JoinPath(output_dir_, "page_processed.jpg");
@@ -156,7 +193,7 @@ public:
         const SdkPageProcessResult result = graphic_facade_.ProcessPage(page_request);
         if (!IsOkStatusCode(result.code) || result.unsupported || !result.processed) {
             page_path_ = original_path_;
-        AddWarning("page_process fallback: " + result.message);
+            AddWarning("page_process fallback: " + result.message);
             FinishStage("page_process", "succeeded", ProviderName(providers_graphic), "fallback to original", {"asset-original"}, {"asset-page-processed"});
             AddAsset(MakeAsset("asset-page-processed", "page_processed", page_path_, "image/jpeg"));
             return CStatus();
@@ -165,13 +202,6 @@ public:
         AddAsset(MakeAsset("asset-page-processed", "page_processed", page_path_, "image/jpeg"));
         FinishStage("page_process", "succeeded", ProviderName(providers_graphic), "ok", {"asset-original"}, {"asset-page-processed"});
         return CStatus();
-    }
-
-    CStatus PageProcessedThumbnail() {
-        if (!request_.profile.thumbnail_page_processed) {
-            return CStatus();
-        }
-        return GenerateThumbnail("page_processed_thumbnail", "page_processed_thumbnail", page_path_, "asset-thumbnail-page-processed");
     }
 
     CStatus ColorMode() {
@@ -195,11 +225,12 @@ public:
         return CStatus();
     }
 
-    CStatus ColorProcessedThumbnail() {
-        if (!request_.profile.thumbnail_color_processed) {
+    CStatus RunThumbnail(ThumbnailTarget target) {
+        const ThumbnailSpec spec = BuildThumbnailSpec(target);
+        if (!spec.enabled) {
             return CStatus();
         }
-        return GenerateThumbnail("color_processed_thumbnail", "color_processed_thumbnail", color_path_, "asset-thumbnail-color-processed");
+        return GenerateThumbnail(spec);
     }
 
     CStatus FormatConvert() {
@@ -311,23 +342,59 @@ private:
         warnings_.push_back(warning);
     }
 
-    CStatus GenerateThumbnail(const std::string& stage_name,
-                                      const std::string& kind,
-                                      const std::string& input_path,
-                                      const std::string& asset_id) {
-        StartStage(stage_name);
+    ThumbnailSpec BuildThumbnailSpec(ThumbnailTarget target) const {
+        ThumbnailSpec spec;
+        if (target == ThumbnailTarget::Original) {
+            spec.enabled = request_.profile.thumbnail_original;
+            spec.stage_name = "original_thumbnail";
+            spec.kind = "original_thumbnail";
+            spec.input_asset_id = "asset-original";
+            spec.output_asset_id = "asset-thumbnail-original";
+            spec.input_path = original_path_;
+            return spec;
+        }
+        if (target == ThumbnailTarget::PageProcessed) {
+            spec.enabled = request_.profile.thumbnail_page_processed;
+            spec.stage_name = "page_processed_thumbnail";
+            spec.kind = "page_processed_thumbnail";
+            spec.input_asset_id = "asset-page-processed";
+            spec.output_asset_id = "asset-thumbnail-page-processed";
+            spec.input_path = page_path_;
+            return spec;
+        }
+        spec.enabled = request_.profile.thumbnail_color_processed;
+        spec.stage_name = "color_processed_thumbnail";
+        spec.kind = "color_processed_thumbnail";
+        spec.input_asset_id = "asset-color-processed";
+        spec.output_asset_id = "asset-thumbnail-color-processed";
+        spec.input_path = color_path_;
+        return spec;
+    }
+
+    CStatus GenerateThumbnail(const ThumbnailSpec& spec) {
+        StartStage(spec.stage_name);
         SdkThumbnailRequest request;
-        request.input_path = input_path;
-        request.output_path = JoinPath(output_dir_, stage_name + ".jpg");
-        request.thumbnail_kind = kind;
+        request.input_path = spec.input_path;
+        request.output_path = JoinPath(output_dir_, spec.stage_name + ".jpg");
+        request.thumbnail_kind = spec.kind;
         const SdkThumbnailResult result = graphic_facade_.GenerateThumbnail(request);
-        if (!IsOkStatusCode(result.code) || !result.generated) {
-            AddWarning(stage_name + " failed: " + result.message);
-            FinishStage(stage_name, "failed", ProviderName(providers_graphic), result.message, {}, {});
+        const std::string output_path = result.output_path.empty() ? request.output_path : result.output_path;
+        if (IsOkStatusCode(result.code) && result.generated && FileExists(output_path)) {
+            AddAsset(MakeAsset(spec.output_asset_id, spec.kind, output_path, "image/jpeg", result.width, result.height, result.size));
+            FinishStage(spec.stage_name, "succeeded", ProviderName(providers_graphic), "ok", {spec.input_asset_id}, {spec.output_asset_id});
             return CStatus();
         }
-        AddAsset(MakeAsset(asset_id, kind, result.output_path.empty() ? request.output_path : result.output_path, "image/jpeg", result.width, result.height, result.size));
-        FinishStage(stage_name, "succeeded", ProviderName(providers_graphic), "ok", {}, {asset_id});
+
+        const std::string message = result.message.empty() ? "thumbnail generation failed" : result.message;
+        AddWarning(spec.stage_name + " fallback: " + message);
+        if (!CopyFileBinary(spec.input_path, request.output_path)) {
+            AddWarning(spec.stage_name + " fallback copy failed");
+            FinishStage(spec.stage_name, "failed", ProviderName(providers_graphic), "fallback copy failed", {spec.input_asset_id}, {});
+            return CStatus();
+        }
+
+        AddAsset(MakeAsset(spec.output_asset_id, spec.kind, request.output_path, "image/jpeg", 0, 0, FileSize(request.output_path)));
+        FinishStage(spec.stage_name, "succeeded", ProviderName(providers_graphic), "fallback copy original", {spec.input_asset_id}, {spec.output_asset_id});
         return CStatus();
     }
 
@@ -357,12 +424,13 @@ private:
     CapturePipelineContext* context_;
 };
 
-class OriginalThumbnailNode : public CGraph::GTemplateNode<CapturePipelineContext*> {
+class ThumbnailNode : public CGraph::GTemplateNode<CapturePipelineContext*, ThumbnailTarget> {
 public:
-    explicit OriginalThumbnailNode(CapturePipelineContext* context) : context_(context) {}
-    CStatus run() override { return context_->OriginalThumbnail(); }
+    ThumbnailNode(CapturePipelineContext* context, ThumbnailTarget target) : context_(context), target_(target) {}
+    CStatus run() override { return context_->RunThumbnail(target_); }
 private:
     CapturePipelineContext* context_;
+    ThumbnailTarget target_;
 };
 
 class PageProcessNode : public CGraph::GTemplateNode<CapturePipelineContext*> {
@@ -373,26 +441,10 @@ private:
     CapturePipelineContext* context_;
 };
 
-class PageProcessedThumbnailNode : public CGraph::GTemplateNode<CapturePipelineContext*> {
-public:
-    explicit PageProcessedThumbnailNode(CapturePipelineContext* context) : context_(context) {}
-    CStatus run() override { return context_->PageProcessedThumbnail(); }
-private:
-    CapturePipelineContext* context_;
-};
-
 class ColorModeNode : public CGraph::GTemplateNode<CapturePipelineContext*> {
 public:
     explicit ColorModeNode(CapturePipelineContext* context) : context_(context) {}
     CStatus run() override { return context_->ColorMode(); }
-private:
-    CapturePipelineContext* context_;
-};
-
-class ColorProcessedThumbnailNode : public CGraph::GTemplateNode<CapturePipelineContext*> {
-public:
-    explicit ColorProcessedThumbnailNode(CapturePipelineContext* context) : context_(context) {}
-    CStatus run() override { return context_->ColorProcessedThumbnail(); }
 private:
     CapturePipelineContext* context_;
 };
@@ -425,20 +477,20 @@ CapturePipelineResult CapturePipelineService::Run(const CapturePipelineRequest& 
     CapturePipelineContext context(request, device_facade_, graphic_facade_, providers_, stage_callback);
     CGraph::GPipelinePtr pipeline = CGraph::GPipelineFactory::create();
     CGraph::GTemplateNodePtr<CapturePipelineContext*> capture = nullptr;
-    CGraph::GTemplateNodePtr<CapturePipelineContext*> original_thumb = nullptr;
+    CGraph::GTemplateNodePtr<CapturePipelineContext*, ThumbnailTarget> original_thumb = nullptr;
     CGraph::GTemplateNodePtr<CapturePipelineContext*> page = nullptr;
-    CGraph::GTemplateNodePtr<CapturePipelineContext*> page_thumb = nullptr;
+    CGraph::GTemplateNodePtr<CapturePipelineContext*, ThumbnailTarget> page_thumb = nullptr;
     CGraph::GTemplateNodePtr<CapturePipelineContext*> color = nullptr;
-    CGraph::GTemplateNodePtr<CapturePipelineContext*> color_thumb = nullptr;
+    CGraph::GTemplateNodePtr<CapturePipelineContext*, ThumbnailTarget> color_thumb = nullptr;
     CGraph::GTemplateNodePtr<CapturePipelineContext*> convert = nullptr;
     CGraph::GTemplateNodePtr<CapturePipelineContext*> finalize = nullptr;
 
     pipeline->registerGElement<CaptureRawNode>(&capture, {}, &context);
-    pipeline->registerGElement<OriginalThumbnailNode>(&original_thumb, {capture}, &context);
+    pipeline->registerGElement<ThumbnailNode>(&original_thumb, {capture}, &context, ThumbnailTarget::Original);
     pipeline->registerGElement<PageProcessNode>(&page, {capture}, &context);
-    pipeline->registerGElement<PageProcessedThumbnailNode>(&page_thumb, {page}, &context);
+    pipeline->registerGElement<ThumbnailNode>(&page_thumb, {page}, &context, ThumbnailTarget::PageProcessed);
     pipeline->registerGElement<ColorModeNode>(&color, {page}, &context);
-    pipeline->registerGElement<ColorProcessedThumbnailNode>(&color_thumb, {color}, &context);
+    pipeline->registerGElement<ThumbnailNode>(&color_thumb, {color}, &context, ThumbnailTarget::ColorProcessed);
     pipeline->registerGElement<FormatConvertNode>(&convert, {color}, &context);
     pipeline->registerGElement<FinalizeResultNode>(&finalize, {convert, original_thumb, page_thumb, color_thumb}, &context);
 

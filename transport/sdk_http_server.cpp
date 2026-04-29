@@ -4,6 +4,7 @@
 #include "sdk_http_server.h"
 
 #include <httplib.h>
+#include <sys/stat.h>
 
 #include "sdk_logger.h"
 
@@ -14,18 +15,60 @@ namespace {
 
 const char* kJsonContentType = "application/json; charset=utf-8";
 
+bool FileExists(const std::string& path) {
+    struct stat st;
+    return !path.empty() && ::stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+}
+
+std::string ExtractBearerToken(const std::string& authorization) {
+    const std::string prefix = "Bearer ";
+    if (authorization.size() <= prefix.size() || authorization.substr(0, prefix.size()) != prefix) {
+        return "";
+    }
+    return authorization.substr(prefix.size());
+}
+
+int HttpStatusForSdkCode(int code) {
+    if (IsOkStatusCode(code)) {
+        return ToHttpStatus(SdkHttpStatus::Ok);
+    }
+    if (code == ToCode(SdkStatusCode::AuthRequired) ||
+        code == ToCode(SdkStatusCode::TokenInvalid) ||
+        code == ToCode(SdkStatusCode::SessionTokenInvalid)) {
+        return ToHttpStatus(SdkHttpStatus::Unauthorized);
+    }
+    if (code == ToCode(SdkStatusCode::CapabilityNotAllowed)) {
+        return 403;
+    }
+    if (code == ToCode(SdkStatusCode::InvalidParams)) {
+        return ToHttpStatus(SdkHttpStatus::NotFound);
+    }
+    return 500;
+}
+
+void SetCorsHeaders(httplib::Response* res) {
+    if (res == NULL) {
+        return;
+    }
+    res->set_header("Access-Control-Allow-Origin", "*");
+    res->set_header("Access-Control-Allow-Headers", "Authorization, Content-Type");
+    res->set_header("Access-Control-Allow-Methods", "GET, OPTIONS");
+}
+
 } // namespace
 
 SdkHttpServer::SdkHttpServer(const std::string& site_name,
                              const std::string& host,
                              int port,
                              const std::string& document_root,
-                             const std::string& auth_token)
+                             const std::string& auth_token,
+                             bool mount_static_site)
     : site_name_(site_name),
       host_(host),
       port_(port),
       document_root_(document_root),
       auth_token_(auth_token),
+      mount_static_site_(mount_static_site),
       running_(false) {}
 
 SdkHttpServer::~SdkHttpServer() {
@@ -38,6 +81,10 @@ void SdkHttpServer::SetHealthSupplier(JsonSupplier supplier) {
 
 void SdkHttpServer::SetStatusSupplier(JsonSupplier supplier) {
     status_supplier_ = supplier;
+}
+
+void SdkHttpServer::SetAssetResolver(AssetResolver resolver) {
+    asset_resolver_ = resolver;
 }
 
 bool SdkHttpServer::IsAuthorized(const std::string& authorization) const {
@@ -71,9 +118,66 @@ bool SdkHttpServer::ConfigureRoutes() {
         res.set_content(DumpJson(body), kJsonContentType);
     });
 
-    if (!server_->set_mount_point("/", document_root_)) {
-        SDK_OPEN_LOG_ERROR("[sdk_http_server] {} set_mount_point failed, root={}", site_name_, document_root_);
-        return false;
+    server_->Get(R"(/api/assets/([^/]+)/([^/]+)/download)", [this](const httplib::Request& req, httplib::Response& res) {
+        SetCorsHeaders(&res);
+        if (!asset_resolver_) {
+            res.status = 404;
+            res.set_content(DumpJson(BuildErrorBody(SdkStatusCode::InvalidMethod, "asset api unavailable")), kJsonContentType);
+            return;
+        }
+        const std::string session_token = ExtractBearerToken(req.get_header_value("Authorization"));
+        const AssetResult result = asset_resolver_(session_token, req.matches[1], req.matches[2]);
+        if (!IsOkStatusCode(result.code)) {
+            res.status = HttpStatusForSdkCode(result.code);
+            res.set_content(DumpJson(BuildErrorBody(result.code, result.message)), kJsonContentType);
+            return;
+        }
+        if (!FileExists(result.asset.path)) {
+            res.status = ToHttpStatus(SdkHttpStatus::NotFound);
+            res.set_content(DumpJson(BuildErrorBody(SdkStatusCode::InvalidParams, "asset file not found")), kJsonContentType);
+            return;
+        }
+        res.status = ToHttpStatus(SdkHttpStatus::Ok);
+        res.set_header("Cache-Control", "no-store");
+        res.set_header("Content-Disposition", "attachment; filename=\"" + result.asset.asset_id + "\"");
+        res.set_file_content(result.asset.path, result.asset.content_type.empty() ? "application/octet-stream" : result.asset.content_type);
+    });
+
+    server_->Get(R"(/api/assets/([^/]+)/([^/]+))", [this](const httplib::Request& req, httplib::Response& res) {
+        SetCorsHeaders(&res);
+        if (!asset_resolver_) {
+            res.status = 404;
+            res.set_content(DumpJson(BuildErrorBody(SdkStatusCode::InvalidMethod, "asset api unavailable")), kJsonContentType);
+            return;
+        }
+        const std::string session_token = ExtractBearerToken(req.get_header_value("Authorization"));
+        const AssetResult result = asset_resolver_(session_token, req.matches[1], req.matches[2]);
+        if (!IsOkStatusCode(result.code)) {
+            res.status = HttpStatusForSdkCode(result.code);
+            res.set_content(DumpJson(BuildErrorBody(result.code, result.message)), kJsonContentType);
+            return;
+        }
+        if (!FileExists(result.asset.path)) {
+            res.status = ToHttpStatus(SdkHttpStatus::NotFound);
+            res.set_content(DumpJson(BuildErrorBody(SdkStatusCode::InvalidParams, "asset file not found")), kJsonContentType);
+            return;
+        }
+        res.status = ToHttpStatus(SdkHttpStatus::Ok);
+        res.set_header("Cache-Control", "no-store");
+        res.set_header("Content-Disposition", "inline");
+        res.set_file_content(result.asset.path, result.asset.content_type.empty() ? "application/octet-stream" : result.asset.content_type);
+    });
+
+    server_->Options(R"(/api/assets/.*)", [](const httplib::Request&, httplib::Response& res) {
+        SetCorsHeaders(&res);
+        res.status = 204;
+    });
+
+    if (mount_static_site_) {
+        if (!server_->set_mount_point("/", document_root_)) {
+            SDK_OPEN_LOG_ERROR("[sdk_http_server] {} set_mount_point failed, root={}", site_name_, document_root_);
+            return false;
+        }
     }
 
     server_->set_error_handler([](const httplib::Request&, httplib::Response& res) {

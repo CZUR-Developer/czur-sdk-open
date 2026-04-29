@@ -14,6 +14,8 @@ Json BuildAssetJson(const SdkCaptureAsset& asset) {
     return Json{{"asset_id", asset.asset_id},
                 {"kind", asset.kind},
                 {"path", asset.path},
+                {"url", asset.url},
+                {"download_url", asset.download_url},
                 {"content_type", asset.content_type},
                 {"width", asset.width},
                 {"height", asset.height},
@@ -48,10 +50,18 @@ Json BuildTaskJson(const CaptureTaskSnapshot& task) {
                 {"error", task.error}};
 }
 
+std::string TrimTrailingSlash(const std::string& value) {
+    if (!value.empty() && value[value.size() - 1] == '/') {
+        return value.substr(0, value.size() - 1);
+    }
+    return value;
+}
+
 } // namespace
 
-CaptureTaskService::CaptureTaskService(const ProviderBundle& providers)
+CaptureTaskService::CaptureTaskService(const ProviderBundle& providers, const std::string& asset_base_url)
     : pipeline_service_(providers),
+      asset_base_url_(TrimTrailingSlash(asset_base_url)),
       next_task_seq_(1) {}
 
 CaptureTaskService::~CaptureTaskService() {
@@ -84,6 +94,7 @@ CaptureTaskStartResult CaptureTaskService::StartTask(const CaptureTaskStartReque
     CaptureTaskSnapshot task;
     task.task_id = task_id;
     task.connection_id = request.connection_id;
+    task.session_token = request.session_token;
     task.device_id = request.device_id;
     task.status = "queued";
     task.profile_revision = request.profile.revision;
@@ -117,6 +128,33 @@ CaptureTaskSnapshot CaptureTaskService::GetTask(const std::string& connection_id
         return task;
     }
     return task;
+}
+
+CaptureAssetResult CaptureTaskService::GetAsset(const std::string& connection_id,
+                                                const std::string& task_id,
+                                                const std::string& asset_id) const {
+    std::lock_guard<std::mutex> lock(mu_);
+    CaptureAssetResult result;
+    const CaptureTaskSnapshot task = GetTaskUnlocked(task_id);
+    if (!IsOkStatusCode(task.code)) {
+        result.code = task.code;
+        result.message = task.message;
+        return result;
+    }
+    if (task.connection_id != connection_id) {
+        result.code = ToCode(SdkStatusCode::CapabilityNotAllowed);
+        result.message = "task belongs to another connection";
+        return result;
+    }
+    for (std::vector<SdkCaptureAsset>::const_iterator it = task.assets.begin(); it != task.assets.end(); ++it) {
+        if (it->asset_id == asset_id) {
+            result.asset = *it;
+            return result;
+        }
+    }
+    result.code = ToCode(SdkStatusCode::InvalidParams);
+    result.message = "asset not found";
+    return result;
 }
 
 void CaptureTaskService::RunTask(const std::string& task_id, CaptureTaskStartRequest request) {
@@ -161,6 +199,7 @@ void CaptureTaskService::RunTask(const std::string& task_id, CaptureTaskStartReq
         task.status = pipeline_result.status;
         task.stages = pipeline_result.stages;
         task.assets = pipeline_result.assets;
+        AttachAssetUrls(task_id, &task.assets);
         task.warnings = pipeline_result.warnings;
         task.code = pipeline_result.code;
         task.message = pipeline_result.message;
@@ -204,6 +243,16 @@ CaptureTaskSnapshot CaptureTaskService::GetTaskUnlocked(const std::string& task_
         return task;
     }
     return it->second;
+}
+
+void CaptureTaskService::AttachAssetUrls(const std::string& task_id, std::vector<SdkCaptureAsset>* assets) const {
+    if (assets == NULL) {
+        return;
+    }
+    for (std::vector<SdkCaptureAsset>::iterator it = assets->begin(); it != assets->end(); ++it) {
+        it->url = asset_base_url_ + "/api/assets/" + task_id + "/" + it->asset_id;
+        it->download_url = it->url + "/download";
+    }
 }
 
 std::string CaptureTaskService::NextTaskId() {

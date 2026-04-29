@@ -175,9 +175,18 @@ export async function closeSelectedDevice(): Promise<void> {
   const streamId = state.streamId;
   state.closeState = 'running';
   state.errorMessage = '';
-  const response = await sendBoundCommand('device.close', {
-    params: { device_id: deviceId },
-  });
+
+  let response;
+  try {
+    response = await sendBoundCommand('device.close', {
+      params: { device_id: deviceId },
+    });
+  } catch (error) {
+    state.closeState = 'error';
+    state.errorMessage = error instanceof Error ? error.message : 'device.close failed';
+    return;
+  }
+
   if (!isOkResponse(response)) {
     state.closeState = 'error';
     state.errorMessage = response.message;

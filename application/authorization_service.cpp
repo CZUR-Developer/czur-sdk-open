@@ -33,6 +33,7 @@ AuthorizationService::SessionResult AuthorizationService::CreateSession(const st
     result.message = provider_result.message;
     result.token = token;
     result.session_token = provider_result.session_token;
+    result.connection_id = connection_id;
     result.expires_in = provider_result.expires_in;
     result.auth_context = provider_result.auth_context;
 
@@ -66,6 +67,7 @@ AuthorizationService::SessionResult AuthorizationService::RefreshSession(const s
     result.message = provider_result.message;
     result.token = bound_session.token;
     result.session_token = provider_result.session_token;
+    result.connection_id = connection_id;
     result.expires_in = provider_result.expires_in;
     result.auth_context = provider_result.auth_context;
 
@@ -90,6 +92,30 @@ AuthorizationService::SessionResult AuthorizationService::RequireSession(const s
         return result;
     }
     return it->second;
+}
+
+AuthorizationService::SessionResult AuthorizationService::RequireSessionToken(const std::string& session_token) const {
+    SessionResult result;
+    if (session_token.empty()) {
+        result.code = ToCode(SdkStatusCode::AuthRequired);
+        result.message = "session token required";
+        return result;
+    }
+    std::lock_guard<std::mutex> lock(sessions_mu_);
+    for (std::map<std::string, SessionResult>::const_iterator it = sessions_.begin();
+         it != sessions_.end();
+         ++it) {
+        if (it->second.session_token == session_token) {
+            result = it->second;
+            if (result.connection_id.empty()) {
+                result.connection_id = it->first;
+            }
+            return result;
+        }
+    }
+    result.code = ToCode(SdkStatusCode::AuthRequired);
+    result.message = "session token invalid";
+    return result;
 }
 
 AuthorizationService::SessionResult AuthorizationService::RequireCapability(const std::string& connection_id,
@@ -139,6 +165,7 @@ AuthorizationService::SessionResult AuthorizationService::ActivateOffline(const 
     result.message = provider_result.message;
     result.token = bound_session.token;
     result.session_token = provider_result.session_token;
+    result.connection_id = connection_id;
     result.expires_in = provider_result.expires_in;
     result.auth_context = provider_result.auth_context;
     if (IsOkStatusCode(result.code)) {

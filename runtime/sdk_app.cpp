@@ -17,6 +17,14 @@ constexpr bool kSdkOpenHttpServerEnabled = true;
 constexpr bool kSdkOpenHttpServerEnabled = false;
 #endif
 
+std::string BuildAssetBaseUrl(const SdkConfig& config) {
+    if (!config.asset_base_url.empty()) {
+        return config.asset_base_url;
+    }
+    const std::string host = config.bind_host == "0.0.0.0" ? "127.0.0.1" : config.bind_host;
+    return "http://" + host + ":" + std::to_string(config.asset_http_port);
+}
+
 } // namespace
 
 SdkApp::SdkApp(const SdkConfig& config, ProviderBundle providers)
@@ -27,6 +35,8 @@ SdkApp::SdkApp(const SdkConfig& config, ProviderBundle providers)
           "admin-site", config_.bind_host, config_.admin_http_port, config_.web_root + "/admin", config_.auth_token),
       demo_http_server_(
           "demo-site", config_.bind_host, config_.demo_http_port, config_.web_root + "/demo", config_.auth_token),
+      asset_http_server_(
+          "asset-api", config_.bind_host, config_.asset_http_port, "", config_.auth_token, false),
       command_ws_server_(config_.bind_host, config_.command_ws_port),
       video_ws_server_(config_.bind_host, config_.video_ws_port),
       running_(false),
@@ -38,6 +48,23 @@ SdkApp::SdkApp(const SdkConfig& config, ProviderBundle providers)
         demo_http_server_.SetHealthSupplier([this]() { return admin_application_service_.BuildHealthJson(); });
         demo_http_server_.SetStatusSupplier([this]() { return admin_application_service_.BuildStatusJson(); });
     }
+    asset_http_server_.SetHealthSupplier([this]() { return admin_application_service_.BuildHealthJson(); });
+    SdkHttpServer::AssetResolver asset_resolver =
+            [this](const std::string& session_token, const std::string& task_id, const std::string& asset_id) {
+                SdkHttpServer::AssetResult result;
+                if (!command_application_service_) {
+                    result.code = ToCode(SdkStatusCode::InternalError);
+                    result.message = "command service not ready";
+                    return result;
+                }
+                const CommandApplicationService::AssetAccessResult asset_result =
+                        command_application_service_->ResolveAsset(session_token, task_id, asset_id);
+                result.code = asset_result.code;
+                result.message = asset_result.message;
+                result.asset = asset_result.asset;
+                return result;
+            };
+    asset_http_server_.SetAssetResolver(asset_resolver);
     command_application_service_->SetStatusSupplier([this]() { return BuildStatusJson(); });
     command_application_service_->SetVideoFrameSink([this](const SdkVideoFrame& frame) {
         video_ws_server_.PublishFrame(frame);
@@ -85,7 +112,13 @@ bool SdkApp::Start() {
     } else {
         SDK_OPEN_LOG_INFO("[sdk_app] embedded http server disabled by SDK_OPEN_ENABLE_HTTP_SERVER=0");
     }
+    if (!asset_http_server_.Start()) {
+        demo_http_server_.Stop();
+        admin_http_server_.Stop();
+        return false;
+    }
     if (!command_ws_server_.Start()) {
+        asset_http_server_.Stop();
         if (kSdkOpenHttpServerEnabled) {
             demo_http_server_.Stop();
             admin_http_server_.Stop();
@@ -94,6 +127,7 @@ bool SdkApp::Start() {
     }
     if (!video_ws_server_.Start()) {
         command_ws_server_.Stop();
+        asset_http_server_.Stop();
         if (kSdkOpenHttpServerEnabled) {
             demo_http_server_.Stop();
             admin_http_server_.Stop();
@@ -132,6 +166,7 @@ void SdkApp::Stop() {
     video_ws_server_.Stop();
     command_ws_server_.Stop();
     if (kSdkOpenHttpServerEnabled) {
+        asset_http_server_.Stop();
         demo_http_server_.Stop();
         admin_http_server_.Stop();
     }
@@ -166,12 +201,15 @@ Json SdkApp::BuildStatusJson() const {
               {
                   {"admin", config_.admin_http_port},
                   {"demo", config_.demo_http_port},
+                  {"asset", config_.asset_http_port},
               }},
+             {"assetBaseUrl", BuildAssetBaseUrl(config_)},
          }},
         {"ports",
          {
              {"adminHttp", config_.admin_http_port},
              {"demoHttp", config_.demo_http_port},
+             {"assetHttp", config_.asset_http_port},
              {"commandWs", config_.command_ws_port},
              {"videoWs", config_.video_ws_port},
          }},

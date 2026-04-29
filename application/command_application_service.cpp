@@ -41,6 +41,14 @@ std::vector<std::string> GetOptionalStringArrayField(const Json& obj, const char
     return values;
 }
 
+std::string BuildDefaultAssetBaseUrl(const SdkConfig& config) {
+    if (!config.asset_base_url.empty()) {
+        return config.asset_base_url;
+    }
+    const std::string host = config.bind_host == "0.0.0.0" ? "127.0.0.1" : config.bind_host;
+    return "http://" + host + ":" + std::to_string(config.asset_http_port);
+}
+
 int GetOptionalIntField(const Json& obj, const char* key, int default_value) {
     const auto it = obj.find(key);
     if (it != obj.end() && it->is_number_integer()) {
@@ -112,6 +120,8 @@ Json BuildAssetJson(const SdkCaptureAsset& asset) {
     return Json{{"asset_id", asset.asset_id},
                 {"kind", asset.kind},
                 {"path", asset.path},
+                {"url", asset.url},
+                {"download_url", asset.download_url},
                 {"content_type", asset.content_type},
                 {"width", asset.width},
                 {"height", asset.height},
@@ -166,7 +176,7 @@ CommandApplicationService::CommandApplicationService(const SdkConfig& config, co
       graphic_facade_(providers_),
       ocr_facade_(providers_),
       ofd_facade_(providers_),
-      capture_task_service_(providers_) {
+      capture_task_service_(providers_, BuildDefaultAssetBaseUrl(config_)) {
     methods_.push_back(MakeMethod("system.ping", false, "SDK heartbeat probe"));
     methods_.push_back(MakeMethod("system.info", false, "SDK runtime status snapshot"));
     methods_.push_back(MakeMethod("system.capabilities", false, "List public methods and auth model"));
@@ -340,6 +350,30 @@ Json CommandApplicationService::BuildCapabilitiesJson() const {
 VideoSessionService::ValidationResult CommandApplicationService::ValidateVideoStream(const std::string& session_token,
                                                                                      const std::string& stream_id) const {
     return video_session_service_.Validate(session_token, stream_id);
+}
+
+CommandApplicationService::AssetAccessResult CommandApplicationService::ResolveAsset(const std::string& session_token,
+                                                                                    const std::string& task_id,
+                                                                                    const std::string& asset_id) const {
+    AssetAccessResult result;
+    AuthorizationService::SessionResult session_result = authorization_service_.RequireSessionToken(session_token);
+    if (!IsOkStatusCode(session_result.code)) {
+        result.code = session_result.code;
+        result.message = session_result.message;
+        return result;
+    }
+    if (!IsOkStatusCode(authorization_service_.RequireCapability(session_result.connection_id, "capture.get").code)) {
+        result.code = ToCode(SdkStatusCode::CapabilityNotAllowed);
+        result.message = "capability not allowed";
+        return result;
+    }
+
+    const CaptureAssetResult asset_result =
+        capture_task_service_.GetAsset(session_result.connection_id, task_id, asset_id);
+    result.code = asset_result.code;
+    result.message = asset_result.message;
+    result.asset = asset_result.asset;
+    return result;
 }
 
 std::size_t CommandApplicationService::ActiveSessionCount() const {
@@ -568,6 +602,7 @@ Json CommandApplicationService::HandleCaptureTake(const std::string& connection_
 
     CaptureTaskStartRequest start_request;
     start_request.connection_id = connection_id;
+    start_request.session_token = session_result.session_token;
     start_request.device_id = device_id;
     start_request.output_dir = GetOptionalStringField(request.params, "output_dir");
     start_request.include_base64 = GetOptionalBoolField(request.params, "include_base64", false);

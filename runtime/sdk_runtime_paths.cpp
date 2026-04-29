@@ -116,6 +116,20 @@ std::string ResolveSdkOpenLogDir() {
     return JoinPath(GetSdkOpenWorkDir(), "logs");
 }
 
+std::string GetSdkOpenTasksDir() {
+    return JoinPath(GetSdkOpenWorkDir(), "tasks");
+}
+
+std::string GetSdkOpenTaskDir(const std::string& module, const std::string& task_id) {
+    return JoinPath(JoinPath(GetSdkOpenTasksDir(), module), task_id);
+}
+
+std::string GetSdkOpenTaskAssetDir(const std::string& module,
+                                   const std::string& task_id,
+                                   const std::string& asset_group) {
+    return JoinPath(GetSdkOpenTaskDir(module, task_id), asset_group);
+}
+
 std::string GetSdkOpenCaptureDir() {
     return JoinPath(GetSdkOpenWorkDir(), "capture");
 }

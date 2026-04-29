@@ -38,6 +38,12 @@ public:
         std::string summary;
     };
 
+    struct AssetAccessResult {
+        int code = ToCode(SdkStatusCode::Ok);
+        std::string message = "ok";
+        SdkCaptureAsset asset;
+    };
+
     explicit CommandApplicationService(const SdkConfig& config, const ProviderBundle& providers);
 
     void SetStatusSupplier(StatusSupplier supplier);
@@ -49,6 +55,9 @@ public:
     Json BuildCapabilitiesJson() const;
     VideoSessionService::ValidationResult ValidateVideoStream(const std::string& session_token,
                                                               const std::string& stream_id) const;
+    AssetAccessResult ResolveAsset(const std::string& session_token,
+                                   const std::string& task_id,
+                                   const std::string& asset_id) const;
     std::size_t ActiveSessionCount() const;
     std::size_t ActiveStreamCount() const;
 

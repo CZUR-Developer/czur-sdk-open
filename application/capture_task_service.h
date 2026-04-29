@@ -20,6 +20,7 @@ namespace sdk {
 
 struct CaptureTaskStartRequest {
     std::string connection_id;
+    std::string session_token;
     std::string device_id;
     std::string output_dir;
     bool include_base64 = false;
@@ -33,6 +34,7 @@ struct CaptureTaskSnapshot {
     std::string message = "ok";
     std::string task_id;
     std::string connection_id;
+    std::string session_token;
     std::string device_id;
     std::string status = "queued";
     int profile_revision = 1;
@@ -40,6 +42,12 @@ struct CaptureTaskSnapshot {
     std::vector<SdkCaptureAsset> assets;
     std::vector<std::string> warnings;
     std::string error;
+};
+
+struct CaptureAssetResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    SdkCaptureAsset asset;
 };
 
 struct CaptureTaskStartResult {
@@ -53,12 +61,15 @@ class CaptureTaskService {
 public:
     using EventSink = std::function<void(const std::string&, const Json&)>;
 
-    explicit CaptureTaskService(const ProviderBundle& providers);
+    explicit CaptureTaskService(const ProviderBundle& providers, const std::string& asset_base_url = "");
     ~CaptureTaskService();
 
     void SetEventSink(EventSink sink);
     CaptureTaskStartResult StartTask(const CaptureTaskStartRequest& request);
     CaptureTaskSnapshot GetTask(const std::string& connection_id, const std::string& task_id) const;
+    CaptureAssetResult GetAsset(const std::string& connection_id,
+                                const std::string& task_id,
+                                const std::string& asset_id) const;
 
 private:
     void RunTask(const std::string& task_id, CaptureTaskStartRequest request);
@@ -67,9 +78,11 @@ private:
                       const CaptureTaskSnapshot& task,
                       const SdkCaptureStageResult* stage = nullptr) const;
     CaptureTaskSnapshot GetTaskUnlocked(const std::string& task_id) const;
+    void AttachAssetUrls(const std::string& task_id, std::vector<SdkCaptureAsset>* assets) const;
     std::string NextTaskId();
 
     CapturePipelineService pipeline_service_;
+    std::string asset_base_url_;
     mutable std::mutex mu_;
     std::map<std::string, CaptureTaskSnapshot> tasks_;
     std::set<std::string> busy_devices_;

@@ -65,8 +65,10 @@ int main(int argc, char* argv[]) {
     config.web_root = GetExecutableDir() + "/web";
     ApplyEnvPortOverride("SDK_ADMIN_HTTP_PORT", config.admin_http_port);
     ApplyEnvPortOverride("SDK_DEMO_HTTP_PORT", config.demo_http_port);
+    ApplyEnvPortOverride("SDK_ASSET_HTTP_PORT", config.asset_http_port);
     ApplyEnvPortOverride("SDK_COMMAND_WS_PORT", config.command_ws_port);
     ApplyEnvPortOverride("SDK_VIDEO_WS_PORT", config.video_ws_port);
+    ApplyEnvStringOverride("SDK_ASSET_BASE_URL", config.asset_base_url);
     ApplyEnvStringOverride("SDK_AUTH_TOKEN", config.auth_token);
 
 #ifdef SDK_USE_PRIVATE_PROVIDER

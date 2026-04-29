@@ -113,7 +113,12 @@
                     <button type="button" class="control-button" :disabled="!deviceVideoState.streamId" @click="stopVideo">
                       video.stop
                     </button>
-                    <button type="button" class="control-button col-span-2" :disabled="!deviceVideoState.selectedDeviceId" @click="closeSelectedDevice">
+                    <button
+                      type="button"
+                      class="control-button col-span-2"
+                      :disabled="!deviceVideoState.selectedDeviceId || (!deviceVideoState.opened && !deviceVideoState.streamId) || deviceVideoState.closeState === 'running'"
+                      @click="closeCaptureDevice"
+                    >
                       device.close
                     </button>
                   </div>
@@ -134,6 +139,37 @@
               Clear
             </button>
           </template>
+          <div v-if="captureResults.length > 0" class="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <article
+              v-for="result in captureResults"
+              :key="result.id"
+              class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+            >
+              <div class="flex aspect-[4/3] items-center justify-center bg-slate-100">
+                <img
+                  v-if="result.thumbnailObjectUrl"
+                  :src="result.thumbnailObjectUrl"
+                  :alt="result.filename"
+                  class="h-full w-full object-contain"
+                />
+                <div v-else class="px-4 text-center text-sm text-slate-500">
+                  <p class="font-semibold text-slate-700">{{ thumbnailStateLabel(result) }}</p>
+                  <p v-if="result.thumbnailError" class="mt-1 text-xs text-rose-500">{{ result.thumbnailError }}</p>
+                </div>
+              </div>
+              <div class="space-y-2 p-3">
+                <div class="flex items-start justify-between gap-3">
+                  <p class="min-w-0 truncate text-sm font-semibold text-slate-900">{{ result.filename }}</p>
+                  <StatusPill :label="result.status" :tone="captureStatusTone(result.status)" />
+                </div>
+                <div class="grid gap-1 text-xs text-slate-500">
+                  <p v-if="result.thumbnailAssetKind" class="truncate">{{ result.thumbnailAssetKind }}</p>
+                  <p class="truncate">{{ result.resolution }}</p>
+                  <p>{{ result.createdAt }}</p>
+                </div>
+              </div>
+            </article>
+          </div>
           <DataTableCard :columns="captureColumns" :rows="captureRows" :empty-label="t('pages.captureAcquisition.noCaptures')" />
         </SectionPanel>
       </div>
@@ -260,7 +296,7 @@ import {
   stopVideo,
 } from '../services/device-video';
 import { recordRuntimeEvent, runtimeRecordState } from '../services/runtime-records';
-import type { TableColumn, TableRow, TimelineItem } from '../types/demoSite';
+import type { TableColumn, TableRow, TimelineItem, Tone } from '../types/demo';
 
 type PageProcessingMode = 'single_page' | 'curved_book' | 'selected_area';
 type ColorMode = 'auto_optimize' | 'black_white' | 'color' | 'white_paper_seal';
@@ -279,6 +315,15 @@ interface CaptureResult {
   createdAt: string;
   status: string;
   path: string;
+  assetUrl: string;
+  downloadUrl: string;
+  assets: CaptureAssetPayload[];
+  thumbnailAssetId: string;
+  thumbnailAssetKind: string;
+  thumbnailUrl: string;
+  thumbnailObjectUrl: string;
+  thumbnailState: 'idle' | 'loading' | 'ready' | 'error' | 'unavailable';
+  thumbnailError: string;
 }
 
 const { t } = useI18n();
@@ -347,7 +392,9 @@ const profileRevision = ref(1);
 const profileInitializedAt = ref(timeLabel());
 const captureResults = ref<CaptureResult[]>([]);
 const activeCaptureTasks = new Set<string>();
+const thumbnailRequests = new Map<string, number>();
 let commandEventUnsubscribe: (() => void) | null = null;
+const suppressAutoOpen = ref(false);
 
 const canLoadDevices = computed(() => authSessionState.commandState === 'success' && Boolean(authSessionState.sessionToken));
 const canCapture = computed(() => Boolean(deviceVideoState.selectedDeviceId && deviceVideoState.opened && deviceVideoState.streamId && deviceVideoState.videoState === 'success'));
@@ -412,25 +459,25 @@ const captureMetrics = computed(() => [
       : deviceVideoState.selectedDeviceId
         ? t('pages.captureAcquisition.selected')
         : t('pages.captureAcquisition.noDevice'),
-    helper: deviceVideoState.selectedDeviceId || t('pages.captureAcquisition.deviceCount', { count: deviceInventoryState.devices.length }),
+    detail: deviceVideoState.selectedDeviceId || t('pages.captureAcquisition.deviceCount', { count: deviceInventoryState.devices.length }),
     tone: deviceVideoState.opened ? 'success' : 'neutral',
   },
   {
     label: t('labels.resolution'),
     value: selectedResolutionLabel.value,
-    helper: t('pages.captureAcquisition.resolutionOptionCount', { count: deviceVideoState.resolutions.length }),
+    detail: t('pages.captureAcquisition.resolutionOptionCount', { count: deviceVideoState.resolutions.length }),
     tone: selectedResolution.value ? 'success' : 'neutral',
   },
   {
-    label: t('pages.captureAcquisition.profileRevision'),
-    value: `r${profileRevision.value}`,
-    helper: t('pages.captureAcquisition.initializedAt', { time: profileInitializedAt.value }),
+    label: t('pages.captureAcquisition.profileUpdatedAt'),
+    value: profileInitializedAt.value,
+    detail: t('pages.captureAcquisition.profileUpdatedAtDescription'),
     tone: 'warning',
   },
   {
     label: t('pages.captureAcquisition.sessionFiles'),
     value: String(captureResults.value.length),
-    helper: captureConfig.outputFormat.toUpperCase(),
+    detail: captureConfig.outputFormat.toUpperCase(),
     tone: captureResults.value.length > 0 ? 'success' : 'neutral',
   },
 ]);
@@ -479,14 +526,16 @@ const captureColumns = computed<TableColumn[]>(() => [
 const captureRows = computed<TableRow[]>(() =>
   captureResults.value.map((result) => ({
     id: result.id,
-    filename: result.filename,
-    format: result.format.toUpperCase(),
-    pageProcessing: result.pageProcessing,
-    colorMode: result.colorMode,
-    thumbnails: result.thumbnails,
-    resolution: result.resolution,
-    createdAt: result.createdAt,
-    status: result.status,
+    cells: {
+      filename: result.filename,
+      format: result.format.toUpperCase(),
+      pageProcessing: result.pageProcessing,
+      colorMode: result.colorMode,
+      thumbnails: result.thumbnails,
+      resolution: result.resolution,
+      createdAt: result.createdAt,
+      status: result.status,
+    },
   })),
 );
 
@@ -499,6 +548,7 @@ const eventItems = computed<TimelineItem[]>(() =>
       time: item.time,
       title: item.title,
       detail: item.detail,
+      meta: item.meta,
       tone: item.tone,
     })),
 );
@@ -522,7 +572,7 @@ watch(
 watch(
   () => deviceInventoryState.devices.map((device) => device.device_id).join('|'),
   () => {
-    if (!deviceVideoState.selectedDeviceId && deviceInventoryState.devices.length > 0) {
+    if (!suppressAutoOpen.value && !deviceVideoState.selectedDeviceId && deviceInventoryState.devices.length > 0) {
       void openDefaultCaptureDevice();
     }
   },
@@ -549,6 +599,7 @@ watch(
 onBeforeUnmount(() => {
   commandEventUnsubscribe?.();
   commandEventUnsubscribe = null;
+  revokeAllThumbnailObjectUrls();
   void closeSelectedDevice();
   resetDeviceVideo();
 });
@@ -566,6 +617,17 @@ async function openDefaultCaptureDevice(): Promise<void> {
   await selectDevice(defaultDeviceId);
   await openCaptureDevice();
   await startCaptureVideo();
+}
+
+async function closeCaptureDevice(): Promise<void> {
+  suppressAutoOpen.value = true;
+  if (deviceVideoState.streamId) {
+    await stopVideo();
+    if (deviceVideoState.stopState === 'error') {
+      return;
+    }
+  }
+  await closeSelectedDevice();
 }
 
 async function openCaptureDevice(): Promise<void> {
@@ -598,6 +660,15 @@ async function handleCapture(): Promise<void> {
     createdAt: timeLabel(),
     status: 'pending',
     path: '',
+    assetUrl: '',
+    downloadUrl: '',
+    assets: [],
+    thumbnailAssetId: '',
+    thumbnailAssetKind: '',
+    thumbnailUrl: '',
+    thumbnailObjectUrl: '',
+    thumbnailState: 'idle',
+    thumbnailError: '',
   };
 
   captureResults.value = [result, ...captureResults.value];
@@ -609,8 +680,21 @@ async function handleCapture(): Promise<void> {
         timeout_ms: 20000,
       },
     });
+    logCaptureDebug('capture.take response', {
+      code: response?.code,
+      message: response?.message,
+      data: response?.data,
+      task_id: response?.data ? asString(response.data.task_id) : '',
+      status: response?.data ? asString(response.data.status) : '',
+      assets: response?.data && typeof response.data === 'object' ? (response.data as Record<string, unknown>).assets : undefined,
+    });
     if (!response || response.code !== 0) {
-      updateCaptureResult(pendingId, { status: response?.message || 'failed' });
+      const message = response?.message || 'failed';
+      updateCaptureResult(pendingId, {
+        status: message,
+        thumbnailState: 'error',
+        thumbnailError: message,
+      });
       return;
     }
     const taskId = asString(response.data.task_id);
@@ -625,7 +709,12 @@ async function handleCapture(): Promise<void> {
       tone: 'success',
     });
   } catch (error) {
-    updateCaptureResult(pendingId, { status: error instanceof Error ? error.message : 'failed' });
+    const message = error instanceof Error ? error.message : 'failed';
+    updateCaptureResult(pendingId, {
+      status: message,
+      thumbnailState: 'error',
+      thumbnailError: message,
+    });
   }
 }
 
@@ -637,8 +726,25 @@ async function pollCaptureTask(taskId: string): Promise<void> {
         params: { task_id: taskId },
       });
       if (response.code !== 0) {
+        logCaptureDebug('capture.get non-ok response', {
+          task_id: taskId,
+          code: response.code,
+          message: response.message,
+          data: response.data,
+        });
         continue;
       }
+      logCaptureDebug('capture.get response', {
+        task_id: taskId,
+        code: response.code,
+        message: response.message,
+        status: asString(response.data.status),
+        assets_count: Array.isArray((response.data as Record<string, unknown>).assets)
+          ? ((response.data as Record<string, unknown>).assets as unknown[]).length
+          : 0,
+        assets: (response.data as Record<string, unknown>).assets,
+        data: response.data,
+      });
       const task = asTaskPayload(response.data);
       if (!task.task_id) {
         continue;
@@ -658,6 +764,10 @@ function handleCommandEvent(event: { event: string; payload?: Record<string, unk
   if (!event.event.startsWith('capture.')) {
     return;
   }
+  logCaptureDebug('capture event payload', {
+    event: event.event,
+    payload: event.payload,
+  });
   const task = asTaskPayload(event.payload);
   if (!task.task_id || !activeCaptureTasks.has(task.task_id)) {
     return;
@@ -670,12 +780,51 @@ function handleCommandEvent(event: { event: string; payload?: Record<string, unk
 
 function applyCaptureTask(task: CaptureTaskPayload): void {
   const finalAsset = task.assets.find((asset) => asset.kind === 'final') ?? task.assets.find((asset) => asset.kind === 'original');
+  const displayAsset = selectPreferredDisplayAsset(task.assets);
+  logCaptureDebug('applyCaptureTask parsed', {
+    task_id: task.task_id,
+    status: task.status,
+    message: task.message,
+    error: task.error,
+    assets_count: task.assets.length,
+    assets: task.assets.map((asset) => ({
+      asset_id: asset.assetId,
+      kind: asset.kind,
+      content_type: asset.contentType,
+      url: asset.url,
+      download_url: asset.downloadUrl,
+      path: asset.path,
+      size: asset.size,
+    })),
+    final_asset: finalAsset,
+    display_asset: displayAsset,
+  });
+  const currentRow = captureResults.value.find((item) => item.taskId === task.task_id);
+  const thumbnailChanged = Boolean(displayAsset && currentRow?.thumbnailAssetId && currentRow.thumbnailAssetId !== displayAsset.assetId);
+  if (thumbnailChanged && currentRow?.thumbnailObjectUrl) {
+    URL.revokeObjectURL(currentRow.thumbnailObjectUrl);
+  }
   const filename = finalAsset?.path ? finalAsset.path.split('/').pop() || finalAsset.path : undefined;
+  const status = task.status === 'succeeded' ? 'succeeded' : task.status === 'failed' ? task.error || task.message || 'failed' : task.status;
   updateCaptureByTaskId(task.task_id, {
     filename,
     path: finalAsset?.path,
-    status: task.status === 'succeeded' ? 'succeeded' : task.status === 'failed' ? task.error || task.message || 'failed' : task.status,
+    assetUrl: finalAsset?.url,
+    downloadUrl: finalAsset?.downloadUrl,
+    assets: task.assets,
+    thumbnailAssetId: displayAsset?.assetId,
+    thumbnailAssetKind: displayAsset?.kind,
+    thumbnailUrl: displayAsset ? assetAccessPath(displayAsset) : undefined,
+    thumbnailObjectUrl: thumbnailChanged ? '' : undefined,
+    thumbnailState: isTerminalCaptureStatus(task.status) && !displayAsset ? 'unavailable' : undefined,
+    status,
   });
+  if (displayAsset) {
+    const row = captureResults.value.find((item) => item.taskId === task.task_id);
+    if (row && row.thumbnailAssetId === displayAsset.assetId && !row.thumbnailObjectUrl && row.thumbnailState !== 'loading') {
+      void loadCaptureThumbnail(row.id, displayAsset);
+    }
+  }
 }
 
 function updateCaptureByTaskId(taskId: string, patch: Partial<CaptureResult>): void {
@@ -691,8 +840,10 @@ function updateCaptureResult(id: string, patch: Partial<CaptureResult>): void {
 }
 
 function clearCaptureResults(): void {
+  revokeAllThumbnailObjectUrls();
   captureResults.value = [];
   activeCaptureTasks.clear();
+  thumbnailRequests.clear();
   recordRuntimeEvent({
     title: 'capture.results_cleared',
     detail: t('pages.captureAcquisition.resultsCleared'),
@@ -700,9 +851,188 @@ function clearCaptureResults(): void {
   });
 }
 
+function selectPreferredDisplayAsset(assets: CaptureAssetPayload[]): CaptureAssetPayload | undefined {
+  const preferredKinds = [
+    'color_processed_thumbnail',
+    'page_processed_thumbnail',
+    'original_thumbnail',
+    'color_processed',
+    'page_processed',
+    'original',
+    'final',
+  ];
+  for (const kind of preferredKinds) {
+    const asset = assets.find((item) => item.kind === kind && assetAccessPath(item) && isBrowserRenderableImage(item));
+    if (asset) {
+      return asset;
+    }
+  }
+  return undefined;
+}
+
+async function loadCaptureThumbnail(resultId: string, asset: CaptureAssetPayload): Promise<void> {
+  const sessionToken = authSessionState.sessionToken;
+  const accessPath = assetAccessPath(asset);
+  if (!sessionToken || !accessPath) {
+    updateCaptureResult(resultId, {
+      thumbnailState: 'error',
+      thumbnailError: t('pages.captureAcquisition.thumbnailAuthMissing'),
+    });
+    return;
+  }
+
+  const requestToken = Date.now();
+  thumbnailRequests.set(resultId, requestToken);
+  updateCaptureResult(resultId, { thumbnailState: 'loading', thumbnailError: '' });
+
+  try {
+    const fetchUrl = resolveAssetUrl(accessPath);
+    logCaptureDebug('thumbnail fetch request', {
+      asset_id: asset.assetId,
+      kind: asset.kind,
+      url: fetchUrl,
+    });
+    const response = await fetch(fetchUrl, {
+      headers: {
+        Authorization: `Bearer ${sessionToken}`,
+      },
+    });
+    logCaptureDebug('thumbnail fetch response', {
+      asset_id: asset.assetId,
+      status: response.status,
+      status_text: response.statusText,
+      content_type: response.headers.get('content-type'),
+      url: response.url,
+    });
+    if (!response.ok) {
+      throw new Error(`${response.status} ${response.statusText}`.trim());
+    }
+    const contentType = response.headers.get('content-type') || asset.contentType;
+    if (!contentType.toLowerCase().startsWith('image/')) {
+      throw new Error(`unexpected content-type: ${contentType || 'unknown'}`);
+    }
+    let blob = await response.blob();
+    if (!blob.type.toLowerCase().startsWith('image/') && contentType) {
+      blob = blob.slice(0, blob.size, contentType);
+    }
+    if (thumbnailRequests.get(resultId) !== requestToken) {
+      return;
+    }
+    const objectUrl = URL.createObjectURL(blob);
+    const current = captureResults.value.find((item) => item.id === resultId);
+    if (!current) {
+      URL.revokeObjectURL(objectUrl);
+      return;
+    }
+    if (current?.thumbnailObjectUrl) {
+      URL.revokeObjectURL(current.thumbnailObjectUrl);
+    }
+    updateCaptureResult(resultId, {
+      thumbnailObjectUrl: objectUrl,
+      thumbnailState: 'ready',
+      thumbnailError: '',
+    });
+  } catch (error) {
+    if (thumbnailRequests.get(resultId) !== requestToken) {
+      return;
+    }
+    updateCaptureResult(resultId, {
+      thumbnailState: 'error',
+      thumbnailError: error instanceof Error ? error.message : t('pages.captureAcquisition.thumbnailLoadFailed'),
+    });
+  } finally {
+    if (thumbnailRequests.get(resultId) === requestToken) {
+      thumbnailRequests.delete(resultId);
+    }
+  }
+}
+
+function resolveAssetUrl(path: string): string {
+  if (/^https?:\/\//i.test(path)) {
+    return path;
+  }
+  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+  return `${protocol}//${window.location.hostname || '127.0.0.1'}:17082${path.startsWith('/') ? path : `/${path}`}`;
+}
+
+function assetAccessPath(asset: CaptureAssetPayload): string {
+  return asset.url || asset.downloadUrl;
+}
+
+function isBrowserRenderableImage(asset: CaptureAssetPayload): boolean {
+  const contentType = asset.contentType.toLowerCase();
+  if (!contentType) {
+    return asset.kind.includes('thumbnail') || asset.kind === 'original' || asset.kind === 'page_processed' || asset.kind === 'color_processed';
+  }
+  return ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif', 'image/bmp'].includes(contentType);
+}
+
+function revokeAllThumbnailObjectUrls(): void {
+  for (const result of captureResults.value) {
+    if (result.thumbnailObjectUrl) {
+      URL.revokeObjectURL(result.thumbnailObjectUrl);
+    }
+  }
+}
+
+function thumbnailStateLabel(result: CaptureResult): string {
+  if (result.thumbnailState === 'loading') {
+    return t('pages.captureAcquisition.thumbnailLoading');
+  }
+  if (result.thumbnailState === 'unavailable') {
+    return t('pages.captureAcquisition.thumbnailUnavailable');
+  }
+  if (result.thumbnailState === 'error') {
+    return t('pages.captureAcquisition.thumbnailLoadFailed');
+  }
+  if (isActiveCaptureStatus(result.status)) {
+    return t('pages.captureAcquisition.capturePending');
+  }
+  if (isTerminalCaptureStatus(result.status)) {
+    return t('pages.captureAcquisition.thumbnailUnavailable');
+  }
+  return t('pages.captureAcquisition.thumbnailWaiting');
+}
+
+function captureStatusTone(status: string): Tone {
+  if (status === 'succeeded') {
+    return 'success';
+  }
+  if (status === 'pending' || status === 'queued' || status === 'running') {
+    return 'warning';
+  }
+  if (status === 'failed' || status.toLowerCase().includes('fail') || status.toLowerCase().includes('error')) {
+    return 'danger';
+  }
+  if (status.toLowerCase().includes('exhausted') || status.toLowerCase().includes('quota')) {
+    return 'danger';
+  }
+  return 'neutral';
+}
+
+function isActiveCaptureStatus(status: string): boolean {
+  return ['pending', 'queued', 'running'].includes(status);
+}
+
+function isTerminalCaptureStatus(status: string): boolean {
+  const normalized = status.toLowerCase();
+  return (
+    ['succeeded', 'success', 'completed', 'done', 'failed', 'error'].includes(normalized) ||
+    normalized.includes('fail') ||
+    normalized.includes('error') ||
+    normalized.includes('exhausted') ||
+    normalized.includes('quota')
+  );
+}
+
 interface CaptureAssetPayload {
+  assetId: string;
   kind: string;
   path: string;
+  contentType: string;
+  size: number;
+  url: string;
+  downloadUrl: string;
 }
 
 interface CaptureTaskPayload {
@@ -715,29 +1045,47 @@ interface CaptureTaskPayload {
 
 function asTaskPayload(value: unknown): CaptureTaskPayload {
   const record = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+  const taskId = asString(record.task_id);
   return {
-    task_id: asString(record.task_id),
+    task_id: taskId,
     status: asString(record.status),
     message: asString(record.message),
     error: asString(record.error),
-    assets: asAssets(record.assets),
+    assets: asAssets(record.assets, taskId),
   };
 }
 
-function asAssets(value: unknown): CaptureAssetPayload[] {
+function asAssets(value: unknown, taskId: string): CaptureAssetPayload[] {
   if (!Array.isArray(value)) {
     return [];
   }
   return value
     .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
-    .map((item) => ({
-      kind: asString(item.kind),
-      path: asString(item.path),
-    }));
+    .map((item) => {
+      const assetId = asString(item.asset_id);
+      const synthesizedUrl = taskId && assetId ? `/api/assets/${encodeURIComponent(taskId)}/${encodeURIComponent(assetId)}` : '';
+      return {
+        assetId,
+        kind: asString(item.kind),
+        path: asString(item.path),
+        contentType: asString(item.content_type),
+        size: asNumber(item.size),
+        url: asString(item.url) || synthesizedUrl,
+        downloadUrl: asString(item.download_url) || (synthesizedUrl ? `${synthesizedUrl}/download` : ''),
+      };
+    });
 }
 
 function asString(value: unknown): string {
   return typeof value === 'string' ? value : '';
+}
+
+function asNumber(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function logCaptureDebug(label: string, payload: unknown): void {
+  console.info(`[capture-debug] ${label}`, payload);
 }
 
 function withoutUndefinedCapturePatch(value: Partial<CaptureResult>): Partial<CaptureResult> {

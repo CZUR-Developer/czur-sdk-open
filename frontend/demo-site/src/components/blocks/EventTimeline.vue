@@ -10,7 +10,7 @@
           <p class="text-sm font-semibold text-slate-950">{{ item.title }}</p>
           <p class="mt-1 text-sm leading-6 text-slate-600">{{ item.detail }}</p>
         </div>
-        <StatusPill :label="item.meta" :tone="item.tone" />
+        <StatusPill v-if="item.meta" :label="item.meta" :tone="item.tone" />
       </div>
     </li>
   </ol>

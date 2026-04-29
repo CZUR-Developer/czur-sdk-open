@@ -21,6 +21,7 @@ public:
         std::string message = "ok";
         std::string token;
         std::string session_token;
+        std::string connection_id;
         int expires_in = 0;
         AuthContext auth_context;
     };
@@ -31,6 +32,7 @@ public:
     SessionResult RefreshSession(const std::string& connection_id);
     SessionResult GetContext(const std::string& connection_id) const;
     SessionResult RequireSession(const std::string& connection_id) const;
+    SessionResult RequireSessionToken(const std::string& session_token) const;
     SessionResult RequireCapability(const std::string& connection_id, const std::string& capability) const;
     SessionResult ActivateOffline(const std::string& connection_id, const std::string& auth_code);
     SessionResult ConsumeQuota(const std::string& connection_id,

@@ -102,7 +102,7 @@ export interface TimelineItem {
   id: string;
   title: string;
   detail: string;
-  meta: string;
+  meta?: string;
   tone: Tone;
 }
 

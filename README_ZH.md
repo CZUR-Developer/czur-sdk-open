@@ -54,6 +54,8 @@
   - admin site
 - `http://127.0.0.1:17081`
   - demo site
+- `http://127.0.0.1:17082`
+  - 采集图片、缩略图、文档输出等资源 API
 - `ws://127.0.0.1:17090`
   - command channel
 - `ws://127.0.0.1:17091`
@@ -193,9 +195,18 @@ cmake --build build --target sdk_open_app sdk_app -j4
 
 - `SDK_ADMIN_HTTP_PORT`
 - `SDK_DEMO_HTTP_PORT`
+- `SDK_ASSET_HTTP_PORT`
+- `SDK_ASSET_BASE_URL`
 - `SDK_COMMAND_WS_PORT`
 - `SDK_VIDEO_WS_PORT`
 - `SDK_AUTH_TOKEN`
+
+Asset API 需要使用会话授权访问：
+
+```bash
+curl -H "Authorization: Bearer <session_token>" \
+  http://127.0.0.1:17082/api/assets/<task_id>/<asset_id>
+```
 
 ## 文档
 

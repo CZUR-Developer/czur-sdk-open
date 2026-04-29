@@ -171,6 +171,8 @@ struct SdkCaptureAsset {
     std::string asset_id;
     std::string kind;
     std::string path;
+    std::string url;
+    std::string download_url;
     std::string content_type;
     int width = 0;
     int height = 0;
@@ -233,6 +235,9 @@ struct SdkThumbnailRequest {
     std::string input_path;
     std::string output_path;
     std::string thumbnail_kind;
+    int max_width = 320;
+    int max_height = 320;
+    bool keep_aspect_ratio = true;
 };
 
 struct SdkThumbnailResult {
