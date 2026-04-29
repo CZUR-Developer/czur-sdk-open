@@ -112,6 +112,7 @@ SdkCaptureProfile ParseCaptureProfile(const Json& params, const std::string& dev
         profile.thumbnail_original = GetOptionalBoolField(thumbnails_json, "original", profile.thumbnail_original);
         profile.thumbnail_page_processed = GetOptionalBoolField(thumbnails_json, "page_processed", profile.thumbnail_page_processed);
         profile.thumbnail_color_processed = GetOptionalBoolField(thumbnails_json, "color_processed", profile.thumbnail_color_processed);
+        profile.thumbnail_final = GetOptionalBoolField(thumbnails_json, "final", profile.thumbnail_final);
     }
     return profile;
 }

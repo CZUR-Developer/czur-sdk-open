@@ -165,6 +165,7 @@ struct SdkCaptureProfile {
     bool thumbnail_original = true;
     bool thumbnail_page_processed = true;
     bool thumbnail_color_processed = false;
+    bool thumbnail_final = true;
 };
 
 struct SdkCaptureAsset {
@@ -189,10 +190,25 @@ struct SdkCaptureStageResult {
 };
 
 struct SdkPageProcessRequest {
+    std::string device_id;
     std::string input_path;
     std::string laser_path;
+    std::string output_dir;
     std::string output_path;
     std::string page_processing;
+    int width = 0;
+    int height = 0;
+};
+
+struct SdkPageOutput {
+    std::string output_id;
+    std::string role;
+    int index = 0;
+    std::string path;
+    std::string content_type = "image/jpeg";
+    int width = 0;
+    int height = 0;
+    uint64_t size = 0;
 };
 
 struct SdkPageProcessResult {
@@ -201,6 +217,7 @@ struct SdkPageProcessResult {
     bool processed = false;
     bool unsupported = false;
     std::string output_path;
+    std::vector<SdkPageOutput> outputs;
 };
 
 struct SdkColorModeRequest {

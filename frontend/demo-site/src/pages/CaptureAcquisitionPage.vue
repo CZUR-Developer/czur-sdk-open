@@ -139,33 +139,33 @@
               Clear
             </button>
           </template>
-          <div v-if="captureResults.length > 0" class="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div v-if="capturePreviewCards.length > 0" class="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <article
-              v-for="result in captureResults"
-              :key="result.id"
+              v-for="card in capturePreviewCards"
+              :key="card.id"
               class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
             >
               <div class="flex aspect-[4/3] items-center justify-center bg-slate-100">
                 <img
-                  v-if="result.thumbnailObjectUrl"
-                  :src="result.thumbnailObjectUrl"
-                  :alt="result.filename"
+                  v-if="card.thumbnailObjectUrl"
+                  :src="card.thumbnailObjectUrl"
+                  :alt="card.filename"
                   class="h-full w-full object-contain"
                 />
                 <div v-else class="px-4 text-center text-sm text-slate-500">
-                  <p class="font-semibold text-slate-700">{{ thumbnailStateLabel(result) }}</p>
-                  <p v-if="result.thumbnailError" class="mt-1 text-xs text-rose-500">{{ result.thumbnailError }}</p>
+                  <p class="font-semibold text-slate-700">{{ thumbnailStateLabel(card) }}</p>
+                  <p v-if="card.thumbnailError" class="mt-1 text-xs text-rose-500">{{ card.thumbnailError }}</p>
                 </div>
               </div>
               <div class="space-y-2 p-3">
                 <div class="flex items-start justify-between gap-3">
-                  <p class="min-w-0 truncate text-sm font-semibold text-slate-900">{{ result.filename }}</p>
-                  <StatusPill :label="result.status" :tone="captureStatusTone(result.status)" />
+                  <p class="min-w-0 truncate text-sm font-semibold text-slate-900">{{ card.filename }}</p>
+                  <StatusPill :label="card.status" :tone="captureStatusTone(card.status)" />
                 </div>
                 <div class="grid gap-1 text-xs text-slate-500">
-                  <p v-if="result.thumbnailAssetKind" class="truncate">{{ result.thumbnailAssetKind }}</p>
-                  <p class="truncate">{{ result.resolution }}</p>
-                  <p>{{ result.createdAt }}</p>
+                  <p v-if="card.thumbnailAssetKind" class="truncate">{{ card.thumbnailAssetKind }}</p>
+                  <p class="truncate">{{ card.resolution }}</p>
+                  <p>{{ card.createdAt }}</p>
                 </div>
               </div>
             </article>
@@ -301,7 +301,18 @@ import type { TableColumn, TableRow, TimelineItem, Tone } from '../types/demo';
 type PageProcessingMode = 'single_page' | 'curved_book' | 'selected_area';
 type ColorMode = 'auto_optimize' | 'black_white' | 'color' | 'white_paper_seal';
 type OutputFormat = 'jpg' | 'png' | 'tiff';
-type ThumbnailKey = 'original' | 'pageProcessed' | 'colorProcessed';
+type ThumbnailKey = 'original' | 'pageProcessed' | 'colorProcessed' | 'final';
+type ThumbnailState = 'idle' | 'loading' | 'ready' | 'error' | 'unavailable';
+
+interface CapturePreview {
+  id: string;
+  assetId: string;
+  kind: string;
+  url: string;
+  objectUrl: string;
+  state: ThumbnailState;
+  error: string;
+}
 
 interface CaptureResult {
   id: string;
@@ -318,11 +329,24 @@ interface CaptureResult {
   assetUrl: string;
   downloadUrl: string;
   assets: CaptureAssetPayload[];
+  previews: CapturePreview[];
   thumbnailAssetId: string;
   thumbnailAssetKind: string;
   thumbnailUrl: string;
   thumbnailObjectUrl: string;
-  thumbnailState: 'idle' | 'loading' | 'ready' | 'error' | 'unavailable';
+  thumbnailState: ThumbnailState;
+  thumbnailError: string;
+}
+
+interface CapturePreviewCard {
+  id: string;
+  filename: string;
+  status: string;
+  resolution: string;
+  createdAt: string;
+  thumbnailAssetKind: string;
+  thumbnailObjectUrl: string;
+  thumbnailState: ThumbnailState;
   thumbnailError: string;
 }
 
@@ -375,6 +399,7 @@ const thumbnailOptions = computed<Array<{ key: ThumbnailKey; label: string }>>((
   { key: 'original', label: t('pages.captureAcquisition.originalThumbnail') },
   { key: 'pageProcessed', label: t('pages.captureAcquisition.pageProcessedThumbnail') },
   { key: 'colorProcessed', label: t('pages.captureAcquisition.colorProcessedThumbnail') },
+  { key: 'final', label: t('pages.captureAcquisition.finalThumbnail') },
 ]);
 
 const captureConfig = reactive({
@@ -385,6 +410,7 @@ const captureConfig = reactive({
     original: true,
     pageProcessed: true,
     colorProcessed: false,
+    final: true,
   } as Record<ThumbnailKey, boolean>,
 });
 
@@ -506,6 +532,7 @@ const captureProfile = computed(() => ({
       original: captureConfig.thumbnails.original,
       page_processed: captureConfig.thumbnails.pageProcessed,
       color_processed: captureConfig.thumbnails.colorProcessed,
+      final: captureConfig.thumbnails.final,
     },
   },
 }));
@@ -537,6 +564,37 @@ const captureRows = computed<TableRow[]>(() =>
       status: result.status,
     },
   })),
+);
+
+const capturePreviewCards = computed<CapturePreviewCard[]>(() =>
+  captureResults.value.flatMap((result) => {
+    if (result.previews.length === 0) {
+      return [
+        {
+          id: result.id,
+          filename: result.filename,
+          status: result.status,
+          resolution: result.resolution,
+          createdAt: result.createdAt,
+          thumbnailAssetKind: result.thumbnailAssetKind,
+          thumbnailObjectUrl: result.thumbnailObjectUrl,
+          thumbnailState: result.thumbnailState,
+          thumbnailError: result.thumbnailError,
+        },
+      ];
+    }
+    return result.previews.map((preview, index) => ({
+      id: preview.id,
+      filename: result.previews.length === 1 ? result.filename : `${result.filename} #${index + 1}`,
+      status: result.status,
+      resolution: result.resolution,
+      createdAt: result.createdAt,
+      thumbnailAssetKind: preview.kind,
+      thumbnailObjectUrl: preview.objectUrl,
+      thumbnailState: preview.state,
+      thumbnailError: preview.error,
+    }));
+  }),
 );
 
 const eventItems = computed<TimelineItem[]>(() =>
@@ -587,6 +645,7 @@ watch(
     captureConfig.thumbnails.original,
     captureConfig.thumbnails.pageProcessed,
     captureConfig.thumbnails.colorProcessed,
+    captureConfig.thumbnails.final,
     deviceVideoState.selectedDeviceId,
     deviceVideoState.selectedResolutionKey,
   ],
@@ -663,6 +722,7 @@ async function handleCapture(): Promise<void> {
     assetUrl: '',
     downloadUrl: '',
     assets: [],
+    previews: [],
     thumbnailAssetId: '',
     thumbnailAssetKind: '',
     thumbnailUrl: '',
@@ -780,7 +840,8 @@ function handleCommandEvent(event: { event: string; payload?: Record<string, unk
 
 function applyCaptureTask(task: CaptureTaskPayload): void {
   const finalAsset = task.assets.find((asset) => asset.kind === 'final') ?? task.assets.find((asset) => asset.kind === 'original');
-  const displayAsset = selectPreferredDisplayAsset(task.assets);
+  const displayAssets = selectDisplayAssets(task.assets);
+  const displayAsset = displayAssets[0];
   logCaptureDebug('applyCaptureTask parsed', {
     task_id: task.task_id,
     status: task.status,
@@ -798,12 +859,14 @@ function applyCaptureTask(task: CaptureTaskPayload): void {
     })),
     final_asset: finalAsset,
     display_asset: displayAsset,
+    display_assets: displayAssets,
   });
   const currentRow = captureResults.value.find((item) => item.taskId === task.task_id);
   const thumbnailChanged = Boolean(displayAsset && currentRow?.thumbnailAssetId && currentRow.thumbnailAssetId !== displayAsset.assetId);
   if (thumbnailChanged && currentRow?.thumbnailObjectUrl) {
     URL.revokeObjectURL(currentRow.thumbnailObjectUrl);
   }
+  const nextPreviews = buildCapturePreviews(currentRow, displayAssets);
   const filename = finalAsset?.path ? finalAsset.path.split('/').pop() || finalAsset.path : undefined;
   const status = task.status === 'succeeded' ? 'succeeded' : task.status === 'failed' ? task.error || task.message || 'failed' : task.status;
   updateCaptureByTaskId(task.task_id, {
@@ -812,6 +875,7 @@ function applyCaptureTask(task: CaptureTaskPayload): void {
     assetUrl: finalAsset?.url,
     downloadUrl: finalAsset?.downloadUrl,
     assets: task.assets,
+    previews: nextPreviews,
     thumbnailAssetId: displayAsset?.assetId,
     thumbnailAssetKind: displayAsset?.kind,
     thumbnailUrl: displayAsset ? assetAccessPath(displayAsset) : undefined,
@@ -819,10 +883,13 @@ function applyCaptureTask(task: CaptureTaskPayload): void {
     thumbnailState: isTerminalCaptureStatus(task.status) && !displayAsset ? 'unavailable' : undefined,
     status,
   });
-  if (displayAsset) {
-    const row = captureResults.value.find((item) => item.taskId === task.task_id);
-    if (row && row.thumbnailAssetId === displayAsset.assetId && !row.thumbnailObjectUrl && row.thumbnailState !== 'loading') {
-      void loadCaptureThumbnail(row.id, displayAsset);
+  const row = captureResults.value.find((item) => item.taskId === task.task_id);
+  if (row) {
+    for (const preview of row.previews) {
+      const asset = displayAssets.find((item) => item.assetId === preview.assetId);
+      if (asset && !preview.objectUrl && preview.state !== 'loading') {
+        void loadCaptureThumbnail(row.id, preview.id, asset);
+      }
     }
   }
 }
@@ -839,6 +906,18 @@ function updateCaptureResult(id: string, patch: Partial<CaptureResult>): void {
   captureResults.value = captureResults.value.map((item) => (item.id === id ? { ...item, ...withoutUndefinedCapturePatch(patch) } : item));
 }
 
+function updateCapturePreview(resultId: string, previewId: string, patch: Partial<CapturePreview>): void {
+  captureResults.value = captureResults.value.map((item) => {
+    if (item.id !== resultId) {
+      return item;
+    }
+    return {
+      ...item,
+      previews: item.previews.map((preview) => (preview.id === previewId ? { ...preview, ...patch } : preview)),
+    };
+  });
+}
+
 function clearCaptureResults(): void {
   revokeAllThumbnailObjectUrls();
   captureResults.value = [];
@@ -851,8 +930,9 @@ function clearCaptureResults(): void {
   });
 }
 
-function selectPreferredDisplayAsset(assets: CaptureAssetPayload[]): CaptureAssetPayload | undefined {
+function selectDisplayAssets(assets: CaptureAssetPayload[]): CaptureAssetPayload[] {
   const preferredKinds = [
+    'final_thumbnail',
     'color_processed_thumbnail',
     'page_processed_thumbnail',
     'original_thumbnail',
@@ -862,28 +942,48 @@ function selectPreferredDisplayAsset(assets: CaptureAssetPayload[]): CaptureAsse
     'final',
   ];
   for (const kind of preferredKinds) {
-    const asset = assets.find((item) => item.kind === kind && assetAccessPath(item) && isBrowserRenderableImage(item));
-    if (asset) {
-      return asset;
+    const matched = assets.filter((item) => item.kind === kind || item.kind.startsWith(`${kind}_`));
+    const renderable = matched.filter((item) => assetAccessPath(item) && isBrowserRenderableImage(item));
+    if (renderable.length > 0) {
+      return renderable;
     }
   }
-  return undefined;
+  return [];
 }
 
-async function loadCaptureThumbnail(resultId: string, asset: CaptureAssetPayload): Promise<void> {
+function buildCapturePreviews(currentRow: CaptureResult | undefined, assets: CaptureAssetPayload[]): CapturePreview[] {
+  const previous = new Map((currentRow?.previews ?? []).map((preview) => [preview.assetId, preview]));
+  const nextAssetIds = new Set(assets.map((asset) => asset.assetId));
+  for (const preview of currentRow?.previews ?? []) {
+    if (!nextAssetIds.has(preview.assetId) && preview.objectUrl) {
+      URL.revokeObjectURL(preview.objectUrl);
+    }
+  }
+  return assets.map((asset, index) => {
+    const oldPreview = previous.get(asset.assetId);
+    return {
+      id: `${currentRow?.id ?? 'capture'}-preview-${asset.assetId || index}`,
+      assetId: asset.assetId,
+      kind: asset.kind,
+      url: assetAccessPath(asset),
+      objectUrl: oldPreview?.objectUrl ?? '',
+      state: oldPreview?.objectUrl ? 'ready' : oldPreview?.state ?? 'idle',
+      error: oldPreview?.error ?? '',
+    };
+  });
+}
+
+async function loadCaptureThumbnail(resultId: string, previewId: string, asset: CaptureAssetPayload): Promise<void> {
   const sessionToken = authSessionState.sessionToken;
   const accessPath = assetAccessPath(asset);
   if (!sessionToken || !accessPath) {
-    updateCaptureResult(resultId, {
-      thumbnailState: 'error',
-      thumbnailError: t('pages.captureAcquisition.thumbnailAuthMissing'),
-    });
+    updateCapturePreview(resultId, previewId, { state: 'error', error: t('pages.captureAcquisition.thumbnailAuthMissing') });
     return;
   }
 
   const requestToken = Date.now();
-  thumbnailRequests.set(resultId, requestToken);
-  updateCaptureResult(resultId, { thumbnailState: 'loading', thumbnailError: '' });
+  thumbnailRequests.set(previewId, requestToken);
+  updateCapturePreview(resultId, previewId, { state: 'loading', error: '' });
 
   try {
     const fetchUrl = resolveAssetUrl(accessPath);
@@ -915,34 +1015,31 @@ async function loadCaptureThumbnail(resultId: string, asset: CaptureAssetPayload
     if (!blob.type.toLowerCase().startsWith('image/') && contentType) {
       blob = blob.slice(0, blob.size, contentType);
     }
-    if (thumbnailRequests.get(resultId) !== requestToken) {
+    if (thumbnailRequests.get(previewId) !== requestToken) {
       return;
     }
     const objectUrl = URL.createObjectURL(blob);
     const current = captureResults.value.find((item) => item.id === resultId);
-    if (!current) {
+    const currentPreview = current?.previews.find((item) => item.id === previewId);
+    if (!current || !currentPreview) {
       URL.revokeObjectURL(objectUrl);
       return;
     }
-    if (current?.thumbnailObjectUrl) {
-      URL.revokeObjectURL(current.thumbnailObjectUrl);
+    if (currentPreview.objectUrl) {
+      URL.revokeObjectURL(currentPreview.objectUrl);
     }
-    updateCaptureResult(resultId, {
-      thumbnailObjectUrl: objectUrl,
-      thumbnailState: 'ready',
-      thumbnailError: '',
-    });
+    updateCapturePreview(resultId, previewId, { objectUrl, state: 'ready', error: '' });
   } catch (error) {
-    if (thumbnailRequests.get(resultId) !== requestToken) {
+    if (thumbnailRequests.get(previewId) !== requestToken) {
       return;
     }
-    updateCaptureResult(resultId, {
-      thumbnailState: 'error',
-      thumbnailError: error instanceof Error ? error.message : t('pages.captureAcquisition.thumbnailLoadFailed'),
+    updateCapturePreview(resultId, previewId, {
+      state: 'error',
+      error: error instanceof Error ? error.message : t('pages.captureAcquisition.thumbnailLoadFailed'),
     });
   } finally {
-    if (thumbnailRequests.get(resultId) === requestToken) {
-      thumbnailRequests.delete(resultId);
+    if (thumbnailRequests.get(previewId) === requestToken) {
+      thumbnailRequests.delete(previewId);
     }
   }
 }
@@ -962,7 +1059,7 @@ function assetAccessPath(asset: CaptureAssetPayload): string {
 function isBrowserRenderableImage(asset: CaptureAssetPayload): boolean {
   const contentType = asset.contentType.toLowerCase();
   if (!contentType) {
-    return asset.kind.includes('thumbnail') || asset.kind === 'original' || asset.kind === 'page_processed' || asset.kind === 'color_processed';
+    return asset.kind.includes('thumbnail') || asset.kind === 'original' || asset.kind.startsWith('page_processed') || asset.kind.startsWith('color_processed');
   }
   return ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif', 'image/bmp'].includes(contentType);
 }
@@ -972,10 +1069,15 @@ function revokeAllThumbnailObjectUrls(): void {
     if (result.thumbnailObjectUrl) {
       URL.revokeObjectURL(result.thumbnailObjectUrl);
     }
+    for (const preview of result.previews) {
+      if (preview.objectUrl) {
+        URL.revokeObjectURL(preview.objectUrl);
+      }
+    }
   }
 }
 
-function thumbnailStateLabel(result: CaptureResult): string {
+function thumbnailStateLabel(result: { thumbnailState: ThumbnailState; status: string }): string {
   if (result.thumbnailState === 'loading') {
     return t('pages.captureAcquisition.thumbnailLoading');
   }

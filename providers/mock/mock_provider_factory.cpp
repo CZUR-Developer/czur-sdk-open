@@ -516,6 +516,15 @@ public:
         CopyFile(request.input_path, request.output_path);
         result.processed = true;
         result.output_path = request.output_path;
+        SdkPageOutput output;
+        output.output_id = "page-001";
+        output.role = "page";
+        output.index = 0;
+        output.path = request.output_path;
+        output.content_type = "image/jpeg";
+        output.width = request.width;
+        output.height = request.height;
+        result.outputs.push_back(output);
         return result;
     }
 
