@@ -58,6 +58,8 @@ interface PendingVideoFrame {
   streamId: string;
   frameSeq: number;
   meta: FrameMeta | null;
+  width: number;
+  height: number;
   buffer: ArrayBuffer;
 }
 
@@ -311,7 +313,7 @@ function buildVideoParams(resolution: DeviceResolution): Record<string, unknown>
     width: resolution.width,
     height: resolution.height,
     fps: resolution.fps,
-    pixel_format: resolution.pixel_format || 'jpeg',
+    pixel_format: resolution.pixel_format || 'bgr24',
   };
 }
 
@@ -379,7 +381,7 @@ function enqueueVideoFrame(buffer: ArrayBuffer): void {
   state.receivedFrameCount += 1;
   state.lastFrameBytes = buffer.byteLength;
 
-  if (!state.streamId || buffer.byteLength === 0 || !isCompleteJpeg(buffer)) {
+  if (!state.streamId || buffer.byteLength === 0) {
     state.droppedFrameCount += 1;
     return;
   }
@@ -399,10 +401,22 @@ function enqueueVideoFrame(buffer: ArrayBuffer): void {
     return;
   }
 
+  const pixelFormat = meta?.pixel_format || 'bgr24';
+  const width = typeof meta?.width === 'number' && Number.isFinite(meta.width) ? meta.width : 0;
+  const height = typeof meta?.height === 'number' && Number.isFinite(meta.height) ? meta.height : 0;
+  const expectedBytes = width > 0 && height > 0 ? width * height * 3 : 0;
+  if (pixelFormat !== 'bgr24' || expectedBytes <= 0 || buffer.byteLength < expectedBytes) {
+    state.decodeFailedCount += 1;
+    state.droppedFrameCount += 1;
+    return;
+  }
+
   pendingFrame = {
     streamId: frameStreamId,
     frameSeq,
     meta,
+    width,
+    height,
     buffer: buffer.slice(0),
   };
   processPendingFrame();
@@ -418,50 +432,33 @@ function processPendingFrame(): void {
   decodingFrame = true;
   const generation = streamGeneration;
 
-  void decodeFrame(frame.buffer)
-    .then(async (image) => {
+  requestAnimationFrame(() => {
+    try {
       if (generation !== streamGeneration || frame.streamId !== state.streamId || frame.frameSeq <= state.lastRenderedSeq) {
-        closeDecodedImage(image);
         state.droppedFrameCount += 1;
         return;
       }
       if (pendingFrame && pendingFrame.frameSeq > frame.frameSeq) {
-        closeDecodedImage(image);
         state.droppedFrameCount += 1;
         return;
       }
-      await new Promise<void>((resolve) => {
-        requestAnimationFrame(() => {
-          if (generation !== streamGeneration || frame.streamId !== state.streamId || frame.frameSeq <= state.lastRenderedSeq) {
-            closeDecodedImage(image);
-            state.droppedFrameCount += 1;
-            resolve();
-            return;
-          }
-          if (pendingFrame && pendingFrame.frameSeq > frame.frameSeq) {
-            closeDecodedImage(image);
-            state.droppedFrameCount += 1;
-            resolve();
-            return;
-          }
-          drawDecodedFrame(image);
-          closeDecodedImage(image);
-          state.frameMeta = frame.meta;
-          state.renderedFrameCount += 1;
-          state.lastRenderedSeq = frame.frameSeq;
-          state.lastFrameAt = nowTimeLabel();
-          resolve();
-        });
-      });
-    })
-    .catch(() => {
+      if (!drawBgrFrame(frame.buffer, frame.width, frame.height)) {
+        state.decodeFailedCount += 1;
+        state.droppedFrameCount += 1;
+        return;
+      }
+      state.frameMeta = frame.meta;
+      state.renderedFrameCount += 1;
+      state.lastRenderedSeq = frame.frameSeq;
+      state.lastFrameAt = nowTimeLabel();
+    } catch {
       state.decodeFailedCount += 1;
       state.droppedFrameCount += 1;
-    })
-    .finally(() => {
+    } finally {
       decodingFrame = false;
       processPendingFrame();
-    });
+    }
+  });
 }
 
 function closeVideoSocket(): void {
@@ -503,7 +500,7 @@ function ensureCaptureResolution(): DeviceResolution {
     real_width: 1536,
     real_height: 1152,
     fps: 15,
-    pixel_format: 'jpeg',
+    pixel_format: 'bgr24',
     is_default: false,
   };
   state.resolutions = [fallback, ...state.resolutions];
@@ -522,7 +519,7 @@ function asResolutions(value: unknown): DeviceResolution[] {
       real_width: asNumber(item.real_width),
       real_height: asNumber(item.real_height),
       fps: asNumber(item.fps) || 15,
-      pixel_format: asString(item.pixel_format) || 'jpeg',
+      pixel_format: asString(item.pixel_format) || 'bgr24',
       is_default: Boolean(item.is_default),
     }))
     .filter((resolution) => resolution.width > 0 && resolution.height > 0);
@@ -546,69 +543,31 @@ function asNumber(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
-function isCompleteJpeg(buffer: ArrayBuffer): boolean {
-  const bytes = new Uint8Array(buffer);
-  const length = bytes.length;
-  if (length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) {
+function drawBgrFrame(buffer: ArrayBuffer, width: number, height: number): boolean {
+  if (!videoCanvas || !videoContext) {
     return false;
   }
-  for (let index = length - 2; index >= 2; index -= 1) {
-    if (bytes[index] === 0xff && bytes[index + 1] === 0xd9) {
-      return true;
-    }
+  const expectedBytes = width * height * 3;
+  if (width <= 0 || height <= 0 || buffer.byteLength < expectedBytes) {
+    return false;
   }
-  return false;
-}
 
-async function decodeFrame(buffer: ArrayBuffer): Promise<ImageBitmap | HTMLImageElement> {
-  const blob = new Blob([buffer], { type: 'image/jpeg' });
-  if ('createImageBitmap' in window) {
-    return createImageBitmap(blob);
-  }
-  return decodeWithImage(blob);
-}
-
-async function decodeWithImage(blob: Blob): Promise<HTMLImageElement> {
-  const url = URL.createObjectURL(blob);
-  const image = new Image();
-  image.decoding = 'async';
-  image.src = url;
-  try {
-    if ('decode' in image) {
-      await image.decode();
-    } else {
-      await new Promise<void>((resolve, reject) => {
-        image.onload = () => resolve();
-        image.onerror = () => reject(new Error('image decode failed'));
-      });
-    }
-    return image;
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
-function drawDecodedFrame(image: ImageBitmap | HTMLImageElement): void {
-  if (!videoCanvas || !videoContext) {
-    return;
-  }
-  const width = image.width;
-  const height = image.height;
-  if (width <= 0 || height <= 0) {
-    return;
-  }
   if (videoCanvas.width !== width || videoCanvas.height !== height) {
     videoCanvas.width = width;
     videoCanvas.height = height;
   }
-  videoContext.clearRect(0, 0, width, height);
-  videoContext.drawImage(image, 0, 0, width, height);
-}
 
-function closeDecodedImage(image: ImageBitmap | HTMLImageElement): void {
-  if ('close' in image && typeof image.close === 'function') {
-    image.close();
+  const bgr = new Uint8Array(buffer, 0, expectedBytes);
+  const imageData = videoContext.createImageData(width, height);
+  const rgba = imageData.data;
+  for (let source = 0, target = 0; source < expectedBytes; source += 3, target += 4) {
+    rgba[target] = bgr[source + 2];
+    rgba[target + 1] = bgr[source + 1];
+    rgba[target + 2] = bgr[source];
+    rgba[target + 3] = 255;
   }
+  videoContext.putImageData(imageData, 0, 0);
+  return true;
 }
 
 function clearCanvas(): void {

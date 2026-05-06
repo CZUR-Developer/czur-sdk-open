@@ -19,7 +19,7 @@ struct SdkVideoResolution {
     int real_width = 0;
     int real_height = 0;
     int fps = 0;
-    std::string pixel_format = "jpeg";
+    std::string pixel_format = "bgr24";
     bool is_default = false;
 };
 
@@ -41,7 +41,7 @@ struct SdkDeviceOpenRequest {
     int width = 0;
     int height = 0;
     int fps = 0;
-    std::string pixel_format = "jpeg";
+    std::string pixel_format = "bgr24";
 };
 
 struct SdkDeviceOpenResult {
@@ -91,14 +91,14 @@ struct SdkVideoStartRequest {
     int width = 0;
     int height = 0;
     int fps = 0;
-    std::string pixel_format = "jpeg";
+    std::string pixel_format = "bgr24";
 };
 
 struct SdkVideoStartResult {
     int code = ToCode(SdkStatusCode::Ok);
     std::string message = "ok";
     bool accepted = false;
-    std::string pixel_format = "jpeg";
+    std::string pixel_format = "bgr24";
     int width = 1280;
     int height = 720;
     int fps = 15;
@@ -111,7 +111,7 @@ struct SdkVideoFrame {
     int64_t timestamp_ms = 0;
     int width = 0;
     int height = 0;
-    std::string pixel_format = "jpeg";
+    std::string pixel_format = "bgr24";
     std::vector<uint8_t> payload;
 };
 

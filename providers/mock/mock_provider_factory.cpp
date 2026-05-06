@@ -351,8 +351,8 @@ public:
                     frame.timestamp_ms = NowMs();
                     frame.width = resolution.width;
                     frame.height = resolution.height;
-                    frame.pixel_format = "jpeg";
-                    frame.payload = TinyJpeg();
+                    frame.pixel_format = "bgr24";
+                    frame.payload = MakeBgrFrame(resolution.width, resolution.height, frame.frame_seq);
                     if (callback) {
                         callback(frame);
                     }
@@ -363,7 +363,7 @@ public:
             streams_[request.device_id] = state;
         }
         result.accepted = true;
-        result.pixel_format = "jpeg";
+        result.pixel_format = "bgr24";
         result.width = resolution.width;
         result.height = resolution.height;
         result.fps = resolution.fps;
@@ -428,6 +428,23 @@ private:
             0x07, 0xff, 0xd9,
         };
         return std::vector<uint8_t>(kJpeg, kJpeg + sizeof(kJpeg));
+    }
+
+    static std::vector<uint8_t> MakeBgrFrame(int width, int height, uint64_t frame_seq) {
+        if (width <= 0 || height <= 0) {
+            return std::vector<uint8_t>();
+        }
+        std::vector<uint8_t> data(static_cast<size_t>(width) * static_cast<size_t>(height) * 3);
+        const uint8_t phase = static_cast<uint8_t>(frame_seq % 256);
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                const size_t offset = (static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x)) * 3;
+                data[offset + 0] = static_cast<uint8_t>((x + phase) % 256);
+                data[offset + 1] = static_cast<uint8_t>((y + phase) % 256);
+                data[offset + 2] = static_cast<uint8_t>((x + y + phase) % 256);
+            }
+        }
+        return data;
     }
 
     static void WriteBytes(const std::string& path, const std::vector<uint8_t>& bytes) {
