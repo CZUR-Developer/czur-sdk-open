@@ -23,6 +23,18 @@ interface FrameMeta {
   width?: number;
   height?: number;
   pixel_format?: string;
+  detected_rects?: DetectedRect[];
+  detected_rects_source?: {
+    width?: number;
+    height?: number;
+  };
+}
+
+interface DetectedRect {
+  left_top?: [number, number];
+  right_top?: [number, number];
+  right_down?: [number, number];
+  left_down?: [number, number];
 }
 
 interface DeviceFeatures {
@@ -45,6 +57,7 @@ interface DeviceVideoState {
   streamId: string;
   streamSessionToken: string;
   frameMeta: FrameMeta | null;
+  showDetectedRects: boolean;
   receivedFrameCount: number;
   renderedFrameCount: number;
   droppedFrameCount: number;
@@ -58,6 +71,12 @@ interface PendingVideoFrame {
   streamId: string;
   frameSeq: number;
   meta: FrameMeta | null;
+  width: number;
+  height: number;
+  buffer: ArrayBuffer;
+}
+
+interface RenderedVideoFrame {
   width: number;
   height: number;
   buffer: ArrayBuffer;
@@ -79,6 +98,7 @@ const state = reactive<DeviceVideoState>({
   streamId: '',
   streamSessionToken: '',
   frameMeta: null,
+  showDetectedRects: false,
   receivedFrameCount: 0,
   renderedFrameCount: 0,
   droppedFrameCount: 0,
@@ -95,6 +115,7 @@ let pendingFrame: PendingVideoFrame | null = null;
 let decodingFrame = false;
 let streamGeneration = 0;
 let nextSyntheticFrameSeq = 1;
+let lastRenderedFrame: RenderedVideoFrame | null = null;
 
 export const deviceVideoState = readonly(state);
 
@@ -209,7 +230,7 @@ export async function closeSelectedDevice(): Promise<void> {
   });
 }
 
-export async function startVideo(): Promise<void> {
+export async function startVideo(profile?: unknown): Promise<void> {
   const resolution = selectedResolution();
   if (!state.selectedDeviceId || !state.opened || !resolution) {
     state.startState = 'blocked';
@@ -220,9 +241,12 @@ export async function startVideo(): Promise<void> {
   state.startState = 'running';
   state.videoState = 'running';
   state.errorMessage = '';
-  const response = await sendBoundCommand('video.start', {
-    params: buildVideoParams(resolution),
-  });
+  const params = buildVideoParams(resolution);
+  if (profile && typeof profile === 'object') {
+    params.profile = profile;
+  }
+  state.showDetectedRects = shouldShowDetectedRects(profile);
+  const response = await sendBoundCommand('video.start', { params });
   if (!isOkResponse(response)) {
     state.startState = 'error';
     state.videoState = 'error';
@@ -233,6 +257,37 @@ export async function startVideo(): Promise<void> {
   state.streamSessionToken = asString(response.data.session_token);
   state.startState = 'success';
   connectVideoSocket();
+}
+
+export async function setVideoProfile(profile: unknown): Promise<void> {
+  if (!state.selectedDeviceId || !state.streamId) {
+    return;
+  }
+  const response = await sendBoundCommand('video.set_profile', {
+    params: {
+      device_id: state.selectedDeviceId,
+      profile,
+    },
+  });
+  if (!isOkResponse(response)) {
+    state.errorMessage = response.message;
+    recordAlert({
+      name: 'VIDEO_SET_PROFILE_FAILED',
+      method: 'video.set_profile',
+      code: response.code,
+      message: response.message,
+    });
+    return;
+  }
+  state.showDetectedRects = shouldShowDetectedRects(profile);
+  if (!state.showDetectedRects) {
+    clearDetectedRectsPreview();
+  }
+  recordRuntimeEvent({
+    title: 'video.profile_updated',
+    detail: `video.set_profile applied to ${state.selectedDeviceId}.`,
+    tone: 'info',
+  });
 }
 
 export async function stopVideo(): Promise<void> {
@@ -442,11 +497,16 @@ function processPendingFrame(): void {
         state.droppedFrameCount += 1;
         return;
       }
-      if (!drawBgrFrame(frame.buffer, frame.width, frame.height)) {
+      if (!drawBgrFrame(frame.buffer, frame.width, frame.height, frame.meta)) {
         state.decodeFailedCount += 1;
         state.droppedFrameCount += 1;
         return;
       }
+      lastRenderedFrame = {
+        width: frame.width,
+        height: frame.height,
+        buffer: frame.buffer.slice(0),
+      };
       state.frameMeta = frame.meta;
       state.renderedFrameCount += 1;
       state.lastRenderedSeq = frame.frameSeq;
@@ -476,6 +536,8 @@ function resetPreview(): void {
   state.streamId = '';
   state.streamSessionToken = '';
   state.frameMeta = null;
+  state.showDetectedRects = false;
+  lastRenderedFrame = null;
   state.receivedFrameCount = 0;
   state.renderedFrameCount = 0;
   state.droppedFrameCount = 0;
@@ -543,7 +605,7 @@ function asNumber(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
-function drawBgrFrame(buffer: ArrayBuffer, width: number, height: number): boolean {
+function drawBgrFrame(buffer: ArrayBuffer, width: number, height: number, meta: FrameMeta | null): boolean {
   if (!videoCanvas || !videoContext) {
     return false;
   }
@@ -567,7 +629,85 @@ function drawBgrFrame(buffer: ArrayBuffer, width: number, height: number): boole
     rgba[target + 3] = 255;
   }
   videoContext.putImageData(imageData, 0, 0);
+  drawDetectedRects(meta, width, height);
   return true;
+}
+
+function drawDetectedRects(meta: FrameMeta | null, width: number, height: number): void {
+  if (!state.showDetectedRects || !videoContext || !meta?.detected_rects?.length) {
+    return;
+  }
+  const sourceWidth = typeof meta.detected_rects_source?.width === 'number' && meta.detected_rects_source.width > 0
+    ? meta.detected_rects_source.width
+    : width;
+  const sourceHeight = typeof meta.detected_rects_source?.height === 'number' && meta.detected_rects_source.height > 0
+    ? meta.detected_rects_source.height
+    : height;
+  const scaleX = width / sourceWidth;
+  const scaleY = height / sourceHeight;
+
+  videoContext.save();
+  videoContext.lineWidth = Math.max(3, Math.round(Math.min(width, height) / 240));
+  videoContext.strokeStyle = '#22d3ee';
+  videoContext.shadowColor = 'rgba(8, 47, 73, 0.65)';
+  videoContext.shadowBlur = 6;
+  for (const rect of meta.detected_rects) {
+    if (!isDetectedRect(rect)) {
+      continue;
+    }
+    videoContext.beginPath();
+    videoContext.moveTo(rect.left_top[0] * scaleX, rect.left_top[1] * scaleY);
+    videoContext.lineTo(rect.right_top[0] * scaleX, rect.right_top[1] * scaleY);
+    videoContext.lineTo(rect.right_down[0] * scaleX, rect.right_down[1] * scaleY);
+    videoContext.lineTo(rect.left_down[0] * scaleX, rect.left_down[1] * scaleY);
+    videoContext.closePath();
+    videoContext.stroke();
+  }
+  videoContext.restore();
+}
+
+function clearDetectedRectsPreview(): void {
+  if (state.frameMeta) {
+    state.frameMeta = {
+      ...state.frameMeta,
+      detected_rects: [],
+      detected_rects_source: undefined,
+    };
+  }
+  if (pendingFrame?.meta) {
+    pendingFrame.meta = {
+      ...pendingFrame.meta,
+      detected_rects: [],
+      detected_rects_source: undefined,
+    };
+  }
+  if (lastRenderedFrame) {
+    drawBgrFrame(lastRenderedFrame.buffer, lastRenderedFrame.width, lastRenderedFrame.height, null);
+  }
+}
+
+function shouldShowDetectedRects(profile: unknown): boolean {
+  if (!profile || typeof profile !== 'object') {
+    return false;
+  }
+  const capture = (profile as { capture?: unknown }).capture;
+  if (!capture || typeof capture !== 'object') {
+    return false;
+  }
+  const pageProcessing = (capture as { page_processing?: unknown }).page_processing;
+  const singlePage = (capture as { single_page?: unknown }).single_page;
+  if (!singlePage || typeof singlePage !== 'object') {
+    return false;
+  }
+  return pageProcessing === 'single_page' &&
+    (singlePage as { realtime_detect_rects?: unknown }).realtime_detect_rects === true;
+}
+
+function isDetectedRect(rect: DetectedRect): rect is Required<DetectedRect> {
+  return Array.isArray(rect.left_top) &&
+    Array.isArray(rect.right_top) &&
+    Array.isArray(rect.right_down) &&
+    Array.isArray(rect.left_down);
 }
 
 function clearCanvas(): void {

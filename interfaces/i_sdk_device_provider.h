@@ -23,6 +23,7 @@ public:
     virtual SdkVideoStartResult StartVideo(const SdkVideoStartRequest& request, SdkVideoFrameCallback callback) = 0;
     virtual SdkVideoStopResult StopVideo(const SdkVideoStopRequest& request) = 0;
     virtual SdkVideoFormatResult SetVideoFormat(const SdkVideoFormatRequest& request) = 0;
+    virtual SdkVideoProfileResult SetVideoProfile(const SdkVideoProfileRequest& request) = 0;
 };
 
 } // namespace sdk

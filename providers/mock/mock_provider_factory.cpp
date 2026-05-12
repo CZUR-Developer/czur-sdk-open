@@ -93,6 +93,7 @@ public:
             "video.start",
             "video.stop",
             "video.set_format",
+            "video.set_profile",
             "image.process",
             "ocr.recognize",
             "file.convert",
@@ -394,6 +395,21 @@ public:
     SdkVideoFormatResult SetVideoFormat(const SdkVideoFormatRequest&) override {
         SdkVideoFormatResult result;
         result.applied = true;
+        return result;
+    }
+
+    SdkVideoProfileResult SetVideoProfile(const SdkVideoProfileRequest& request) override {
+        SdkVideoProfileResult result;
+        std::lock_guard<std::mutex> lock(mu_);
+        if (streams_.find(request.device_id) == streams_.end()) {
+            result.code = ToCode(SdkStatusCode::StreamNotReady);
+            result.message = "video stream not running";
+            return result;
+        }
+        result.applied = true;
+        result.page_processing = request.page_processing;
+        result.single_page_realtime_detect_rects =
+            request.page_processing == "single_page" && request.single_page_realtime_detect_rects;
         return result;
     }
 

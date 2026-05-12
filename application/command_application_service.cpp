@@ -104,6 +104,9 @@ SdkCaptureProfile ParseCaptureProfile(const Json& params, const std::string& dev
         if (!color_mode.empty()) {
             profile.color_mode = color_mode;
         }
+        const Json single_page_json = GetOptionalObjectField(capture_json, "single_page");
+        profile.single_page_realtime_detect_rects =
+            GetOptionalBoolField(single_page_json, "realtime_detect_rects", profile.single_page_realtime_detect_rects);
     }
 
     const Json output_json = GetOptionalObjectField(profile_json, "output");
@@ -199,6 +202,7 @@ CommandApplicationService::CommandApplicationService(const SdkConfig& config, co
     methods_.push_back(MakeMethod("video.start", true, "Create one video stream session"));
     methods_.push_back(MakeMethod("video.stop", true, "Stop one video stream session"));
     methods_.push_back(MakeMethod("video.set_format", true, "Update one video stream format"));
+    methods_.push_back(MakeMethod("video.set_profile", true, "Update one video stream processing profile"));
     methods_.push_back(MakeMethod("image.process", true, "Run one image-processing request"));
     methods_.push_back(MakeMethod("ocr.recognize", true, "Submit one OCR request"));
     methods_.push_back(MakeMethod("file.convert", true, "Submit one file conversion request"));
@@ -293,6 +297,9 @@ Json CommandApplicationService::HandleRequest(const std::string& connection_id, 
     }
     if (request.method == "video.set_format") {
         return HandleVideoSetFormat(connection_id, request);
+    }
+    if (request.method == "video.set_profile") {
+        return HandleVideoSetProfile(connection_id, request);
     }
     if (request.method == "image.process") {
         return HandleImageProcess(connection_id, request);
@@ -670,6 +677,12 @@ Json CommandApplicationService::HandleVideoStart(const std::string& connection_i
     if (!IsSupportedVideoPixelFormat(start_request.pixel_format)) {
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "unsupported pixel_format");
     }
+    const Json profile_json = GetOptionalObjectField(request.params, "profile");
+    if (!profile_json.empty()) {
+        const SdkCaptureProfile profile = ParseCaptureProfile(request.params, start_request.device_id);
+        start_request.page_processing = profile.page_processing;
+        start_request.single_page_realtime_detect_rects = profile.single_page_realtime_detect_rects;
+    }
 
     const VideoSessionService::StreamResult stream_result =
         video_session_service_.RegisterStream(connection_id,
@@ -793,6 +806,41 @@ Json CommandApplicationService::HandleVideoSetFormat(const std::string& connecti
                                 {"width", stream_result.binding.width},
                                 {"height", stream_result.binding.height},
                                 {"fps", stream_result.binding.fps}});
+}
+
+Json CommandApplicationService::HandleVideoSetProfile(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+
+    SdkVideoProfileRequest profile_request;
+    profile_request.device_id = GetOptionalStringField(request.params, "device_id");
+    if (profile_request.device_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "device_id required");
+    }
+    const Json profile_json = GetOptionalObjectField(request.params, "profile");
+    if (profile_json.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "profile required");
+    }
+
+    const SdkCaptureProfile profile = ParseCaptureProfile(request.params, profile_request.device_id);
+    profile_request.page_processing = profile.page_processing;
+    profile_request.single_page_realtime_detect_rects = profile.single_page_realtime_detect_rects;
+
+    const SdkVideoProfileResult profile_result = device_facade_.SetVideoProfile(session_result.auth_context, profile_request);
+    if (!IsOkStatusCode(profile_result.code)) {
+        return BuildWsResponse(request.request_id, profile_result.code, profile_result.message);
+    }
+
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"device_id", profile_request.device_id},
+                                {"page_processing", profile_result.page_processing},
+                                {"single_page",
+                                 Json{{"realtime_detect_rects", profile_result.single_page_realtime_detect_rects}}},
+                                {"applied", profile_result.applied}});
 }
 
 Json CommandApplicationService::HandleImageProcess(const std::string& connection_id, const Request& request) {

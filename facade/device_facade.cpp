@@ -167,5 +167,17 @@ SdkVideoFormatResult DeviceFacade::SetVideoFormat(const AuthContext& auth_contex
     return providers_.device_provider->SetVideoFormat(request);
 }
 
+SdkVideoProfileResult DeviceFacade::SetVideoProfile(const AuthContext& auth_context,
+                                                    const SdkVideoProfileRequest& request) const {
+    SdkVideoProfileResult result;
+    const DeviceGetResult device_result = LookupDevice(auth_context, request.device_id);
+    if (!IsOkStatusCode(device_result.code)) {
+        result.code = device_result.code;
+        result.message = device_result.message;
+        return result;
+    }
+    return providers_.device_provider->SetVideoProfile(request);
+}
+
 } // namespace sdk
 } // namespace editor

@@ -194,6 +194,14 @@
               </div>
             </div>
 
+            <div v-if="captureConfig.pageProcessing === 'single_page'">
+              <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ t('pages.captureAcquisition.singlePageOptions') }}</p>
+              <label class="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                <span>{{ t('pages.captureAcquisition.realtimeDetectRects') }}</span>
+                <input v-model="captureConfig.singlePageRealtimeDetectRects" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500" />
+              </label>
+            </div>
+
             <div>
               <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ t('pages.captureAcquisition.colorMode') }}</p>
               <div class="grid gap-2 sm:grid-cols-2">
@@ -292,6 +300,7 @@ import {
   resolutionKey,
   selectDevice,
   setSelectedResolution,
+  setVideoProfile,
   startVideo,
   stopVideo,
 } from '../services/device-video';
@@ -404,6 +413,7 @@ const thumbnailOptions = computed<Array<{ key: ThumbnailKey; label: string }>>((
 
 const captureConfig = reactive({
   pageProcessing: 'single_page' as PageProcessingMode,
+  singlePageRealtimeDetectRects: true,
   colorMode: 'auto_optimize' as ColorMode,
   outputFormat: 'jpg' as OutputFormat,
   thumbnails: {
@@ -524,6 +534,9 @@ const captureProfile = computed(() => ({
   },
   capture: {
     page_processing: captureConfig.pageProcessing,
+    single_page: {
+      realtime_detect_rects: captureConfig.singlePageRealtimeDetectRects,
+    },
     color_mode: captureConfig.colorMode,
   },
   output: {
@@ -640,6 +653,7 @@ watch(
 watch(
   () => [
     captureConfig.pageProcessing,
+    captureConfig.singlePageRealtimeDetectRects,
     captureConfig.colorMode,
     captureConfig.outputFormat,
     captureConfig.thumbnails.original,
@@ -652,6 +666,16 @@ watch(
   () => {
     profileRevision.value += 1;
     profileInitializedAt.value = timeLabel();
+  },
+);
+
+watch(
+  () => [captureConfig.pageProcessing, captureConfig.singlePageRealtimeDetectRects] as const,
+  async () => {
+    if (!deviceVideoState.streamId || deviceVideoState.startState === 'running' || deviceVideoState.stopState === 'running') {
+      return;
+    }
+    await setVideoProfile(captureProfile.value);
   },
 );
 
@@ -696,7 +720,7 @@ async function openCaptureDevice(): Promise<void> {
 
 async function startCaptureVideo(): Promise<void> {
   await applyCaptureAcquisitionResolution();
-  await startVideo();
+  await startVideo(captureProfile.value);
 }
 
 async function handleCapture(): Promise<void> {

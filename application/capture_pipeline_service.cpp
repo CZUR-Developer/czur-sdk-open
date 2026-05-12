@@ -207,6 +207,10 @@ public:
         laser_path_ = result.laser_path;
         original_width_ = result.width;
         original_height_ = result.height;
+        detected_rects_ = result.detected_rects;
+        detected_rects_source_width_ = result.detected_rects_source_width;
+        detected_rects_source_height_ = result.detected_rects_source_height;
+        scan_device_type_ = result.scan_device_type;
         AddAsset(MakeAsset("asset-original", "original", original_path_, result.content_type.empty() ? "image/jpeg" : result.content_type, result.width, result.height, result.size));
         if (!laser_path_.empty()) {
             AddAsset(MakeAsset("asset-laser", "laser", laser_path_, "image/jpeg"));
@@ -226,6 +230,11 @@ public:
         page_request.page_processing = request_.profile.page_processing;
         page_request.width = original_width_;
         page_request.height = original_height_;
+        page_request.single_page_realtime_detect_rects = request_.profile.single_page_realtime_detect_rects;
+        page_request.detected_rects = detected_rects_;
+        page_request.detected_rects_source_width = detected_rects_source_width_;
+        page_request.detected_rects_source_height = detected_rects_source_height_;
+        page_request.scan_device_type = scan_device_type_;
         const SdkPageProcessResult result = graphic_facade_.ProcessPage(page_request);
         if (!IsOkStatusCode(result.code) || result.unsupported || !result.processed) {
             page_outputs_.clear();
@@ -587,6 +596,10 @@ private:
     std::string laser_path_;
     int original_width_ = 0;
     int original_height_ = 0;
+    std::vector<SdkRect4P> detected_rects_;
+    int detected_rects_source_width_ = 0;
+    int detected_rects_source_height_ = 0;
+    int scan_device_type_ = 0;
     std::vector<ProcessedOutput> page_outputs_;
     mutable std::mutex mu_;
 };

@@ -39,6 +39,7 @@ public:
                                    SdkVideoFrameCallback callback) const;
     SdkVideoStopResult StopVideo(const AuthContext& auth_context, const SdkVideoStopRequest& request) const;
     SdkVideoFormatResult SetVideoFormat(const AuthContext& auth_context, const SdkVideoFormatRequest& request) const;
+    SdkVideoProfileResult SetVideoProfile(const AuthContext& auth_context, const SdkVideoProfileRequest& request) const;
 
 private:
     bool IsDeviceAuthorized(const AuthContext& auth_context, const SdkDeviceDescriptor& device) const;

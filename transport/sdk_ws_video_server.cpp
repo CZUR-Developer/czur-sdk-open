@@ -46,6 +46,13 @@ std::string QueryValue(const std::string& query, const std::string& key) {
     return "";
 }
 
+Json BuildDetectedRectJson(const SdkRect4P& rect) {
+    return Json{{"left_top", Json::array({rect.left_top.x, rect.left_top.y})},
+                {"right_top", Json::array({rect.right_top.x, rect.right_top.y})},
+                {"right_down", Json::array({rect.right_down.x, rect.right_down.y})},
+                {"left_down", Json::array({rect.left_down.x, rect.left_down.y})}};
+}
+
 } // namespace
 
 class SdkWsVideoServer::Impl {
@@ -250,15 +257,23 @@ void SdkWsVideoServer::PublishFrame(const SdkVideoFrame& frame) {
         return;
     }
 
-    const std::string meta_payload = DumpJson(BuildWsEvent(
-        "stream.frame_meta",
-        Json{{"device_id", frame.device_id},
-             {"stream_id", frame.stream_id},
-             {"frame_seq", frame.frame_seq},
-             {"timestamp_ms", frame.timestamp_ms},
-             {"width", frame.width},
-             {"height", frame.height},
-             {"pixel_format", frame.pixel_format}}));
+    Json meta = Json{{"device_id", frame.device_id},
+                     {"stream_id", frame.stream_id},
+                     {"frame_seq", frame.frame_seq},
+                     {"timestamp_ms", frame.timestamp_ms},
+                     {"width", frame.width},
+                     {"height", frame.height},
+                     {"pixel_format", frame.pixel_format}};
+    if (!frame.detected_rects.empty()) {
+        Json rects = Json::array();
+        for (std::vector<SdkRect4P>::const_iterator it = frame.detected_rects.begin(); it != frame.detected_rects.end(); ++it) {
+            rects.push_back(BuildDetectedRectJson(*it));
+        }
+        meta["detected_rects"] = rects;
+        meta["detected_rects_source"] = Json{{"width", frame.detected_rects_source_width},
+                                             {"height", frame.detected_rects_source_height}};
+    }
+    const std::string meta_payload = DumpJson(BuildWsEvent("stream.frame_meta", meta));
     const std::string binary_payload(reinterpret_cast<const char*>(frame.payload.data()), frame.payload.size());
 
     impl_->server.get_io_service().post([this, targets, meta_payload, binary_payload]() {

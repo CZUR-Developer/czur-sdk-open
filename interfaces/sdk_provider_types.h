@@ -69,6 +69,18 @@ struct SdkCaptureRequest {
     int timeout_ms = 15000;
 };
 
+struct SdkPoint2f {
+    float x = 0.0f;
+    float y = 0.0f;
+};
+
+struct SdkRect4P {
+    SdkPoint2f left_top;
+    SdkPoint2f right_top;
+    SdkPoint2f right_down;
+    SdkPoint2f left_down;
+};
+
 struct SdkCaptureResult {
     int code = ToCode(SdkStatusCode::Ok);
     std::string message = "ok";
@@ -81,6 +93,10 @@ struct SdkCaptureResult {
     int width = 0;
     int height = 0;
     uint64_t size = 0;
+    std::vector<SdkRect4P> detected_rects;
+    int detected_rects_source_width = 0;
+    int detected_rects_source_height = 0;
+    int scan_device_type = 0;
 };
 
 using SdkCaptureCallback = std::function<void(const SdkCaptureResult&)>;
@@ -92,6 +108,8 @@ struct SdkVideoStartRequest {
     int height = 0;
     int fps = 0;
     std::string pixel_format = "bgr24";
+    std::string page_processing;
+    bool single_page_realtime_detect_rects = false;
 };
 
 struct SdkVideoStartResult {
@@ -113,6 +131,9 @@ struct SdkVideoFrame {
     int height = 0;
     std::string pixel_format = "bgr24";
     std::vector<uint8_t> payload;
+    std::vector<SdkRect4P> detected_rects;
+    int detected_rects_source_width = 0;
+    int detected_rects_source_height = 0;
 };
 
 using SdkVideoFrameCallback = std::function<void(const SdkVideoFrame&)>;
@@ -141,6 +162,20 @@ struct SdkVideoFormatResult {
     bool applied = false;
 };
 
+struct SdkVideoProfileRequest {
+    std::string device_id;
+    std::string page_processing;
+    bool single_page_realtime_detect_rects = false;
+};
+
+struct SdkVideoProfileResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool applied = false;
+    std::string page_processing;
+    bool single_page_realtime_detect_rects = false;
+};
+
 struct SdkImageProcessRequest {
     std::string input_path;
     std::string output_path;
@@ -160,6 +195,7 @@ struct SdkCaptureProfile {
     int height = 0;
     int fps = 0;
     std::string page_processing = "single_page";
+    bool single_page_realtime_detect_rects = false;
     std::string color_mode = "auto_optimize";
     std::string output_format = "jpg";
     bool thumbnail_original = true;
@@ -198,6 +234,11 @@ struct SdkPageProcessRequest {
     std::string page_processing;
     int width = 0;
     int height = 0;
+    bool single_page_realtime_detect_rects = false;
+    std::vector<SdkRect4P> detected_rects;
+    int detected_rects_source_width = 0;
+    int detected_rects_source_height = 0;
+    int scan_device_type = 0;
 };
 
 struct SdkPageOutput {

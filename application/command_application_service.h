@@ -86,6 +86,7 @@ private:
     Json HandleVideoStart(const std::string& connection_id, const Request& request);
     Json HandleVideoStop(const std::string& connection_id, const Request& request);
     Json HandleVideoSetFormat(const std::string& connection_id, const Request& request);
+    Json HandleVideoSetProfile(const std::string& connection_id, const Request& request);
     Json HandleImageProcess(const std::string& connection_id, const Request& request);
     Json HandleOcrRecognize(const std::string& connection_id, const Request& request);
     Json HandleFileConvert(const std::string& connection_id, const Request& request);
