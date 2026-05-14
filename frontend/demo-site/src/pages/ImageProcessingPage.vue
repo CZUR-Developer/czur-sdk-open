@@ -431,8 +431,14 @@ const selectedAreaHint = computed(() => {
   }
   return hasSelectedArea() ? t('pages.captureAcquisition.selectedAreaReady') : t('pages.captureAcquisition.selectedAreaPending');
 });
-const overlayPoints = computed(() => pointKeys.map((key) => naturalToDisplay(form.selectedArea[key])).filter((point) => point.x > 0 || point.y > 0));
+const overlayPoints = computed(() => {
+  const keys = areaMode.value === 'points' ? pointKeys.slice(0, selectedPointCount.value) : pointKeys;
+  return keys.map((key) => naturalToDisplay(form.selectedArea[key]));
+});
 const areaOverlayPolygon = computed(() => {
+  if (areaMode.value === 'points' && selectedPointCount.value < pointKeys.length) {
+    return '';
+  }
   if (!hasSelectedArea()) {
     return '';
   }
@@ -650,10 +656,14 @@ function handleAreaPointerDown(event: PointerEvent): void {
   updateDisplaySize();
   const point = eventPoint(event);
   if (areaMode.value === 'points') {
+    if (selectedPointCount.value >= pointKeys.length) {
+      clearSelectedArea();
+    }
     const key = pointKeys[Math.min(selectedPointCount.value, pointKeys.length - 1)];
     form.selectedArea[key] = displayToNatural(point);
     selectedPointCount.value = Math.min(selectedPointCount.value + 1, pointKeys.length);
     if (selectedPointCount.value === pointKeys.length) {
+      normalizeSelectedAreaPoints();
       event.preventDefault();
     }
     return;
@@ -750,6 +760,18 @@ function hasSelectedArea(): boolean {
   const xs = points.map((point) => point.x);
   const ys = points.map((point) => point.y);
   return Math.max(...xs) - Math.min(...xs) >= 8 && Math.max(...ys) - Math.min(...ys) >= 8;
+}
+
+function normalizeSelectedAreaPoints(): void {
+  const points = pointKeys.map((key) => form.selectedArea[key]);
+  const center = points.reduce((acc, point) => ({ x: acc.x + point.x / points.length, y: acc.y + point.y / points.length }), { x: 0, y: 0 });
+  const sorted = [...points].sort((a, b) => Math.atan2(a.y - center.y, a.x - center.x) - Math.atan2(b.y - center.y, b.x - center.x));
+  const top = sorted.slice().sort((a, b) => a.y - b.y).slice(0, 2).sort((a, b) => a.x - b.x);
+  const bottom = sorted.slice().sort((a, b) => b.y - a.y).slice(0, 2).sort((a, b) => a.x - b.x);
+  form.selectedArea.left_top = top[0];
+  form.selectedArea.right_top = top[1];
+  form.selectedArea.right_down = bottom[1];
+  form.selectedArea.left_down = bottom[0];
 }
 
 function emptyArea(): Record<PointKey, { x: number; y: number }> {
