@@ -27,7 +27,13 @@ public:
         std::string message = "ok";
         SdkCaptureAsset asset;
     };
+    struct UploadResult {
+        int code = ToCode(SdkStatusCode::Ok);
+        std::string message = "ok";
+        Json body = Json::object();
+    };
     using AssetResolver = std::function<AssetResult(const std::string&, const std::string&, const std::string&)>;
+    using ImageUploadHandler = std::function<UploadResult(const std::string&, const std::string&, const std::string&, const std::string&)>;
 
     SdkHttpServer(const std::string& site_name,
                   const std::string& host,
@@ -40,6 +46,7 @@ public:
     void SetHealthSupplier(JsonSupplier supplier);
     void SetStatusSupplier(JsonSupplier supplier);
     void SetAssetResolver(AssetResolver resolver);
+    void SetImageUploadHandler(ImageUploadHandler handler);
     bool Start();
     void Stop();
 
@@ -56,6 +63,7 @@ private:
     JsonSupplier health_supplier_;
     JsonSupplier status_supplier_;
     AssetResolver asset_resolver_;
+    ImageUploadHandler image_upload_handler_;
     std::atomic<bool> running_;
     std::unique_ptr<httplib::Server> server_;
     std::thread server_thread_;

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -44,6 +45,13 @@ public:
         SdkCaptureAsset asset;
     };
 
+    struct ImageUploadResult {
+        int code = ToCode(SdkStatusCode::Ok);
+        std::string message = "ok";
+        std::string upload_id;
+        SdkCaptureAsset asset;
+    };
+
     explicit CommandApplicationService(const SdkConfig& config, const ProviderBundle& providers);
 
     void SetStatusSupplier(StatusSupplier supplier);
@@ -58,6 +66,10 @@ public:
     AssetAccessResult ResolveAsset(const std::string& session_token,
                                    const std::string& task_id,
                                    const std::string& asset_id) const;
+    ImageUploadResult UploadImage(const std::string& session_token,
+                                  const std::string& filename,
+                                  const std::string& content_type,
+                                  const std::string& content);
     std::size_t ActiveSessionCount() const;
     std::size_t ActiveStreamCount() const;
 
@@ -104,6 +116,12 @@ private:
     void RememberOpenedDevice(const std::string& connection_id, const std::string& device_id);
     void ForgetOpenedDevice(const std::string& connection_id, const std::string& device_id);
     std::vector<std::string> ClearOpenedDevices(const std::string& connection_id);
+    std::string NextImageTaskId();
+    SdkCaptureAsset AttachImageAssetUrls(const std::string& task_id, const SdkCaptureAsset& asset) const;
+    void RegisterImageAsset(const std::string& connection_id, const std::string& task_id, const SdkCaptureAsset& asset);
+    AssetAccessResult ResolveImageAsset(const std::string& connection_id,
+                                        const std::string& task_id,
+                                        const std::string& asset_id) const;
 
     SdkConfig config_;
     ProviderBundle providers_;
@@ -118,6 +136,10 @@ private:
     VideoFrameSink video_frame_sink_;
     VideoStreamClosedSink video_stream_closed_sink_;
     std::vector<MethodDescriptor> methods_;
+    std::atomic<uint64_t> next_image_task_seq_;
+    mutable std::mutex image_assets_mu_;
+    std::map<std::string, std::string> image_asset_connection_by_task_;
+    std::map<std::string, std::map<std::string, SdkCaptureAsset> > image_assets_by_task_;
     mutable std::mutex opened_devices_mu_;
     std::map<std::string, std::set<std::string> > opened_devices_by_connection_;
 };

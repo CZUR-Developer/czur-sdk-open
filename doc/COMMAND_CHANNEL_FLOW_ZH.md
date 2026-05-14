@@ -212,14 +212,14 @@ ws://127.0.0.1:17090
 - 设备 scope 是否允许
 - `capture.take`、`image.process`、`file.convert` 是否还能继续消费 quota
 
-纸张处理扩展参数通过 `params.profile.capture` 传递。单页模式支持：
+纸张处理扩展参数在采集方法中通过 `params.profile.capture` 传递，在 `image.process` 中通过顶层 `params.single_page` / `params.curved_book` 传递。单页模式支持：
 
 - `single_page.crop_border.enabled/width/height`：裁边开关与裁边参数，`width/height` 范围为 `-100..100`。
 - `single_page.id_card_round_corner`：证件圆角留白。
 - `single_page.auto_rotate`：页面自动转正。
 - `single_page.smart_black_edge_optimize`：智能优化黑边，默认开启。
 - `single_page.multi_target_paging`：多目标自动分页，可输出多页资产。
-- `single_page.realtime_detect_rects`：视频流是否返回实时识别框；关闭后后端不在每帧做目标检测。
+- `single_page.realtime_detect_rects`：仅采集/视频流生效。视频流是否返回实时识别框；关闭后后端不在每帧做目标检测。
 
 曲面书籍模式支持：
 
@@ -229,7 +229,35 @@ ws://127.0.0.1:17090
 - `curved_book.crop_border.enabled/width/height`：裁边开关与裁边参数。
 - `curved_book.auto_complete`：页面自动补全。
 
+独立 `image.process` 的曲面书籍处理只使用基于边缘的展平。激光线展平仅在采集流中对支持激光线的设备生效，因为它依赖设备激光标定数据，以及和原图同时采集得到的激光图。
+
 `video.set_profile` 可以运行时更新 `single_page.realtime_detect_rects` 和 `single_page.multi_target_paging`，无需重开视频流。
+
+`image.process` 对上传图片或已有本地图像文件执行同一套纸张处理和色彩模式链路：
+
+```json
+{
+  "request_id": "req-image-001",
+  "method": "image.process",
+  "params": {
+    "input_upload_id": "img-1760000000-1",
+    "output_dir": "/tmp/sdk-demo",
+    "page_processing": "single_page",
+    "color_mode": "auto_optimize",
+    "output_format": "jpg",
+    "single_page": {
+      "crop_border": { "enabled": false, "width": 0, "height": 0 },
+      "auto_rotate": true,
+      "smart_black_edge_optimize": true,
+      "multi_target_paging": false
+    }
+  }
+}
+```
+
+Demo 站点通过资源服务的 `POST /api/uploads/images` 上传浏览器选择的本地图片，默认地址为 `http://127.0.0.1:17082`。请求使用 multipart form-data，字段名为 `file`，并携带 `Authorization: Bearer <session_token>`。响应会返回 `upload_id` 和原图 asset。`image.process` 既可以使用 `input_upload_id`，也继续兼容已有的本地 `input_path + output_path` 模式。
+
+`selected_area` 模式下，前端把换算后的区域点传入 `params.selected_area.points`，并通过 `params.selected_area.source.width/height` 传入坐标基准尺寸。后端会再按实际输入图片尺寸缩放坐标后裁剪。响应里 `output_path` 指向第一页，`outputs[]` 返回单页或多页结果。
 
 ### 6. 刷新或销毁会话
 

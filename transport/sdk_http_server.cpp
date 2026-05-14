@@ -52,7 +52,7 @@ void SetCorsHeaders(httplib::Response* res) {
     }
     res->set_header("Access-Control-Allow-Origin", "*");
     res->set_header("Access-Control-Allow-Headers", "Authorization, Content-Type");
-    res->set_header("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res->set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
 }
 
 } // namespace
@@ -87,6 +87,10 @@ void SdkHttpServer::SetAssetResolver(AssetResolver resolver) {
     asset_resolver_ = resolver;
 }
 
+void SdkHttpServer::SetImageUploadHandler(ImageUploadHandler handler) {
+    image_upload_handler_ = handler;
+}
+
 bool SdkHttpServer::IsAuthorized(const std::string& authorization) const {
     if (auth_token_.empty()) {
         return true;
@@ -116,6 +120,31 @@ bool SdkHttpServer::ConfigureRoutes() {
         res.status = ToHttpStatus(SdkHttpStatus::Ok);
         res.set_header("Cache-Control", "no-store");
         res.set_content(DumpJson(body), kJsonContentType);
+    });
+
+    server_->Post("/api/uploads/images", [this](const httplib::Request& req, httplib::Response& res) {
+        SetCorsHeaders(&res);
+        if (!image_upload_handler_) {
+            res.status = 404;
+            res.set_content(DumpJson(BuildErrorBody(SdkStatusCode::InvalidMethod, "image upload api unavailable")), kJsonContentType);
+            return;
+        }
+        if (!req.has_file("file")) {
+            res.status = 400;
+            res.set_content(DumpJson(BuildErrorBody(SdkStatusCode::InvalidParams, "multipart field 'file' required")), kJsonContentType);
+            return;
+        }
+        const httplib::MultipartFormData file = req.get_file_value("file");
+        const std::string session_token = ExtractBearerToken(req.get_header_value("Authorization"));
+        const UploadResult result = image_upload_handler_(session_token, file.filename, file.content_type, file.content);
+        if (!IsOkStatusCode(result.code)) {
+            res.status = HttpStatusForSdkCode(result.code);
+            res.set_content(DumpJson(BuildErrorBody(result.code, result.message)), kJsonContentType);
+            return;
+        }
+        res.status = ToHttpStatus(SdkHttpStatus::Ok);
+        res.set_header("Cache-Control", "no-store");
+        res.set_content(DumpJson(result.body), kJsonContentType);
     });
 
     server_->Get(R"(/api/assets/([^/]+)/([^/]+)/download)", [this](const httplib::Request& req, httplib::Response& res) {
@@ -169,6 +198,11 @@ bool SdkHttpServer::ConfigureRoutes() {
     });
 
     server_->Options(R"(/api/assets/.*)", [](const httplib::Request&, httplib::Response& res) {
+        SetCorsHeaders(&res);
+        res.status = 204;
+    });
+
+    server_->Options(R"(/api/uploads/.*)", [](const httplib::Request&, httplib::Response& res) {
         SetCorsHeaders(&res);
         res.status = 204;
     });

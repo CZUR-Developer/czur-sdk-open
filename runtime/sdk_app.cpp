@@ -65,6 +65,34 @@ SdkApp::SdkApp(const SdkConfig& config, ProviderBundle providers)
                 return result;
             };
     asset_http_server_.SetAssetResolver(asset_resolver);
+    asset_http_server_.SetImageUploadHandler(
+        [this](const std::string& session_token,
+               const std::string& filename,
+               const std::string& content_type,
+               const std::string& content) {
+            SdkHttpServer::UploadResult result;
+            if (!command_application_service_) {
+                result.code = ToCode(SdkStatusCode::InternalError);
+                result.message = "command service not ready";
+                return result;
+            }
+            const CommandApplicationService::ImageUploadResult upload_result =
+                command_application_service_->UploadImage(session_token, filename, content_type, content);
+            result.code = upload_result.code;
+            result.message = upload_result.message;
+            result.body = Json{{"upload_id", upload_result.upload_id},
+                               {"asset",
+                                Json{{"asset_id", upload_result.asset.asset_id},
+                                     {"kind", upload_result.asset.kind},
+                                     {"path", upload_result.asset.path},
+                                     {"url", upload_result.asset.url},
+                                     {"download_url", upload_result.asset.download_url},
+                                     {"content_type", upload_result.asset.content_type},
+                                     {"width", upload_result.asset.width},
+                                     {"height", upload_result.asset.height},
+                                     {"size", upload_result.asset.size}}}};
+            return result;
+        });
     command_application_service_->SetStatusSupplier([this]() { return BuildStatusJson(); });
     command_application_service_->SetVideoFrameSink([this](const SdkVideoFrame& frame) {
         video_ws_server_.PublishFrame(frame);

@@ -540,9 +540,18 @@ private:
 class MockGraphicProvider : public ISdkGraphicProvider {
 public:
     std::string ProviderName() const override { return "mock-graphic-provider"; }
-    SdkImageProcessResult Process(const SdkImageProcessRequest&) override {
+    SdkImageProcessResult Process(const SdkImageProcessRequest& request) override {
         SdkImageProcessResult result;
+        CopyFile(request.input_path, request.output_path);
         result.processed = true;
+        result.output_path = request.output_path;
+        SdkImageProcessOutput output;
+        output.output_id = "page-001";
+        output.role = "page";
+        output.index = 0;
+        output.path = request.output_path;
+        output.content_type = request.output_format == "png" ? "image/png" : "image/jpeg";
+        result.outputs.push_back(output);
         return result;
     }
 

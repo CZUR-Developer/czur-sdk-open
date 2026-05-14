@@ -212,14 +212,14 @@ The runtime validates:
 - device scope when applicable
 - quota consumption for `capture.take`, `image.process`, and `file.convert`
 
-Paper processing extension parameters are passed through `params.profile.capture`. Single-page mode supports:
+Paper processing extension parameters are passed through `params.profile.capture` in capture methods and through top-level `params.single_page` / `params.curved_book` in `image.process`. Single-page mode supports:
 
 - `single_page.crop_border.enabled/width/height`: crop-border switch and margins. `width/height` are clamped to `-100..100`.
 - `single_page.id_card_round_corner`: ID card rounded-corner padding.
 - `single_page.auto_rotate`: automatic page rotation.
 - `single_page.smart_black_edge_optimize`: smart black-edge optimization, enabled by default.
 - `single_page.multi_target_paging`: multi-target auto paging; may produce multiple page assets.
-- `single_page.realtime_detect_rects`: whether the video stream returns realtime detection boxes. When disabled, the backend does not run per-frame detection.
+- `single_page.realtime_detect_rects`: capture/video-flow only. Whether the video stream returns realtime detection boxes. When disabled, the backend does not run per-frame detection.
 
 Curved-book mode supports:
 
@@ -229,7 +229,35 @@ Curved-book mode supports:
 - `curved_book.crop_border.enabled/width/height`: crop-border switch and margins.
 - `curved_book.auto_complete`: automatic page completion.
 
+Standalone `image.process` curved-book processing uses edge-based flattening only. Laser-line flattening is only available in the capture flow for supported devices, because it requires device laser calibration data and the laser image captured together with the original image.
+
 `video.set_profile` can update `single_page.realtime_detect_rects` and `single_page.multi_target_paging` at runtime without reopening the video stream.
+
+`image.process` runs the same paper-processing and color-mode chain for an uploaded or existing local image file:
+
+```json
+{
+  "request_id": "req-image-001",
+  "method": "image.process",
+  "params": {
+    "input_upload_id": "img-1760000000-1",
+    "output_dir": "/tmp/sdk-demo",
+    "page_processing": "single_page",
+    "color_mode": "auto_optimize",
+    "output_format": "jpg",
+    "single_page": {
+      "crop_border": { "enabled": false, "width": 0, "height": 0 },
+      "auto_rotate": true,
+      "smart_black_edge_optimize": true,
+      "multi_target_paging": false
+    }
+  }
+}
+```
+
+The demo site uploads local browser-selected images with `POST /api/uploads/images` on the asset service (`http://127.0.0.1:17082` by default). The request must be multipart form-data with field `file` and `Authorization: Bearer <session_token>`. The response returns `upload_id` and an original image asset. `image.process` can use either `input_upload_id` or the existing local `input_path + output_path` mode.
+
+For `selected_area`, pass frontend-scaled points in `params.selected_area.points` and the coordinate basis in `params.selected_area.source.width/height`. The backend scales those points to the real input image size before cropping. The response returns `output_path` for the first page and `outputs[]` for single or multi-page results.
 
 ### 6. Refresh or destroy the session
 

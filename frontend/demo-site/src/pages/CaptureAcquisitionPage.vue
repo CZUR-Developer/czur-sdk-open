@@ -272,6 +272,9 @@
 
             <div v-if="captureConfig.pageProcessing === 'curved_book'" class="space-y-2">
               <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ t('pages.captureAcquisition.curvedBookOptions') }}</p>
+              <p class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                {{ t('pages.captureAcquisition.curvedBookLaserNotice') }}
+              </p>
               <label class="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
                 <span>{{ t('pages.captureAcquisition.removeFinger') }}</span>
                 <input v-model="captureConfig.curvedBookRemoveFinger" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500" />

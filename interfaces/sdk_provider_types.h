@@ -179,17 +179,6 @@ struct SdkVideoProfileResult {
     bool single_page_multi_target_paging = false;
 };
 
-struct SdkImageProcessRequest {
-    std::string input_path;
-    std::string output_path;
-};
-
-struct SdkImageProcessResult {
-    int code = ToCode(SdkStatusCode::Ok);
-    std::string message = "ok";
-    bool processed = false;
-};
-
 struct SdkCropBorderOptions {
     bool enabled = false;
     int width = 0;
@@ -211,6 +200,44 @@ struct SdkCurvedBookOptions {
     bool smart_paging = true;
     SdkCropBorderOptions crop_border;
     bool auto_complete = false;
+};
+
+struct SdkImageProcessRequest {
+    std::string input_upload_id;
+    std::string input_path;
+    std::string output_path;
+    std::string output_dir;
+    std::string page_processing = "keep_original";
+    std::string color_mode = "no_optimize";
+    std::string output_format;
+    SdkSinglePageOptions single_page;
+    SdkCurvedBookOptions curved_book;
+    SdkRect4P selected_area_rect;
+    int selected_area_source_width = 0;
+    int selected_area_source_height = 0;
+    int scan_device_type = 0;
+};
+
+struct SdkImageProcessOutput {
+    std::string asset_id;
+    std::string output_id;
+    std::string role;
+    int index = 0;
+    std::string path;
+    std::string url;
+    std::string download_url;
+    std::string content_type = "image/jpeg";
+    int width = 0;
+    int height = 0;
+    uint64_t size = 0;
+};
+
+struct SdkImageProcessResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool processed = false;
+    std::string output_path;
+    std::vector<SdkImageProcessOutput> outputs;
 };
 
 struct SdkCaptureProfile {
