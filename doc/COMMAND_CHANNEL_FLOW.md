@@ -212,6 +212,25 @@ The runtime validates:
 - device scope when applicable
 - quota consumption for `capture.take`, `image.process`, and `file.convert`
 
+Paper processing extension parameters are passed through `params.profile.capture`. Single-page mode supports:
+
+- `single_page.crop_border.enabled/width/height`: crop-border switch and margins. `width/height` are clamped to `-100..100`.
+- `single_page.id_card_round_corner`: ID card rounded-corner padding.
+- `single_page.auto_rotate`: automatic page rotation.
+- `single_page.smart_black_edge_optimize`: smart black-edge optimization, enabled by default.
+- `single_page.multi_target_paging`: multi-target auto paging; may produce multiple page assets.
+- `single_page.realtime_detect_rects`: whether the video stream returns realtime detection boxes. When disabled, the backend does not run per-frame detection.
+
+Curved-book mode supports:
+
+- `curved_book.remove_finger.enabled`: remove-finger switch.
+- `curved_book.remove_finger.finger_type`: `with_sleeve` or `without_sleeve`.
+- `curved_book.smart_paging`: split into left/right pages; disabled means output one flattened image.
+- `curved_book.crop_border.enabled/width/height`: crop-border switch and margins.
+- `curved_book.auto_complete`: automatic page completion.
+
+`video.set_profile` can update `single_page.realtime_detect_rects` and `single_page.multi_target_paging` at runtime without reopening the video stream.
+
 ### 6. Refresh or destroy the session
 
 Supported lifecycle methods:

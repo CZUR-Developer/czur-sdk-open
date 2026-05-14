@@ -110,6 +110,7 @@ struct SdkVideoStartRequest {
     std::string pixel_format = "bgr24";
     std::string page_processing;
     bool single_page_realtime_detect_rects = false;
+    bool single_page_multi_target_paging = false;
 };
 
 struct SdkVideoStartResult {
@@ -166,6 +167,7 @@ struct SdkVideoProfileRequest {
     std::string device_id;
     std::string page_processing;
     bool single_page_realtime_detect_rects = false;
+    bool single_page_multi_target_paging = false;
 };
 
 struct SdkVideoProfileResult {
@@ -174,6 +176,7 @@ struct SdkVideoProfileResult {
     bool applied = false;
     std::string page_processing;
     bool single_page_realtime_detect_rects = false;
+    bool single_page_multi_target_paging = false;
 };
 
 struct SdkImageProcessRequest {
@@ -187,6 +190,29 @@ struct SdkImageProcessResult {
     bool processed = false;
 };
 
+struct SdkCropBorderOptions {
+    bool enabled = false;
+    int width = 0;
+    int height = 0;
+};
+
+struct SdkSinglePageOptions {
+    bool realtime_detect_rects = false;
+    SdkCropBorderOptions crop_border;
+    bool id_card_round_corner = false;
+    bool auto_rotate = false;
+    bool smart_black_edge_optimize = true;
+    bool multi_target_paging = false;
+};
+
+struct SdkCurvedBookOptions {
+    bool remove_finger = true;
+    std::string finger_type = "with_sleeve";
+    bool smart_paging = true;
+    SdkCropBorderOptions crop_border;
+    bool auto_complete = false;
+};
+
 struct SdkCaptureProfile {
     std::string profile_version = "capture.profile.v1";
     int revision = 1;
@@ -196,6 +222,11 @@ struct SdkCaptureProfile {
     int fps = 0;
     std::string page_processing = "single_page";
     bool single_page_realtime_detect_rects = false;
+    SdkSinglePageOptions single_page;
+    SdkCurvedBookOptions curved_book;
+    SdkRect4P selected_area_rect;
+    int selected_area_source_width = 0;
+    int selected_area_source_height = 0;
     std::string color_mode = "auto_optimize";
     std::string output_format = "jpg";
     bool thumbnail_original = true;
@@ -235,9 +266,14 @@ struct SdkPageProcessRequest {
     int width = 0;
     int height = 0;
     bool single_page_realtime_detect_rects = false;
+    SdkSinglePageOptions single_page;
+    SdkCurvedBookOptions curved_book;
     std::vector<SdkRect4P> detected_rects;
     int detected_rects_source_width = 0;
     int detected_rects_source_height = 0;
+    SdkRect4P selected_area_rect;
+    int selected_area_source_width = 0;
+    int selected_area_source_height = 0;
     int scan_device_type = 0;
 };
 

@@ -231,9 +231,14 @@ public:
         page_request.width = original_width_;
         page_request.height = original_height_;
         page_request.single_page_realtime_detect_rects = request_.profile.single_page_realtime_detect_rects;
+        page_request.single_page = request_.profile.single_page;
+        page_request.curved_book = request_.profile.curved_book;
         page_request.detected_rects = detected_rects_;
         page_request.detected_rects_source_width = detected_rects_source_width_;
         page_request.detected_rects_source_height = detected_rects_source_height_;
+        page_request.selected_area_rect = request_.profile.selected_area_rect;
+        page_request.selected_area_source_width = request_.profile.selected_area_source_width;
+        page_request.selected_area_source_height = request_.profile.selected_area_source_height;
         page_request.scan_device_type = scan_device_type_;
         const SdkPageProcessResult result = graphic_facade_.ProcessPage(page_request);
         if (!IsOkStatusCode(result.code) || result.unsupported || !result.processed) {

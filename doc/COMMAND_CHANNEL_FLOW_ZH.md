@@ -212,6 +212,25 @@ ws://127.0.0.1:17090
 - 设备 scope 是否允许
 - `capture.take`、`image.process`、`file.convert` 是否还能继续消费 quota
 
+纸张处理扩展参数通过 `params.profile.capture` 传递。单页模式支持：
+
+- `single_page.crop_border.enabled/width/height`：裁边开关与裁边参数，`width/height` 范围为 `-100..100`。
+- `single_page.id_card_round_corner`：证件圆角留白。
+- `single_page.auto_rotate`：页面自动转正。
+- `single_page.smart_black_edge_optimize`：智能优化黑边，默认开启。
+- `single_page.multi_target_paging`：多目标自动分页，可输出多页资产。
+- `single_page.realtime_detect_rects`：视频流是否返回实时识别框；关闭后后端不在每帧做目标检测。
+
+曲面书籍模式支持：
+
+- `curved_book.remove_finger.enabled`：清除手指开关。
+- `curved_book.remove_finger.finger_type`：`with_sleeve` 或 `without_sleeve`。
+- `curved_book.smart_paging`：是否左右分页；关闭时输出整张展平图。
+- `curved_book.crop_border.enabled/width/height`：裁边开关与裁边参数。
+- `curved_book.auto_complete`：页面自动补全。
+
+`video.set_profile` 可以运行时更新 `single_page.realtime_detect_rects` 和 `single_page.multi_target_paging`，无需重开视频流。
+
 ### 6. 刷新或销毁会话
 
 支持的方法：

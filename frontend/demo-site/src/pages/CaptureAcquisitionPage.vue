@@ -18,8 +18,44 @@
               stage-size="large"
               :show-text-overlay="false"
               variant="video"
-              @video-canvas="attachVideoCanvas"
-            />
+              @video-canvas="handleVideoCanvas"
+            >
+              <template v-if="captureConfig.pageProcessing === 'selected_area'" #video-overlay>
+                <div
+                  class="absolute inset-0 z-10 cursor-crosshair touch-none"
+                  @pointerdown="handleSelectedAreaPointerDown"
+                  @pointermove="handleSelectedAreaPointerMove"
+                  @pointerup="handleSelectedAreaPointerUp"
+                  @pointercancel="handleSelectedAreaPointerCancel"
+                >
+                  <div
+                    v-if="selectedAreaOverlayRect"
+                    class="absolute border-2 border-cyan-300 bg-cyan-300/10 shadow-[0_0_0_9999px_rgba(15,23,42,0.28)]"
+                    :style="{
+                      left: `${selectedAreaOverlayRect.x}px`,
+                      top: `${selectedAreaOverlayRect.y}px`,
+                      width: `${selectedAreaOverlayRect.width}px`,
+                      height: `${selectedAreaOverlayRect.height}px`,
+                    }"
+                  />
+                  <svg class="pointer-events-none absolute inset-0 h-full w-full">
+                    <polygon
+                      v-if="selectedAreaOverlayPolygon"
+                      :points="selectedAreaOverlayPolygon"
+                      fill="rgba(34, 211, 238, 0.12)"
+                      stroke="#22d3ee"
+                      stroke-width="2"
+                    />
+                  </svg>
+                  <span
+                    v-for="(point, index) in selectedAreaOverlayPoints"
+                    :key="index"
+                    class="pointer-events-none absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-cyan-400 shadow"
+                    :style="{ left: `${point.x}px`, top: `${point.y}px` }"
+                  />
+                </div>
+              </template>
+            </PreviewStage>
 
             <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
               <div class="rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm">
@@ -196,10 +232,107 @@
 
             <div v-if="captureConfig.pageProcessing === 'single_page'">
               <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ t('pages.captureAcquisition.singlePageOptions') }}</p>
+              <div class="space-y-2">
+                <label class="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                  <span>{{ t('pages.captureAcquisition.realtimeDetectRects') }}</span>
+                  <input v-model="captureConfig.singlePageRealtimeDetectRects" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500" />
+                </label>
+                <label class="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                  <span>{{ t('pages.captureAcquisition.cropBorder') }}</span>
+                  <input v-model="captureConfig.singlePageCropBorder" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500" />
+                </label>
+                <div v-if="captureConfig.singlePageCropBorder" class="grid grid-cols-2 gap-2">
+                  <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    {{ t('pages.captureAcquisition.cropBorderWidth') }}
+                    <input v-model.number="captureConfig.singlePageCropBorderWidth" type="number" min="-100" max="100" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100" />
+                  </label>
+                  <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    {{ t('pages.captureAcquisition.cropBorderHeight') }}
+                    <input v-model.number="captureConfig.singlePageCropBorderHeight" type="number" min="-100" max="100" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100" />
+                  </label>
+                </div>
+                <label class="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                  <span>{{ t('pages.captureAcquisition.idCardRoundCorner') }}</span>
+                  <input v-model="captureConfig.singlePageIdCardRoundCorner" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500" />
+                </label>
+                <label class="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                  <span>{{ t('pages.captureAcquisition.autoRotate') }}</span>
+                  <input v-model="captureConfig.singlePageAutoRotate" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500" />
+                </label>
+                <label class="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                  <span>{{ t('pages.captureAcquisition.smartBlackEdgeOptimize') }}</span>
+                  <input v-model="captureConfig.singlePageSmartBlackEdgeOptimize" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500" />
+                </label>
+                <label class="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                  <span>{{ t('pages.captureAcquisition.multiTargetPaging') }}</span>
+                  <input v-model="captureConfig.singlePageMultiTargetPaging" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500" />
+                </label>
+              </div>
+            </div>
+
+            <div v-if="captureConfig.pageProcessing === 'curved_book'" class="space-y-2">
+              <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ t('pages.captureAcquisition.curvedBookOptions') }}</p>
               <label class="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
-                <span>{{ t('pages.captureAcquisition.realtimeDetectRects') }}</span>
-                <input v-model="captureConfig.singlePageRealtimeDetectRects" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500" />
+                <span>{{ t('pages.captureAcquisition.removeFinger') }}</span>
+                <input v-model="captureConfig.curvedBookRemoveFinger" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500" />
               </label>
+              <label v-if="captureConfig.curvedBookRemoveFinger" class="block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {{ t('pages.captureAcquisition.fingerType') }}
+                <select v-model="captureConfig.curvedBookFingerType" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100">
+                  <option value="with_sleeve">{{ t('pages.captureAcquisition.fingerWithSleeve') }}</option>
+                  <option value="without_sleeve">{{ t('pages.captureAcquisition.fingerWithoutSleeve') }}</option>
+                </select>
+              </label>
+              <label class="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                <span>{{ t('pages.captureAcquisition.smartPaging') }}</span>
+                <input v-model="captureConfig.curvedBookSmartPaging" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500" />
+              </label>
+              <label class="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                <span>{{ t('pages.captureAcquisition.cropBorder') }}</span>
+                <input v-model="captureConfig.curvedBookCropBorder" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500" />
+              </label>
+              <div v-if="captureConfig.curvedBookCropBorder" class="grid grid-cols-2 gap-2">
+                <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {{ t('pages.captureAcquisition.cropBorderWidth') }}
+                  <input v-model.number="captureConfig.curvedBookCropBorderWidth" type="number" min="-100" max="100" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100" />
+                </label>
+                <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {{ t('pages.captureAcquisition.cropBorderHeight') }}
+                  <input v-model.number="captureConfig.curvedBookCropBorderHeight" type="number" min="-100" max="100" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100" />
+                </label>
+              </div>
+              <label class="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                <span>{{ t('pages.captureAcquisition.autoComplete') }}</span>
+                <input v-model="captureConfig.curvedBookAutoComplete" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500" />
+              </label>
+            </div>
+
+            <div v-if="captureConfig.pageProcessing === 'selected_area'" class="space-y-3">
+              <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ t('pages.captureAcquisition.selectedAreaOptions') }}</p>
+              <div class="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  class="option-button"
+                  :class="captureConfig.selectedAreaMode === 'rectangle' ? 'option-button-active' : ''"
+                  @click="setSelectedAreaMode('rectangle')"
+                >
+                  <span class="font-semibold">{{ t('pages.captureAcquisition.selectedAreaRectangle') }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="option-button"
+                  :class="captureConfig.selectedAreaMode === 'points' ? 'option-button-active' : ''"
+                  @click="setSelectedAreaMode('points')"
+                >
+                  <span class="font-semibold">{{ t('pages.captureAcquisition.selectedAreaPoints') }}</span>
+                </button>
+              </div>
+              <div class="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                <span>{{ selectedAreaStatusLabel }}</span>
+                <button type="button" class="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-cyan-300 hover:text-cyan-700" @click="clearSelectedArea">
+                  {{ t('pages.captureAcquisition.clearSelectedArea') }}
+                </button>
+              </div>
             </div>
 
             <div>
@@ -307,11 +440,31 @@ import {
 import { recordRuntimeEvent, runtimeRecordState } from '../services/runtime-records';
 import type { TableColumn, TableRow, TimelineItem, Tone } from '../types/demo';
 
-type PageProcessingMode = 'single_page' | 'curved_book' | 'selected_area';
-type ColorMode = 'auto_optimize' | 'black_white' | 'color' | 'white_paper_seal';
+type PageProcessingMode = 'single_page' | 'curved_book' | 'selected_area' | 'keep_original';
+type ColorMode = 'auto_optimize' | 'color_enhance' | 'black_white' | 'grayscale' | 'white_paper_seal' | 'certificate' | 'ancient' | 'no_optimize';
 type OutputFormat = 'jpg' | 'png' | 'tiff';
 type ThumbnailKey = 'original' | 'pageProcessed' | 'colorProcessed' | 'final';
 type ThumbnailState = 'idle' | 'loading' | 'ready' | 'error' | 'unavailable';
+type SelectedAreaMode = 'rectangle' | 'points';
+
+interface ImagePoint {
+  x: number;
+  y: number;
+}
+
+interface Rect4P {
+  left_top: ImagePoint;
+  right_top: ImagePoint;
+  right_down: ImagePoint;
+  left_down: ImagePoint;
+}
+
+interface OverlayRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 interface CapturePreview {
   id: string;
@@ -377,6 +530,11 @@ const pageProcessingOptions = computed<Array<{ value: PageProcessingMode; label:
     label: t('pages.captureAcquisition.pageSelectedArea'),
     description: t('pages.captureAcquisition.pageSelectedAreaDescription'),
   },
+  {
+    value: 'keep_original',
+    label: t('pages.captureAcquisition.pageKeepOriginal'),
+    description: t('pages.captureAcquisition.pageKeepOriginalDescription'),
+  },
 ]);
 
 const colorModeOptions = computed<Array<{ value: ColorMode; label: string; description: string }>>(() => [
@@ -386,19 +544,39 @@ const colorModeOptions = computed<Array<{ value: ColorMode; label: string; descr
     description: t('pages.captureAcquisition.colorAutoOptimizeDescription'),
   },
   {
+    value: 'color_enhance',
+    label: t('pages.captureAcquisition.colorFullColor'),
+    description: t('pages.captureAcquisition.colorFullColorDescription'),
+  },
+  {
     value: 'black_white',
     label: t('pages.captureAcquisition.colorBlackWhite'),
     description: t('pages.captureAcquisition.colorBlackWhiteDescription'),
   },
   {
-    value: 'color',
-    label: t('pages.captureAcquisition.colorFullColor'),
-    description: t('pages.captureAcquisition.colorFullColorDescription'),
+    value: 'grayscale',
+    label: t('pages.captureAcquisition.colorGrayscale'),
+    description: t('pages.captureAcquisition.colorGrayscaleDescription'),
   },
   {
     value: 'white_paper_seal',
     label: t('pages.captureAcquisition.colorWhitePaperSeal'),
     description: t('pages.captureAcquisition.colorWhitePaperSealDescription'),
+  },
+  {
+    value: 'certificate',
+    label: t('pages.captureAcquisition.colorCertificate'),
+    description: t('pages.captureAcquisition.colorCertificateDescription'),
+  },
+  {
+    value: 'ancient',
+    label: t('pages.captureAcquisition.colorAncient'),
+    description: t('pages.captureAcquisition.colorAncientDescription'),
+  },
+  {
+    value: 'no_optimize',
+    label: t('pages.captureAcquisition.colorNoOptimize'),
+    description: t('pages.captureAcquisition.colorNoOptimizeDescription'),
   },
 ]);
 
@@ -414,7 +592,23 @@ const thumbnailOptions = computed<Array<{ key: ThumbnailKey; label: string }>>((
 const captureConfig = reactive({
   pageProcessing: 'single_page' as PageProcessingMode,
   singlePageRealtimeDetectRects: true,
-  colorMode: 'auto_optimize' as ColorMode,
+  singlePageCropBorder: false,
+  singlePageCropBorderWidth: 0,
+  singlePageCropBorderHeight: 0,
+  singlePageIdCardRoundCorner: false,
+  singlePageAutoRotate: false,
+  singlePageSmartBlackEdgeOptimize: true,
+  singlePageMultiTargetPaging: false,
+  curvedBookRemoveFinger: true,
+  curvedBookFingerType: 'with_sleeve' as 'with_sleeve' | 'without_sleeve',
+  curvedBookSmartPaging: true,
+  curvedBookCropBorder: false,
+  curvedBookCropBorderWidth: 0,
+  curvedBookCropBorderHeight: 0,
+  curvedBookAutoComplete: false,
+  selectedAreaMode: 'rectangle' as SelectedAreaMode,
+  selectedAreaPoints: [] as ImagePoint[],
+  colorMode: 'color_enhance' as ColorMode,
   outputFormat: 'jpg' as OutputFormat,
   thumbnails: {
     original: true,
@@ -431,9 +625,15 @@ const activeCaptureTasks = new Set<string>();
 const thumbnailRequests = new Map<string, number>();
 let commandEventUnsubscribe: (() => void) | null = null;
 const suppressAutoOpen = ref(false);
+const captureVideoCanvas = ref<HTMLCanvasElement | null>(null);
+const selectedAreaDragStart = ref<ImagePoint | null>(null);
+const selectedAreaDragging = ref(false);
 
 const canLoadDevices = computed(() => authSessionState.commandState === 'success' && Boolean(authSessionState.sessionToken));
-const canCapture = computed(() => Boolean(deviceVideoState.selectedDeviceId && deviceVideoState.opened && deviceVideoState.streamId && deviceVideoState.videoState === 'success'));
+const canCapture = computed(() =>
+  Boolean(deviceVideoState.selectedDeviceId && deviceVideoState.opened && deviceVideoState.streamId && deviceVideoState.videoState === 'success') &&
+  (captureConfig.pageProcessing !== 'selected_area' || Boolean(selectedAreaRect.value)),
+);
 
 const captureResolutionOptions = computed<DeviceResolution[]>(() => {
   if (!deviceVideoState.features.image_transfer_protocol) {
@@ -487,6 +687,69 @@ const enabledThumbnailLabels = computed(() =>
   thumbnailOptions.value.filter((item) => captureConfig.thumbnails[item.key]).map((item) => item.label),
 );
 
+const selectedAreaRect = computed<Rect4P | null>(() => {
+  if (captureConfig.selectedAreaPoints.length < 4) {
+    return null;
+  }
+  return normalizeAreaPoints(captureConfig.selectedAreaPoints.slice(0, 4));
+});
+
+const selectedAreaSource = computed(() => {
+  const canvas = captureVideoCanvas.value;
+  return canvas && canvas.width > 0 && canvas.height > 0
+    ? { width: canvas.width, height: canvas.height }
+    : { width: 0, height: 0 };
+});
+
+const selectedAreaOverlayPoints = computed<ImagePoint[]>(() =>
+  captureConfig.selectedAreaPoints
+    .map((point) => imagePointToOverlayPoint(point))
+    .filter((point): point is ImagePoint => Boolean(point)),
+);
+
+const selectedAreaOverlayPolygon = computed(() => {
+  const rect = selectedAreaRect.value;
+  if (!rect) {
+    return '';
+  }
+  return [rect.left_top, rect.right_top, rect.right_down, rect.left_down]
+    .map((point) => imagePointToOverlayPoint(point))
+    .filter((point): point is ImagePoint => Boolean(point))
+    .map((point) => `${point.x},${point.y}`)
+    .join(' ');
+});
+
+const selectedAreaOverlayRect = computed<OverlayRect | null>(() => {
+  if (captureConfig.selectedAreaMode !== 'rectangle' || captureConfig.selectedAreaPoints.length !== 2) {
+    return null;
+  }
+  const points = captureConfig.selectedAreaPoints
+    .slice(0, 2)
+    .map((point) => imagePointToOverlayPoint(point))
+    .filter((point): point is ImagePoint => Boolean(point));
+  if (points.length !== 2) {
+    return null;
+  }
+  const x = Math.min(points[0].x, points[1].x);
+  const y = Math.min(points[0].y, points[1].y);
+  return {
+    x,
+    y,
+    width: Math.abs(points[1].x - points[0].x),
+    height: Math.abs(points[1].y - points[0].y),
+  };
+});
+
+const selectedAreaStatusLabel = computed(() => {
+  if (selectedAreaRect.value) {
+    return t('pages.captureAcquisition.selectedAreaReady');
+  }
+  if (captureConfig.selectedAreaMode === 'points') {
+    return t('pages.captureAcquisition.selectedAreaPointProgress', { count: captureConfig.selectedAreaPoints.length });
+  }
+  return t('pages.captureAcquisition.selectedAreaPending');
+});
+
 const captureMetrics = computed(() => [
   {
     label: t('pages.captureAcquisition.deviceState'),
@@ -536,7 +799,35 @@ const captureProfile = computed(() => ({
     page_processing: captureConfig.pageProcessing,
     single_page: {
       realtime_detect_rects: captureConfig.singlePageRealtimeDetectRects,
+      crop_border: {
+        enabled: captureConfig.singlePageCropBorder,
+        width: clampCropMargin(captureConfig.singlePageCropBorderWidth),
+        height: clampCropMargin(captureConfig.singlePageCropBorderHeight),
+      },
+      id_card_round_corner: captureConfig.singlePageIdCardRoundCorner,
+      auto_rotate: captureConfig.singlePageAutoRotate,
+      smart_black_edge_optimize: captureConfig.singlePageSmartBlackEdgeOptimize,
+      multi_target_paging: captureConfig.singlePageMultiTargetPaging,
     },
+    curved_book: {
+      remove_finger: {
+        enabled: captureConfig.curvedBookRemoveFinger,
+        finger_type: captureConfig.curvedBookFingerType,
+      },
+      smart_paging: captureConfig.curvedBookSmartPaging,
+      crop_border: {
+        enabled: captureConfig.curvedBookCropBorder,
+        width: clampCropMargin(captureConfig.curvedBookCropBorderWidth),
+        height: clampCropMargin(captureConfig.curvedBookCropBorderHeight),
+      },
+      auto_complete: captureConfig.curvedBookAutoComplete,
+    },
+    selected_area: selectedAreaRect.value
+      ? {
+          points: selectedAreaRect.value,
+          source: selectedAreaSource.value,
+        }
+      : null,
     color_mode: captureConfig.colorMode,
   },
   output: {
@@ -654,6 +945,22 @@ watch(
   () => [
     captureConfig.pageProcessing,
     captureConfig.singlePageRealtimeDetectRects,
+    captureConfig.singlePageCropBorder,
+    captureConfig.singlePageCropBorderWidth,
+    captureConfig.singlePageCropBorderHeight,
+    captureConfig.singlePageIdCardRoundCorner,
+    captureConfig.singlePageAutoRotate,
+    captureConfig.singlePageSmartBlackEdgeOptimize,
+    captureConfig.singlePageMultiTargetPaging,
+    captureConfig.curvedBookRemoveFinger,
+    captureConfig.curvedBookFingerType,
+    captureConfig.curvedBookSmartPaging,
+    captureConfig.curvedBookCropBorder,
+    captureConfig.curvedBookCropBorderWidth,
+    captureConfig.curvedBookCropBorderHeight,
+    captureConfig.curvedBookAutoComplete,
+    captureConfig.selectedAreaMode,
+    captureConfig.selectedAreaPoints.map((point) => `${point.x},${point.y}`).join('|'),
     captureConfig.colorMode,
     captureConfig.outputFormat,
     captureConfig.thumbnails.original,
@@ -670,7 +977,7 @@ watch(
 );
 
 watch(
-  () => [captureConfig.pageProcessing, captureConfig.singlePageRealtimeDetectRects] as const,
+  () => [captureConfig.pageProcessing, captureConfig.singlePageRealtimeDetectRects, captureConfig.singlePageMultiTargetPaging] as const,
   async () => {
     if (!deviceVideoState.streamId || deviceVideoState.startState === 'running' || deviceVideoState.stopState === 'running') {
       return;
@@ -686,6 +993,149 @@ onBeforeUnmount(() => {
   void closeSelectedDevice();
   resetDeviceVideo();
 });
+
+function handleVideoCanvas(canvas: HTMLCanvasElement | null): void {
+  captureVideoCanvas.value = canvas;
+  attachVideoCanvas(canvas);
+}
+
+function setSelectedAreaMode(mode: SelectedAreaMode): void {
+  captureConfig.selectedAreaMode = mode;
+  clearSelectedArea();
+}
+
+function clearSelectedArea(): void {
+  captureConfig.selectedAreaPoints = [];
+  selectedAreaDragStart.value = null;
+  selectedAreaDragging.value = false;
+}
+
+function handleSelectedAreaPointerDown(event: PointerEvent): void {
+  const point = pointerEventToImagePoint(event);
+  if (!point) {
+    return;
+  }
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  if (captureConfig.selectedAreaMode === 'rectangle') {
+    selectedAreaDragStart.value = point;
+    selectedAreaDragging.value = true;
+    captureConfig.selectedAreaPoints = [point, point];
+    return;
+  }
+  if (captureConfig.selectedAreaPoints.length >= 4) {
+    captureConfig.selectedAreaPoints = [];
+  }
+  captureConfig.selectedAreaPoints = [...captureConfig.selectedAreaPoints, point];
+}
+
+function handleSelectedAreaPointerMove(event: PointerEvent): void {
+  if (captureConfig.selectedAreaMode !== 'rectangle' || !selectedAreaDragging.value || !selectedAreaDragStart.value) {
+    return;
+  }
+  const point = pointerEventToImagePoint(event);
+  if (!point) {
+    return;
+  }
+  captureConfig.selectedAreaPoints = [selectedAreaDragStart.value, point];
+}
+
+function handleSelectedAreaPointerUp(event: PointerEvent): void {
+  if (captureConfig.selectedAreaMode !== 'rectangle' || !selectedAreaDragging.value || !selectedAreaDragStart.value) {
+    return;
+  }
+  const point = pointerEventToImagePoint(event);
+  selectedAreaDragging.value = false;
+  if (!point) {
+    return;
+  }
+  const rect = rectFromCorners(selectedAreaDragStart.value, point);
+  captureConfig.selectedAreaPoints = rect ? [rect.left_top, rect.right_top, rect.right_down, rect.left_down] : [];
+}
+
+function handleSelectedAreaPointerCancel(): void {
+  selectedAreaDragging.value = false;
+  selectedAreaDragStart.value = null;
+}
+
+function pointerEventToImagePoint(event: PointerEvent): ImagePoint | null {
+  const canvas = captureVideoCanvas.value;
+  if (!canvas || canvas.width <= 0 || canvas.height <= 0 || !(event.currentTarget instanceof HTMLElement)) {
+    return null;
+  }
+  const rect = event.currentTarget.getBoundingClientRect();
+  const fit = containRect(rect.width, rect.height, canvas.width, canvas.height);
+  const x = event.clientX - rect.left - fit.x;
+  const y = event.clientY - rect.top - fit.y;
+  if (x < 0 || y < 0 || x > fit.width || y > fit.height) {
+    return null;
+  }
+  return {
+    x: clamp((x / fit.width) * canvas.width, 0, canvas.width),
+    y: clamp((y / fit.height) * canvas.height, 0, canvas.height),
+  };
+}
+
+function imagePointToOverlayPoint(point: ImagePoint): ImagePoint | null {
+  const canvas = captureVideoCanvas.value;
+  if (!canvas || canvas.width <= 0 || canvas.height <= 0) {
+    return null;
+  }
+  const bounds = canvas.getBoundingClientRect();
+  const fit = containRect(bounds.width, bounds.height, canvas.width, canvas.height);
+  return {
+    x: fit.x + (point.x / canvas.width) * fit.width,
+    y: fit.y + (point.y / canvas.height) * fit.height,
+  };
+}
+
+function containRect(containerWidth: number, containerHeight: number, imageWidth: number, imageHeight: number): OverlayRect {
+  const scale = Math.min(containerWidth / imageWidth, containerHeight / imageHeight);
+  const width = imageWidth * scale;
+  const height = imageHeight * scale;
+  return {
+    x: (containerWidth - width) / 2,
+    y: (containerHeight - height) / 2,
+    width,
+    height,
+  };
+}
+
+function rectFromCorners(start: ImagePoint, end: ImagePoint): Rect4P | null {
+  const left = Math.min(start.x, end.x);
+  const right = Math.max(start.x, end.x);
+  const top = Math.min(start.y, end.y);
+  const bottom = Math.max(start.y, end.y);
+  if (right - left < 8 || bottom - top < 8) {
+    return null;
+  }
+  return {
+    left_top: { x: left, y: top },
+    right_top: { x: right, y: top },
+    right_down: { x: right, y: bottom },
+    left_down: { x: left, y: bottom },
+  };
+}
+
+function normalizeAreaPoints(points: ImagePoint[]): Rect4P {
+  const center = points.reduce((acc, point) => ({ x: acc.x + point.x / points.length, y: acc.y + point.y / points.length }), { x: 0, y: 0 });
+  const sorted = [...points].sort((a, b) => Math.atan2(a.y - center.y, a.x - center.x) - Math.atan2(b.y - center.y, b.x - center.x));
+  const top = sorted.slice().sort((a, b) => a.y - b.y).slice(0, 2).sort((a, b) => a.x - b.x);
+  const bottom = sorted.slice().sort((a, b) => b.y - a.y).slice(0, 2).sort((a, b) => a.x - b.x);
+  return {
+    left_top: top[0],
+    right_top: top[1],
+    right_down: bottom[1],
+    left_down: bottom[0],
+  };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function clampCropMargin(value: number): number {
+  return Math.trunc(clamp(Number.isFinite(value) ? value : 0, -100, 100));
+}
 
 function handleResolutionChange(event: Event): void {
   const value = (event.target as HTMLSelectElement).value;

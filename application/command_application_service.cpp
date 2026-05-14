@@ -65,6 +65,162 @@ bool GetOptionalBoolField(const Json& obj, const char* key, bool default_value) 
     return default_value;
 }
 
+float GetOptionalFloatField(const Json& obj, const char* key, float default_value) {
+    const auto it = obj.find(key);
+    if (it != obj.end() && it->is_number()) {
+        return it->get<float>();
+    }
+    return default_value;
+}
+
+int ClampCropMargin(int value) {
+    if (value < -100) {
+        return -100;
+    }
+    if (value > 100) {
+        return 100;
+    }
+    return value;
+}
+
+std::string GetOptionalStringAnyField(const Json& obj,
+                                      const std::vector<const char*>& keys,
+                                      const std::string& default_value) {
+    for (std::vector<const char*>::const_iterator it = keys.begin(); it != keys.end(); ++it) {
+        const std::string value = GetOptionalStringField(obj, *it);
+        if (!value.empty()) {
+            return value;
+        }
+    }
+    return default_value;
+}
+
+int GetOptionalIntAnyField(const Json& obj, const std::vector<const char*>& keys, int default_value) {
+    for (std::vector<const char*>::const_iterator it = keys.begin(); it != keys.end(); ++it) {
+        const auto json_it = obj.find(*it);
+        if (json_it != obj.end() && json_it->is_number_integer()) {
+            return json_it->get<int>();
+        }
+    }
+    return default_value;
+}
+
+bool GetOptionalBoolAnyField(const Json& obj, const std::vector<const char*>& keys, bool default_value) {
+    for (std::vector<const char*>::const_iterator it = keys.begin(); it != keys.end(); ++it) {
+        const auto json_it = obj.find(*it);
+        if (json_it != obj.end() && json_it->is_boolean()) {
+            return json_it->get<bool>();
+        }
+    }
+    return default_value;
+}
+
+SdkCropBorderOptions ParseCropBorderOptions(const Json& obj,
+                                            bool default_enabled = false,
+                                            int default_width = 0,
+                                            int default_height = 0) {
+    SdkCropBorderOptions options;
+    options.enabled = default_enabled;
+    options.width = default_width;
+    options.height = default_height;
+    const Json crop_json = GetOptionalObjectField(obj, "crop_border");
+    if (!crop_json.empty()) {
+        options.enabled = GetOptionalBoolAnyField(crop_json, {"enabled", "crop"}, options.enabled);
+        options.width = GetOptionalIntAnyField(crop_json, {"width", "widthCutMargin"}, options.width);
+        options.height = GetOptionalIntAnyField(crop_json, {"height", "heightCutMargin"}, options.height);
+    }
+    const Json crop_adjust_json = GetOptionalObjectField(obj, "cropAdjust");
+    if (!crop_adjust_json.empty()) {
+        options.enabled = GetOptionalBoolField(crop_adjust_json, "crop", options.enabled);
+        const Json param_json = GetOptionalObjectField(crop_adjust_json, "param");
+        options.width = GetOptionalIntField(param_json, "width", options.width);
+        options.height = GetOptionalIntField(param_json, "height", options.height);
+    }
+    options.enabled = GetOptionalBoolAnyField(obj, {"cropBorder", "crop_border_enabled"}, options.enabled);
+    options.width = GetOptionalIntAnyField(obj, {"cropBorderWidth", "crop_border_width"}, options.width);
+    options.height = GetOptionalIntAnyField(obj, {"cropBorderHeight", "crop_border_height"}, options.height);
+    options.width = ClampCropMargin(options.width);
+    options.height = ClampCropMargin(options.height);
+    if (!options.enabled) {
+        options.width = 0;
+        options.height = 0;
+    }
+    return options;
+}
+
+SdkSinglePageOptions ParseSinglePageOptions(const Json& obj, const SdkSinglePageOptions& defaults) {
+    SdkSinglePageOptions options = defaults;
+    options.realtime_detect_rects =
+        GetOptionalBoolField(obj, "realtime_detect_rects", options.realtime_detect_rects);
+    options.crop_border = ParseCropBorderOptions(obj,
+                                                 options.crop_border.enabled,
+                                                 options.crop_border.width,
+                                                 options.crop_border.height);
+    options.id_card_round_corner =
+        GetOptionalBoolAnyField(obj, {"id_card_round_corner", "idCardRoundCorner", "roundedCorner"}, options.id_card_round_corner);
+    options.auto_rotate =
+        GetOptionalBoolAnyField(obj, {"auto_rotate", "autoRotate", "automaticConversion"}, options.auto_rotate);
+    options.smart_black_edge_optimize =
+        GetOptionalBoolAnyField(obj, {"smart_black_edge_optimize", "smartBlackEdgeOptimize", "optiBlackEdges"}, options.smart_black_edge_optimize);
+    options.multi_target_paging =
+        GetOptionalBoolAnyField(obj, {"multi_target_paging", "multiTargetPaging", "multiTagets"}, options.multi_target_paging);
+    return options;
+}
+
+SdkCurvedBookOptions ParseCurvedBookOptions(const Json& obj, const SdkCurvedBookOptions& defaults) {
+    SdkCurvedBookOptions options = defaults;
+    const Json remove_finger_json = GetOptionalObjectField(obj, "remove_finger");
+    if (!remove_finger_json.empty()) {
+        options.remove_finger = GetOptionalBoolAnyField(remove_finger_json, {"enabled", "remove"}, options.remove_finger);
+        options.finger_type = GetOptionalStringAnyField(remove_finger_json, {"finger_type", "type"}, options.finger_type);
+    }
+    const Json legacy_remove_finger_json = GetOptionalObjectField(obj, "removeFinger");
+    if (!legacy_remove_finger_json.empty()) {
+        options.remove_finger = GetOptionalBoolField(legacy_remove_finger_json, "remove", options.remove_finger);
+        if (legacy_remove_finger_json.find("type") != legacy_remove_finger_json.end()) {
+            const int type = GetOptionalIntField(legacy_remove_finger_json, "type", options.finger_type == "with_sleeve" ? 1 : 0);
+            options.finger_type = type == 0 ? "without_sleeve" : "with_sleeve";
+        }
+    }
+    options.remove_finger = GetOptionalBoolAnyField(obj, {"removeFingerEnabled", "removeFinger"}, options.remove_finger);
+    const bool with_sleeve = GetOptionalBoolField(obj, "withFingerSleeve", options.finger_type != "without_sleeve");
+    options.finger_type = with_sleeve ? "with_sleeve" : "without_sleeve";
+    const std::string explicit_finger_type = GetOptionalStringField(obj, "finger_type");
+    if (!explicit_finger_type.empty()) {
+        options.finger_type = explicit_finger_type;
+    }
+    options.smart_paging = GetOptionalBoolAnyField(obj, {"smart_paging", "smartPaging"}, options.smart_paging);
+    const Json smart_split_json = GetOptionalObjectField(obj, "smartSplit");
+    if (!smart_split_json.empty()) {
+        options.smart_paging = GetOptionalBoolField(smart_split_json, "split", options.smart_paging);
+    }
+    options.crop_border = ParseCropBorderOptions(obj,
+                                                 options.crop_border.enabled,
+                                                 options.crop_border.width,
+                                                 options.crop_border.height);
+    options.auto_complete = GetOptionalBoolAnyField(obj, {"auto_complete", "autoComplete"}, options.auto_complete);
+    if (options.finger_type != "without_sleeve") {
+        options.finger_type = "with_sleeve";
+    }
+    return options;
+}
+
+SdkPoint2f ParsePoint(const Json& obj) {
+    SdkPoint2f point;
+    point.x = GetOptionalFloatField(obj, "x", 0.0f);
+    point.y = GetOptionalFloatField(obj, "y", 0.0f);
+    return point;
+}
+
+SdkRect4P ParseRect4P(const Json& obj) {
+    SdkRect4P rect;
+    rect.left_top = ParsePoint(GetOptionalObjectField(obj, "left_top"));
+    rect.right_top = ParsePoint(GetOptionalObjectField(obj, "right_top"));
+    rect.right_down = ParsePoint(GetOptionalObjectField(obj, "right_down"));
+    rect.left_down = ParsePoint(GetOptionalObjectField(obj, "left_down"));
+    return rect;
+}
+
 bool IsSupportedVideoPixelFormat(const std::string& pixel_format) {
     return pixel_format.empty() || pixel_format == "bgr24";
 }
@@ -105,8 +261,17 @@ SdkCaptureProfile ParseCaptureProfile(const Json& params, const std::string& dev
             profile.color_mode = color_mode;
         }
         const Json single_page_json = GetOptionalObjectField(capture_json, "single_page");
-        profile.single_page_realtime_detect_rects =
-            GetOptionalBoolField(single_page_json, "realtime_detect_rects", profile.single_page_realtime_detect_rects);
+        profile.single_page = ParseSinglePageOptions(single_page_json, profile.single_page);
+        profile.single_page_realtime_detect_rects = profile.single_page.realtime_detect_rects;
+        const Json curved_book_json = GetOptionalObjectField(capture_json, "curved_book");
+        profile.curved_book = ParseCurvedBookOptions(curved_book_json, profile.curved_book);
+        const Json selected_area_json = GetOptionalObjectField(capture_json, "selected_area");
+        if (!selected_area_json.empty()) {
+            profile.selected_area_rect = ParseRect4P(GetOptionalObjectField(selected_area_json, "points"));
+            const Json source_json = GetOptionalObjectField(selected_area_json, "source");
+            profile.selected_area_source_width = GetOptionalIntField(source_json, "width", 0);
+            profile.selected_area_source_height = GetOptionalIntField(source_json, "height", 0);
+        }
     }
 
     const Json output_json = GetOptionalObjectField(profile_json, "output");
@@ -682,6 +847,7 @@ Json CommandApplicationService::HandleVideoStart(const std::string& connection_i
         const SdkCaptureProfile profile = ParseCaptureProfile(request.params, start_request.device_id);
         start_request.page_processing = profile.page_processing;
         start_request.single_page_realtime_detect_rects = profile.single_page_realtime_detect_rects;
+        start_request.single_page_multi_target_paging = profile.single_page.multi_target_paging;
     }
 
     const VideoSessionService::StreamResult stream_result =
@@ -827,6 +993,7 @@ Json CommandApplicationService::HandleVideoSetProfile(const std::string& connect
     const SdkCaptureProfile profile = ParseCaptureProfile(request.params, profile_request.device_id);
     profile_request.page_processing = profile.page_processing;
     profile_request.single_page_realtime_detect_rects = profile.single_page_realtime_detect_rects;
+    profile_request.single_page_multi_target_paging = profile.single_page.multi_target_paging;
 
     const SdkVideoProfileResult profile_result = device_facade_.SetVideoProfile(session_result.auth_context, profile_request);
     if (!IsOkStatusCode(profile_result.code)) {
@@ -839,7 +1006,8 @@ Json CommandApplicationService::HandleVideoSetProfile(const std::string& connect
                            Json{{"device_id", profile_request.device_id},
                                 {"page_processing", profile_result.page_processing},
                                 {"single_page",
-                                 Json{{"realtime_detect_rects", profile_result.single_page_realtime_detect_rects}}},
+                                 Json{{"realtime_detect_rects", profile_result.single_page_realtime_detect_rects},
+                                      {"multi_target_paging", profile_result.single_page_multi_target_paging}}},
                                 {"applied", profile_result.applied}});
 }
 

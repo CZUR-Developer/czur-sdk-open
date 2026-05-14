@@ -12,6 +12,7 @@
         alt=""
         class="absolute inset-0 h-full w-full object-contain"
       />
+      <slot name="video-overlay" />
       <div v-if="showPlaceholder" class="absolute inset-0 opacity-70" :class="variantClass" />
       <div v-if="showOverlay" class="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.12),_transparent_38%)]" />
       <div v-if="showOverlay" class="absolute inset-x-0 top-0 h-px bg-cyan-300/50" />

@@ -410,6 +410,8 @@ public:
         result.page_processing = request.page_processing;
         result.single_page_realtime_detect_rects =
             request.page_processing == "single_page" && request.single_page_realtime_detect_rects;
+        result.single_page_multi_target_paging =
+            result.single_page_realtime_detect_rects && request.single_page_multi_target_paging;
         return result;
     }
 
