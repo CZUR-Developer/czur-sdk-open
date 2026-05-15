@@ -95,6 +95,8 @@ public:
             "video.set_format",
             "video.set_profile",
             "image.process",
+            "image.process_page",
+            "image.apply_color_mode",
             "ocr.recognize",
             "file.convert",
         };
@@ -619,9 +621,10 @@ public:
 class MockOfdProvider : public ISdkOfdProvider {
 public:
     std::string ProviderName() const override { return "mock-ofd-provider"; }
-    SdkFileConvertResult Convert(const SdkFileConvertRequest&) override {
+    SdkFileConvertResult Convert(const SdkFileConvertRequest& request) override {
         SdkFileConvertResult result;
         result.accepted = true;
+        result.output_path = request.output_path;
         return result;
     }
 };

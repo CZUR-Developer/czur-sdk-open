@@ -383,14 +383,17 @@ struct SdkOcrRecognizeResult {
 };
 
 struct SdkFileConvertRequest {
+    std::string input_upload_id;
     std::string input_path;
     std::string output_path;
+    std::string output_format;
 };
 
 struct SdkFileConvertResult {
     int code = ToCode(SdkStatusCode::Ok);
     std::string message = "ok";
     bool accepted = false;
+    std::string output_path;
 };
 
 } // namespace sdk

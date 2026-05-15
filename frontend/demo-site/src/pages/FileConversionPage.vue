@@ -62,20 +62,20 @@ import { capabilityStatusLabelKey, capabilityStatusTone, executionStateLabelKey,
 const { t } = useI18n();
 
 const fileParameterItems = computed(() => [
-  { label: 'source_type', value: 'images' },
-  { label: 'source_files', value: 'capture-042.jpg, image-process-017.png, page-03.png' },
-  { label: 'target_type', value: 'pdf' },
-  { label: t('labels.outputPath'), value: '/tmp/sdk-demo/demo-bundle.pdf', monospace: true },
-  { label: 'template', value: 'images -> pdf' },
-  { label: 'append_bookmarks', value: 'true' },
+  { label: 'method', value: 'file.convert', monospace: true },
+  { label: 'input_upload_id', value: 'img-1760000000-1', monospace: true },
+  { label: 'output_format', value: 'png' },
+  { label: t('labels.outputPath'), value: '/tmp/sdk-demo/converted.png', monospace: true },
+  { label: 'scope', value: 'image format conversion' },
+  { label: 'note', value: 'paper/color processing keeps the source format' },
 ]);
 
 const fileResultItems = computed(() => [
-  { label: t('labels.outputPath'), value: '/tmp/sdk-demo/demo-bundle.pdf', monospace: true },
-  { label: 'target_type', value: 'pdf' },
-  { label: t('labels.fileSize'), value: '12.4MB' },
-  { label: t('labels.pageCount'), value: '3' },
-  { label: 'rename_target', value: 'demo-bundle-final.pdf' },
-  { label: 'workspace', value: '/tmp/sdk-demo/exports' },
+  { label: t('labels.outputPath'), value: '/tmp/sdk-demo/converted.png', monospace: true },
+  { label: 'output_format', value: 'png' },
+  { label: t('labels.fileSize'), value: '2.8MB' },
+  { label: 'asset_id', value: 'asset-converted', monospace: true },
+  { label: 'content_type', value: 'image/png' },
+  { label: 'workspace', value: '/tmp/sdk-demo/file/assets' },
 ]);
 </script>

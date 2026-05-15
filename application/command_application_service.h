@@ -100,6 +100,8 @@ private:
     Json HandleVideoSetFormat(const std::string& connection_id, const Request& request);
     Json HandleVideoSetProfile(const std::string& connection_id, const Request& request);
     Json HandleImageProcess(const std::string& connection_id, const Request& request);
+    Json HandleImageProcessPage(const std::string& connection_id, const Request& request);
+    Json HandleImageApplyColorMode(const std::string& connection_id, const Request& request);
     Json HandleOcrRecognize(const std::string& connection_id, const Request& request);
     Json HandleFileConvert(const std::string& connection_id, const Request& request);
 

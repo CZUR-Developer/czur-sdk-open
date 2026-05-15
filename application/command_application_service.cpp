@@ -4,6 +4,7 @@
 #include "command_application_service.h"
 
 #include <cctype>
+#include <cstdio>
 #include <ctime>
 #include <fstream>
 #include <iomanip>
@@ -479,6 +480,50 @@ std::string InferOutputFormatFromPath(const std::string& output_path) {
     return extension;
 }
 
+std::string NormalizeImageFormat(const std::string& format) {
+    std::string value = NormalizeLower(format);
+    if (value == "jpeg") {
+        return "jpg";
+    }
+    if (value == "tif") {
+        return "tiff";
+    }
+    return value;
+}
+
+std::string ExtensionForImageFormat(const std::string& format) {
+    const std::string value = NormalizeImageFormat(format);
+    if (value == "tiff") {
+        return "tiff";
+    }
+    if (value == "jpg") {
+        return "jpg";
+    }
+    return value;
+}
+
+bool IsGraphicConvertFormat(const std::string& format) {
+    const std::string value = NormalizeImageFormat(format);
+    return value == "jpg" || value == "png" || value == "tiff";
+}
+
+std::string OutputPathForIndexedAsset(const std::string& output_dir,
+                                      const std::string& output_path,
+                                      const std::string& prefix,
+                                      int index,
+                                      const std::string& extension) {
+    if (index == 0 && !output_path.empty()) {
+        return output_path;
+    }
+    std::ostringstream name;
+    name << prefix;
+    if (index > 0) {
+        name << "-" << std::setw(3) << std::setfill('0') << (index + 1);
+    }
+    name << "." << extension;
+    return JoinLocalPath(output_dir, name.str());
+}
+
 } // namespace
 
 CommandApplicationService::CommandApplicationService(const SdkConfig& config, const ProviderBundle& providers)
@@ -509,7 +554,9 @@ CommandApplicationService::CommandApplicationService(const SdkConfig& config, co
     methods_.push_back(MakeMethod("video.stop", true, "Stop one video stream session"));
     methods_.push_back(MakeMethod("video.set_format", true, "Update one video stream format"));
     methods_.push_back(MakeMethod("video.set_profile", true, "Update one video stream processing profile"));
-    methods_.push_back(MakeMethod("image.process", true, "Run one image-processing request"));
+    methods_.push_back(MakeMethod("image.process", true, "Run one combined image-processing request"));
+    methods_.push_back(MakeMethod("image.process_page", true, "Run page processing and keep the source image format"));
+    methods_.push_back(MakeMethod("image.apply_color_mode", true, "Apply one color mode and keep the source image format"));
     methods_.push_back(MakeMethod("ocr.recognize", true, "Submit one OCR request"));
     methods_.push_back(MakeMethod("file.convert", true, "Submit one file conversion request"));
 }
@@ -609,6 +656,12 @@ Json CommandApplicationService::HandleRequest(const std::string& connection_id, 
     }
     if (request.method == "image.process") {
         return HandleImageProcess(connection_id, request);
+    }
+    if (request.method == "image.process_page") {
+        return HandleImageProcessPage(connection_id, request);
+    }
+    if (request.method == "image.apply_color_mode") {
+        return HandleImageApplyColorMode(connection_id, request);
     }
     if (request.method == "ocr.recognize") {
         return HandleOcrRecognize(connection_id, request);
@@ -1418,6 +1471,288 @@ Json CommandApplicationService::HandleImageProcess(const std::string& connection
                                 {"provider", providers_.graphic_provider ? providers_.graphic_provider->ProviderName() : ""}});
 }
 
+Json CommandApplicationService::HandleImageProcessPage(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    const AuthorizationService::SessionResult quota_result = ConsumeQuota(connection_id, request.method, request.request_id);
+    if (!IsOkStatusCode(quota_result.code)) {
+        return BuildWsResponse(request.request_id, quota_result.code, quota_result.message);
+    }
+
+    SdkPageProcessRequest page_request;
+    const std::string input_upload_id = GetOptionalStringField(request.params, "input_upload_id");
+    page_request.input_path = GetOptionalStringField(request.params, "input_path");
+    page_request.output_dir = GetOptionalStringField(request.params, "output_dir");
+    page_request.output_path = GetOptionalStringField(request.params, "output_path");
+    page_request.page_processing = GetOptionalStringField(request.params, "page_processing");
+    if (page_request.page_processing.empty()) {
+        page_request.page_processing = "single_page";
+    }
+    page_request.scan_device_type = GetOptionalIntField(request.params, "scan_device_type", page_request.scan_device_type);
+
+    const Json profile_json = GetOptionalObjectField(request.params, "profile");
+    if (!profile_json.empty()) {
+        const SdkCaptureProfile profile = ParseCaptureProfile(request.params, "");
+        page_request.page_processing = profile.page_processing;
+        page_request.single_page = profile.single_page;
+        page_request.curved_book = profile.curved_book;
+        page_request.selected_area_rect = profile.selected_area_rect;
+        page_request.selected_area_source_width = profile.selected_area_source_width;
+        page_request.selected_area_source_height = profile.selected_area_source_height;
+    }
+    const Json single_page_json = GetOptionalObjectField(request.params, "single_page");
+    if (!single_page_json.empty()) {
+        page_request.single_page = ParseSinglePageOptions(single_page_json, page_request.single_page);
+    }
+    const Json curved_book_json = GetOptionalObjectField(request.params, "curved_book");
+    if (!curved_book_json.empty()) {
+        page_request.curved_book = ParseCurvedBookOptions(curved_book_json, page_request.curved_book);
+    }
+    const Json selected_area_json = GetOptionalObjectField(request.params, "selected_area");
+    if (!selected_area_json.empty()) {
+        page_request.page_processing = "selected_area";
+        page_request.selected_area_rect = ParseRect4P(GetOptionalObjectField(selected_area_json, "points"));
+        const Json source_json = GetOptionalObjectField(selected_area_json, "source");
+        page_request.selected_area_source_width = GetOptionalIntField(source_json, "width", 0);
+        page_request.selected_area_source_height = GetOptionalIntField(source_json, "height", 0);
+    }
+
+    std::string image_task_id = input_upload_id;
+    std::string source_extension;
+    if (!input_upload_id.empty()) {
+        AssetAccessResult input_asset = ResolveImageAsset(connection_id, input_upload_id, "asset-original");
+        if (!IsOkStatusCode(input_asset.code)) {
+            return BuildWsResponse(request.request_id, input_asset.code, input_asset.message);
+        }
+        page_request.input_path = input_asset.asset.path;
+        source_extension = ImageExtensionForContentType(input_asset.asset.content_type, input_asset.asset.path);
+    }
+    if (page_request.input_path.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "input_path or input_upload_id required");
+    }
+    if (!FileExists(page_request.input_path)) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "input image does not exist");
+    }
+    if (source_extension.empty()) {
+        source_extension = ExtensionFromFilename(page_request.input_path);
+    }
+    if (source_extension.empty() || !IsSupportedImageExtension(source_extension)) {
+        source_extension = "jpg";
+    }
+    const std::string source_format = NormalizeImageFormat(source_extension);
+    const std::string source_output_extension = ExtensionForImageFormat(source_format);
+    if (!page_request.output_path.empty()) {
+        const std::string output_format = NormalizeImageFormat(InferOutputFormatFromPath(page_request.output_path));
+        if (!output_format.empty() && output_format != source_format) {
+            return BuildWsResponse(request.request_id,
+                                   SdkStatusCode::InvalidParams,
+                                   "image.process_page output_path must keep the input image format");
+        }
+    }
+    if (image_task_id.empty()) {
+        image_task_id = NextImageTaskId();
+    }
+    if (page_request.output_dir.empty()) {
+        page_request.output_dir = GetSdkOpenTaskAssetDir("image", image_task_id, "assets");
+    }
+    if (!EnsureDirectoryRecursive(page_request.output_dir)) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "failed to create image process output directory");
+    }
+    if (page_request.output_path.empty()) {
+        page_request.output_path = JoinLocalPath(page_request.output_dir, "page_processed." + source_output_extension);
+    }
+
+    const SdkPageProcessResult page_result = graphic_facade_.ProcessPage(page_request);
+    if (!IsOkStatusCode(page_result.code)) {
+        return BuildWsResponse(request.request_id, page_result.code, page_result.message);
+    }
+
+    Json outputs = Json::array();
+    Json assets_json = Json::array();
+    std::string first_output_path;
+    for (std::vector<SdkPageOutput>::const_iterator it = page_result.outputs.begin(); it != page_result.outputs.end(); ++it) {
+        SdkPageOutput page_output = *it;
+        std::string final_path = page_output.path;
+        const std::string output_format = NormalizeImageFormat(ExtensionFromFilename(page_output.path));
+        if (output_format != source_format) {
+            final_path = OutputPathForIndexedAsset(page_request.output_dir,
+                                                   it->index == 0 ? page_request.output_path : "",
+                                                   "page_processed",
+                                                   it->index,
+                                                   source_output_extension);
+            if (IsGraphicConvertFormat(source_format)) {
+                SdkFormatConvertRequest format_request;
+                format_request.input_path = page_output.path;
+                format_request.output_path = final_path;
+                format_request.output_format = source_format;
+                const SdkFormatConvertResult format_result = graphic_facade_.ConvertImageFormat(format_request);
+                if (!IsOkStatusCode(format_result.code)) {
+                    return BuildWsResponse(request.request_id, format_result.code, format_result.message);
+                }
+                final_path = format_result.output_path.empty() ? final_path : format_result.output_path;
+            } else {
+                return BuildWsResponse(request.request_id,
+                                       SdkStatusCode::UnsupportedMethod,
+                                       "input image format cannot be preserved for this page processing result");
+            }
+        }
+
+        SdkImageProcessOutput output;
+        output.asset_id = page_output.index == 0 ? "asset-page" : ("asset-page-" + page_output.output_id);
+        output.output_id = page_output.output_id;
+        output.role = page_output.role.empty() ? "page" : page_output.role;
+        output.index = page_output.index;
+        output.path = final_path;
+        output.content_type = ContentTypeForImageExtension(source_output_extension);
+        output.width = page_output.width;
+        output.height = page_output.height;
+        output.size = FileSize(final_path);
+
+        SdkCaptureAsset asset;
+        asset.asset_id = output.asset_id;
+        asset.kind = output.index == 0 ? "page_processed" : ("page_processed_" + output.output_id);
+        asset.path = output.path;
+        asset.content_type = output.content_type;
+        asset.width = output.width;
+        asset.height = output.height;
+        asset.size = output.size;
+        asset = AttachImageAssetUrls(image_task_id, asset);
+        RegisterImageAsset(connection_id, image_task_id, asset);
+        output.url = asset.url;
+        output.download_url = asset.download_url;
+        assets_json.push_back(BuildAssetJson(asset));
+        outputs.push_back(BuildImageProcessOutputJson(output));
+        if (first_output_path.empty()) {
+            first_output_path = output.path;
+        }
+        if (page_output.path != final_path && page_output.path != page_request.input_path) {
+            std::remove(page_output.path.c_str());
+        }
+    }
+
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"task_id", image_task_id},
+                                {"input_upload_id", input_upload_id},
+                                {"input_path", page_request.input_path},
+                                {"output_path", first_output_path.empty() ? page_result.output_path : first_output_path},
+                                {"outputs", outputs},
+                                {"assets", assets_json},
+                                {"page_processing", page_request.page_processing},
+                                {"output_format", source_format},
+                                {"processed", page_result.processed},
+                                {"provider", providers_.graphic_provider ? providers_.graphic_provider->ProviderName() : ""}});
+}
+
+Json CommandApplicationService::HandleImageApplyColorMode(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    const AuthorizationService::SessionResult quota_result = ConsumeQuota(connection_id, request.method, request.request_id);
+    if (!IsOkStatusCode(quota_result.code)) {
+        return BuildWsResponse(request.request_id, quota_result.code, quota_result.message);
+    }
+
+    SdkColorModeRequest color_request;
+    const std::string input_upload_id = GetOptionalStringField(request.params, "input_upload_id");
+    color_request.input_path = GetOptionalStringField(request.params, "input_path");
+    color_request.output_path = GetOptionalStringField(request.params, "output_path");
+    color_request.color_mode = GetOptionalStringField(request.params, "color_mode");
+    if (color_request.color_mode.empty()) {
+        const SdkCaptureProfile profile = ParseCaptureProfile(request.params, "");
+        color_request.color_mode = profile.color_mode.empty() ? "no_optimize" : profile.color_mode;
+    }
+
+    std::string image_task_id = input_upload_id;
+    std::string source_extension;
+    if (!input_upload_id.empty()) {
+        AssetAccessResult input_asset = ResolveImageAsset(connection_id, input_upload_id, "asset-original");
+        if (!IsOkStatusCode(input_asset.code)) {
+            return BuildWsResponse(request.request_id, input_asset.code, input_asset.message);
+        }
+        color_request.input_path = input_asset.asset.path;
+        source_extension = ImageExtensionForContentType(input_asset.asset.content_type, input_asset.asset.path);
+    }
+    if (color_request.input_path.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "input_path or input_upload_id required");
+    }
+    if (!FileExists(color_request.input_path)) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "input image does not exist");
+    }
+    if (source_extension.empty()) {
+        source_extension = ExtensionFromFilename(color_request.input_path);
+    }
+    if (source_extension.empty() || !IsSupportedImageExtension(source_extension)) {
+        source_extension = "jpg";
+    }
+    const std::string source_format = NormalizeImageFormat(source_extension);
+    const std::string source_output_extension = ExtensionForImageFormat(source_format);
+    if (!color_request.output_path.empty()) {
+        const std::string output_format = NormalizeImageFormat(InferOutputFormatFromPath(color_request.output_path));
+        if (!output_format.empty() && output_format != source_format) {
+            return BuildWsResponse(request.request_id,
+                                   SdkStatusCode::InvalidParams,
+                                   "image.apply_color_mode output_path must keep the input image format");
+        }
+    }
+    if (image_task_id.empty()) {
+        image_task_id = NextImageTaskId();
+    }
+    const std::string output_dir = GetOptionalStringField(request.params, "output_dir").empty()
+                                       ? GetSdkOpenTaskAssetDir("image", image_task_id, "assets")
+                                       : GetOptionalStringField(request.params, "output_dir");
+    if (!EnsureDirectoryRecursive(output_dir)) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "failed to create image process output directory");
+    }
+    if (color_request.output_path.empty()) {
+        color_request.output_path = JoinLocalPath(output_dir, "color_processed." + source_output_extension);
+    }
+
+    const SdkColorModeResult color_result = graphic_facade_.ApplyColorMode(color_request);
+    if (!IsOkStatusCode(color_result.code)) {
+        return BuildWsResponse(request.request_id, color_result.code, color_result.message);
+    }
+    const std::string final_path = color_result.output_path.empty() ? color_request.output_path : color_result.output_path;
+
+    SdkImageProcessOutput output;
+    output.asset_id = "asset-color";
+    output.output_id = "color-001";
+    output.role = "color";
+    output.index = 0;
+    output.path = final_path;
+    output.content_type = ContentTypeForImageExtension(source_output_extension);
+    output.size = FileSize(final_path);
+
+    SdkCaptureAsset asset;
+    asset.asset_id = output.asset_id;
+    asset.kind = "color_processed";
+    asset.path = output.path;
+    asset.content_type = output.content_type;
+    asset.size = output.size;
+    asset = AttachImageAssetUrls(image_task_id, asset);
+    RegisterImageAsset(connection_id, image_task_id, asset);
+    output.url = asset.url;
+    output.download_url = asset.download_url;
+
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"task_id", image_task_id},
+                                {"input_upload_id", input_upload_id},
+                                {"input_path", color_request.input_path},
+                                {"output_path", final_path},
+                                {"outputs", Json::array({BuildImageProcessOutputJson(output)})},
+                                {"assets", Json::array({BuildAssetJson(asset)})},
+                                {"color_mode", color_request.color_mode},
+                                {"output_format", source_format},
+                                {"processed", color_result.processed},
+                                {"provider", providers_.graphic_provider ? providers_.graphic_provider->ProviderName() : ""}});
+}
+
 Json CommandApplicationService::HandleOcrRecognize(const std::string& connection_id, const Request& request) {
     const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
     if (!IsOkStatusCode(session_result.code)) {
@@ -1455,10 +1790,80 @@ Json CommandApplicationService::HandleFileConvert(const std::string& connection_
     }
 
     SdkFileConvertRequest convert_request;
+    convert_request.input_upload_id = GetOptionalStringField(request.params, "input_upload_id");
     convert_request.input_path = GetOptionalStringField(request.params, "input_path");
     convert_request.output_path = GetOptionalStringField(request.params, "output_path");
+    convert_request.output_format = NormalizeImageFormat(GetOptionalStringField(request.params, "output_format"));
+    if (convert_request.output_format.empty() && !convert_request.output_path.empty()) {
+        convert_request.output_format = NormalizeImageFormat(InferOutputFormatFromPath(convert_request.output_path));
+    }
+
+    std::string image_task_id = convert_request.input_upload_id;
+    if (!convert_request.input_upload_id.empty()) {
+        AssetAccessResult input_asset = ResolveImageAsset(connection_id, convert_request.input_upload_id, "asset-original");
+        if (!IsOkStatusCode(input_asset.code)) {
+            return BuildWsResponse(request.request_id, input_asset.code, input_asset.message);
+        }
+        convert_request.input_path = input_asset.asset.path;
+    }
     if (convert_request.input_path.empty()) {
-        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "input_path required");
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "input_path or input_upload_id required");
+    }
+
+    const std::string input_extension = NormalizeImageFormat(ExtensionFromFilename(convert_request.input_path));
+    if (IsSupportedImageExtension(input_extension) && convert_request.output_format.empty()) {
+        return BuildWsResponse(request.request_id,
+                               SdkStatusCode::InvalidParams,
+                               "file.convert image conversion requires output_format or output_path");
+    }
+    if (IsSupportedImageExtension(input_extension) && !IsGraphicConvertFormat(convert_request.output_format)) {
+        return BuildWsResponse(request.request_id,
+                               SdkStatusCode::UnsupportedMethod,
+                               "unsupported image output format: " + convert_request.output_format);
+    }
+    if (IsSupportedImageExtension(input_extension)) {
+        if (image_task_id.empty()) {
+            image_task_id = NextImageTaskId();
+        }
+        if (convert_request.output_path.empty()) {
+            const std::string output_dir = GetSdkOpenTaskAssetDir("file", image_task_id, "assets");
+            if (!EnsureDirectoryRecursive(output_dir)) {
+                return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "failed to create file convert output directory");
+            }
+            convert_request.output_path =
+                JoinLocalPath(output_dir, "converted." + ExtensionForImageFormat(convert_request.output_format));
+        }
+
+        SdkFormatConvertRequest format_request;
+        format_request.input_path = convert_request.input_path;
+        format_request.output_path = convert_request.output_path;
+        format_request.output_format = convert_request.output_format;
+        const SdkFormatConvertResult result = graphic_facade_.ConvertImageFormat(format_request);
+        if (!IsOkStatusCode(result.code)) {
+            return BuildWsResponse(request.request_id, result.code, result.message);
+        }
+        const std::string final_path = result.output_path.empty() ? convert_request.output_path : result.output_path;
+
+        SdkCaptureAsset asset;
+        asset.asset_id = "asset-converted";
+        asset.kind = "converted";
+        asset.path = final_path;
+        asset.content_type = ContentTypeForImageExtension(ExtensionForImageFormat(convert_request.output_format));
+        asset.size = FileSize(final_path);
+        asset = AttachImageAssetUrls(image_task_id, asset);
+        RegisterImageAsset(connection_id, image_task_id, asset);
+
+        return BuildWsResponse(request.request_id,
+                               SdkStatusCode::Ok,
+                               "ok",
+                               Json{{"task_id", image_task_id},
+                                    {"input_upload_id", convert_request.input_upload_id},
+                                    {"input_path", convert_request.input_path},
+                                    {"output_path", final_path},
+                                    {"output_format", convert_request.output_format},
+                                    {"converted", result.converted},
+                                    {"asset", BuildAssetJson(asset)},
+                                    {"provider", providers_.graphic_provider ? providers_.graphic_provider->ProviderName() : ""}});
     }
 
     const SdkFileConvertResult result = ofd_facade_.Convert(convert_request);
@@ -1469,21 +1874,31 @@ Json CommandApplicationService::HandleFileConvert(const std::string& connection_
                            SdkStatusCode::Ok,
                            "ok",
                            Json{{"input_path", convert_request.input_path},
-                                {"output_path", convert_request.output_path},
+                                {"output_path", result.output_path.empty() ? convert_request.output_path : result.output_path},
+                                {"output_format", convert_request.output_format},
                                 {"accepted", result.accepted},
                                 {"provider", providers_.ofd_provider ? providers_.ofd_provider->ProviderName() : ""}});
 }
 
 AuthorizationService::SessionResult CommandApplicationService::RequireCapability(const std::string& connection_id,
                                                                                  const std::string& capability) const {
-    return authorization_service_.RequireCapability(connection_id, capability);
+    AuthorizationService::SessionResult result = authorization_service_.RequireCapability(connection_id, capability);
+    if (IsOkStatusCode(result.code) || (capability != "image.process_page" && capability != "image.apply_color_mode")) {
+        return result;
+    }
+    return authorization_service_.RequireCapability(connection_id, "image.process");
 }
 
 AuthorizationService::SessionResult CommandApplicationService::ConsumeQuota(const std::string& connection_id,
                                                                             const std::string& capability,
                                                                             const std::string& request_id,
                                                                             int units) {
-    return authorization_service_.ConsumeQuota(connection_id, capability, request_id, units);
+    AuthorizationService::SessionResult result =
+        authorization_service_.ConsumeQuota(connection_id, capability, request_id, units);
+    if (IsOkStatusCode(result.code) || (capability != "image.process_page" && capability != "image.apply_color_mode")) {
+        return result;
+    }
+    return authorization_service_.ConsumeQuota(connection_id, "image.process", request_id, units);
 }
 
 Json CommandApplicationService::BuildSessionJson(const AuthorizationService::SessionResult& session_result) const {

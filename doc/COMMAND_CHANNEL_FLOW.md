@@ -14,7 +14,7 @@ Core rules:
 - the server binds the returned `session_token` to the current command connection
 - later business requests do not resend auth fields
 - offline API keys can be locally unlocked through `auth.activate_offline`
-- `capture.take`, `image.process`, and `file.convert` are quota-controlled methods
+- `capture.take`, `image.process`, `image.process_page`, `image.apply_color_mode`, and `file.convert` are quota-controlled methods
 
 Default endpoint:
 
@@ -144,6 +144,8 @@ Successful response example:
         "auth.destroy_session",
         "capture.take",
         "image.process",
+        "image.process_page",
+        "image.apply_color_mode",
         "file.convert"
       ],
       "quota_buckets": [
@@ -189,7 +191,7 @@ On success:
 
 - `auth_context.entitlement_state` changes from `offline_limited` to `offline_unlocked`
 - a fresh `session_token` is returned immediately
-- local quota enforcement for `capture.take`, `image.process`, and `file.convert` stops
+- local quota enforcement for `capture.take`, image-processing methods, and `file.convert` stops
 
 ### 5. Call business methods
 
@@ -210,9 +212,9 @@ The runtime validates:
 - connection-bound session existence
 - capability membership
 - device scope when applicable
-- quota consumption for `capture.take`, `image.process`, and `file.convert`
+- quota consumption for `capture.take`, image-processing methods, and `file.convert`
 
-Paper processing extension parameters are passed through `params.profile.capture` in capture methods and through top-level `params.single_page` / `params.curved_book` in `image.process`. Single-page mode supports:
+Paper processing extension parameters are passed through `params.profile.capture` in capture methods and through top-level `params.single_page` / `params.curved_book` in `image.process` or `image.process_page`. Single-page mode supports:
 
 - `single_page.crop_border.enabled/width/height`: crop-border switch and margins. `width/height` are clamped to `-100..100`.
 - `single_page.id_card_round_corner`: ID card rounded-corner padding.
@@ -233,7 +235,13 @@ Standalone `image.process` curved-book processing uses edge-based flattening onl
 
 `video.set_profile` can update `single_page.realtime_detect_rects` and `single_page.multi_target_paging` at runtime without reopening the video stream.
 
-`image.process` runs the same paper-processing and color-mode chain for an uploaded or existing local image file:
+`image.process` is kept as a compatibility method that runs paper processing, color mode, and format conversion in one call. New integrations should prefer the split methods:
+
+- `image.process_page`: runs only page/paper processing and keeps the source image format.
+- `image.apply_color_mode`: runs only color mode processing and keeps the source image format.
+- `file.convert`: performs image format conversion, for example JPG to PNG or TIFF.
+
+Compatibility `image.process` example:
 
 ```json
 {
@@ -255,7 +263,50 @@ Standalone `image.process` curved-book processing uses edge-based flattening onl
 }
 ```
 
-The demo site uploads local browser-selected images with `POST /api/uploads/images` on the asset service (`http://127.0.0.1:17082` by default). The request must be multipart form-data with field `file` and `Authorization: Bearer <session_token>`. The response returns `upload_id` and an original image asset. `image.process` can use either `input_upload_id` or the existing local `input_path + output_path` mode.
+Split page-processing example:
+
+```json
+{
+  "request_id": "req-page-001",
+  "method": "image.process_page",
+  "params": {
+    "input_upload_id": "img-1760000000-1",
+    "page_processing": "single_page",
+    "single_page": {
+      "crop_border": { "enabled": false, "width": 0, "height": 0 },
+      "auto_rotate": true
+    }
+  }
+}
+```
+
+Split color-mode example:
+
+```json
+{
+  "request_id": "req-color-001",
+  "method": "image.apply_color_mode",
+  "params": {
+    "input_upload_id": "img-1760000000-1",
+    "color_mode": "grayscale"
+  }
+}
+```
+
+Image format conversion belongs to `file.convert`:
+
+```json
+{
+  "request_id": "req-convert-001",
+  "method": "file.convert",
+  "params": {
+    "input_upload_id": "img-1760000000-1",
+    "output_format": "png"
+  }
+}
+```
+
+The demo site uploads local browser-selected images with `POST /api/uploads/images` on the asset service (`http://127.0.0.1:17082` by default). The request must be multipart form-data with field `file` and `Authorization: Bearer <session_token>`. The response returns `upload_id` and an original image asset. Image methods can use either `input_upload_id` or the existing local `input_path + output_path` mode.
 
 For `selected_area`, pass frontend-scaled points in `params.selected_area.points` and the coordinate basis in `params.selected_area.source.width/height`. The backend scales those points to the real input image size before cropping. The response returns `output_path` for the first page and `outputs[]` for single or multi-page results.
 
@@ -273,14 +324,14 @@ Supported lifecycle methods:
 - license mode: `offline_api_key`
 - default state: `offline_limited`
 - local machine code is exposed in `auth_context.machine_code`
-- `capture.take`, `image.process`, and `file.convert` are locally quota-limited by default
+- `capture.take`, image-processing methods, and `file.convert` are locally quota-limited by default
 - `auth.activate_offline` upgrades the current key to `offline_unlocked`
 
 ### Online API key
 
 - license mode: `online_api_key`
 - validation is performed through the configured HTTP auth service
-- quota checks for `capture.take`, `image.process`, and `file.convert` are delegated to the same remote auth service
+- quota checks for `capture.take`, image-processing methods, and `file.convert` are delegated to the same remote auth service
 - the current build supports `http://...` online auth endpoints directly
 
 ## Access Rules

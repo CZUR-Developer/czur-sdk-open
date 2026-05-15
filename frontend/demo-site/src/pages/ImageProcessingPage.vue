@@ -32,7 +32,7 @@
                     @load="handleInputImageLoad"
                   />
                   <div
-                    v-if="form.pageProcessing === 'selected_area'"
+                    v-if="operation !== 'color' && form.pageProcessing === 'selected_area'"
                     class="absolute inset-0 cursor-crosshair touch-none"
                     @pointerdown="handleAreaPointerDown"
                     @pointermove="handleAreaPointerMove"
@@ -98,7 +98,7 @@
               {{ uploadRunning ? t('pages.imageProcessing.uploading') : t('pages.imageProcessing.upload') }}
             </button>
             <button type="button" class="primary-button justify-center" :disabled="!canProcess" @click="runImageProcess">
-              {{ running ? t('pages.imageProcessing.processing') : t('pages.imageProcessing.process') }}
+              {{ running ? t('pages.imageProcessing.processing') : t('pages.imageProcessing.runSelectedOperation') }}
             </button>
           </div>
           <p v-if="lastError" class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">{{ lastError }}</p>
@@ -110,6 +110,21 @@
       <SectionPanel :title="t('pages.imageProcessing.processingOptions')" :description="t('pages.imageProcessing.processingOptionsDescription')">
         <div class="space-y-5">
           <div>
+            <p class="option-heading">{{ t('pages.imageProcessing.operation') }}</p>
+            <div class="grid grid-cols-3 gap-2">
+              <button type="button" class="format-button" :class="operation === 'combined' ? 'format-button-active' : ''" @click="operation = 'combined'">
+                {{ t('pages.imageProcessing.combinedProcess') }}
+              </button>
+              <button type="button" class="format-button" :class="operation === 'page' ? 'format-button-active' : ''" @click="operation = 'page'">
+                {{ t('pages.imageProcessing.processPage') }}
+              </button>
+              <button type="button" class="format-button" :class="operation === 'color' ? 'format-button-active' : ''" @click="operation = 'color'">
+                {{ t('pages.imageProcessing.applyColorMode') }}
+              </button>
+            </div>
+          </div>
+
+          <div v-if="operation !== 'color'">
             <p class="option-heading">{{ t('pages.captureAcquisition.pageProcessing') }}</p>
             <div class="grid gap-2">
               <button
@@ -126,7 +141,7 @@
             </div>
           </div>
 
-          <div v-if="form.pageProcessing === 'selected_area'" class="space-y-2">
+          <div v-if="operation !== 'color' && form.pageProcessing === 'selected_area'" class="space-y-2">
             <div class="flex items-center justify-between gap-3">
               <p class="option-heading mb-0">{{ t('pages.captureAcquisition.selectedAreaOptions') }}</p>
               <button type="button" class="text-xs font-semibold text-cyan-700" @click="clearSelectedArea">{{ t('pages.captureAcquisition.clearSelectedArea') }}</button>
@@ -144,14 +159,14 @@
             </p>
           </div>
 
-          <div>
+          <div v-if="operation !== 'page'">
             <p class="option-heading">{{ t('pages.captureAcquisition.colorMode') }}</p>
             <select v-model="form.colorMode" class="field-input">
               <option v-for="option in colorModeOptions" :key="option.value" :value="option.value">{{ t(option.labelKey) }}</option>
             </select>
           </div>
 
-          <div>
+          <div v-if="operation === 'combined'">
             <p class="option-heading">{{ t('pages.captureAcquisition.outputFormat') }}</p>
             <div class="grid grid-cols-3 gap-2">
               <button
@@ -166,8 +181,11 @@
               </button>
             </div>
           </div>
+          <p class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
+            {{ operation === 'combined' ? t('pages.imageProcessing.combinedFormatNotice') : t('pages.imageProcessing.keepOriginalFormatNotice') }}
+          </p>
 
-          <div v-if="form.pageProcessing === 'single_page'" class="space-y-2">
+          <div v-if="operation !== 'color' && form.pageProcessing === 'single_page'" class="space-y-2">
             <p class="option-heading">{{ t('pages.captureAcquisition.singlePageOptions') }}</p>
             <ToggleRow v-model="form.cropBorder" :label="t('pages.captureAcquisition.cropBorder')" />
             <div v-if="form.cropBorder" class="grid grid-cols-2 gap-2">
@@ -186,7 +204,7 @@
             <ToggleRow v-model="form.multiTargetPaging" :label="t('pages.captureAcquisition.multiTargetPaging')" />
           </div>
 
-          <div v-if="form.pageProcessing === 'curved_book'" class="space-y-2">
+          <div v-if="operation !== 'color' && form.pageProcessing === 'curved_book'" class="space-y-2">
             <p class="option-heading">{{ t('pages.captureAcquisition.curvedBookOptions') }}</p>
             <p class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
               {{ t('pages.imageProcessing.curvedBookEdgeOnlyNotice') }}
@@ -254,6 +272,7 @@ import { isOkResponse, resolveRuntimeHost } from '../services/protocol';
 import type { Tone } from '../types/demo';
 
 type PageProcessing = 'keep_original' | 'single_page' | 'selected_area' | 'curved_book';
+type ImageOperation = 'combined' | 'page' | 'color';
 type AreaMode = 'rectangle' | 'points';
 type PointKey = 'left_top' | 'right_top' | 'right_down' | 'left_down';
 
@@ -364,6 +383,7 @@ const areaDraftEnd = ref<{ x: number; y: number } | null>(null);
 const selectedPointCount = ref(0);
 const outputPreviews = ref<OutputPreview[]>([]);
 const activeOutputAssetId = ref('');
+const operation = ref<ImageOperation>('combined');
 
 const canProcess = computed(() => Boolean(selectedFile.value && !uploadRunning.value && !running.value));
 const outputs = computed<ProcessOutput[]>(() => {
@@ -460,35 +480,11 @@ const areaOverlayRect = computed(() => {
     height: Math.max(...ys) - minY,
   };
 });
-const commandPayload = computed(() => ({
+const pagePayload = computed(() => ({
   input_upload_id: uploadId.value || '<upload_id>',
   page_processing: form.pageProcessing,
-  color_mode: form.colorMode,
-  output_format: form.outputFormat,
-  single_page: {
-    crop_border: {
-      enabled: form.cropBorder,
-      width: form.cropBorderWidth,
-      height: form.cropBorderHeight,
-    },
-    id_card_round_corner: form.idCardRoundCorner,
-    auto_rotate: form.autoRotate,
-    smart_black_edge_optimize: form.smartBlackEdgeOptimize,
-    multi_target_paging: form.multiTargetPaging,
-  },
-  curved_book: {
-    remove_finger: {
-      enabled: form.removeFinger,
-      finger_type: form.fingerType,
-    },
-    smart_paging: form.smartPaging,
-    crop_border: {
-      enabled: form.curvedCropBorder,
-      width: form.curvedCropBorderWidth,
-      height: form.curvedCropBorderHeight,
-    },
-    auto_complete: form.curvedAutoComplete,
-  },
+  single_page: singlePagePayload(),
+  curved_book: curvedBookPayload(),
   selected_area:
     form.pageProcessing === 'selected_area' && hasSelectedArea()
       ? {
@@ -500,7 +496,28 @@ const commandPayload = computed(() => ({
         }
       : undefined,
 }));
-const requestPreview = computed(() => JSON.stringify({ method: 'image.process', params: commandPayload.value }, null, 2));
+const colorPayload = computed(() => ({
+  input_upload_id: uploadId.value || '<upload_id>',
+  color_mode: form.colorMode,
+}));
+const combinedPayload = computed(() => ({
+  ...pagePayload.value,
+  color_mode: form.colorMode,
+  output_format: form.outputFormat,
+}));
+const commandMethod = computed(() => {
+  if (operation.value === 'combined') {
+    return 'image.process';
+  }
+  return operation.value === 'page' ? 'image.process_page' : 'image.apply_color_mode';
+});
+const commandPayload = computed(() => {
+  if (operation.value === 'combined') {
+    return combinedPayload.value;
+  }
+  return operation.value === 'page' ? pagePayload.value : colorPayload.value;
+});
+const requestPreview = computed(() => JSON.stringify({ method: commandMethod.value, params: commandPayload.value }, null, 2));
 const responsePreview = computed(() => JSON.stringify(lastResponse.value ?? { error: lastError.value || t('pages.imageProcessing.noResponse') }, null, 2));
 
 function handleFileChange(event: Event): void {
@@ -579,7 +596,7 @@ async function runImageProcess(): Promise<void> {
   clearOutputPreviews();
   try {
     const inputUploadId = await uploadSelectedImage();
-    const response = await sendBoundCommand('image.process', {
+    const response = await sendBoundCommand(commandMethod.value, {
       params: {
         ...commandPayload.value,
         input_upload_id: inputUploadId,
@@ -596,6 +613,36 @@ async function runImageProcess(): Promise<void> {
   } finally {
     running.value = false;
   }
+}
+
+function singlePagePayload(): Record<string, unknown> {
+  return {
+    crop_border: {
+      enabled: form.cropBorder,
+      width: form.cropBorderWidth,
+      height: form.cropBorderHeight,
+    },
+    id_card_round_corner: form.idCardRoundCorner,
+    auto_rotate: form.autoRotate,
+    smart_black_edge_optimize: form.smartBlackEdgeOptimize,
+    multi_target_paging: form.multiTargetPaging,
+  };
+}
+
+function curvedBookPayload(): Record<string, unknown> {
+  return {
+    remove_finger: {
+      enabled: form.removeFinger,
+      finger_type: form.fingerType,
+    },
+    smart_paging: form.smartPaging,
+    crop_border: {
+      enabled: form.curvedCropBorder,
+      width: form.curvedCropBorderWidth,
+      height: form.curvedCropBorderHeight,
+    },
+    auto_complete: form.curvedAutoComplete,
+  };
 }
 
 async function buildOutputPreviews(items: ProcessOutput[]): Promise<void> {

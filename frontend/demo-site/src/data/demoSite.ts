@@ -292,7 +292,7 @@ export const authContextFields = {
   licenseMode: 'enterprise_trial',
   deviceScope: 'dev-01, dev-02',
   expiresAt: '2026-04-07T20:48:00Z',
-  capabilities: 'capture.*, image.process, ocr.recognize, file.convert',
+  capabilities: 'capture.*, image.process, image.process_page, image.apply_color_mode, ocr.recognize, file.convert',
 };
 
 export const authFailureItems: ErrorItem[] = [
@@ -341,7 +341,7 @@ export const capturePresetCards: InfoCardItem[] = [
     eyebrow: 'capture.take_base64',
     title: 'Base64 return preset',
     description: 'png · 200dpi · for browser-only pipeline handoff',
-    meta: 'used by image.process / ocr.recognize',
+    meta: 'used by image.process_page / ocr.recognize',
     tone: 'primary',
     state: 'idle',
     tags: ['device'],
@@ -562,9 +562,9 @@ export const ocrEvents: TimelineItem[] = [
 export const fileTemplateCards: InfoCardItem[] = [
   {
     id: 'image-pdf',
-    eyebrow: 'image -> pdf',
-    title: 'Single image to PDF',
-    description: 'source=capture-042.jpg · target=A4 PDF',
+    eyebrow: 'jpg -> png',
+    title: 'Image format conversion',
+    description: 'file.convert handles image format changes outside paper/color processing',
     tone: 'success',
     status: 'ga',
   },
@@ -855,9 +855,9 @@ export const sharedJsonSnippets: Record<string, JsonSnippet> = {
   },
   image: {
     id: 'image-json',
-    title: 'image.process result',
-    caption: 'Operation chain summary stays visible for follow-up conversions.',
-    payload: `{"output_path":"/tmp/sdk-demo/image-process-017.png","pipeline":["normalize","add_watermark","merge"]}`,
+    title: 'image.process_page result',
+    caption: 'Paper processing and color mode can now be called independently.',
+    payload: `{"output_path":"/tmp/sdk-demo/page_processed.jpg","page_processing":"single_page","output_format":"jpg"}`,
   },
   ocr: {
     id: 'ocr-json',
@@ -868,8 +868,8 @@ export const sharedJsonSnippets: Record<string, JsonSnippet> = {
   file: {
     id: 'file-json',
     title: 'file.convert result',
-    caption: 'Template-driven conversion still exposes the transport response.',
-    payload: `{"output_path":"/tmp/sdk-demo/demo-bundle.pdf","target_type":"pdf","file_size":"12.4MB","page_count":3}`,
+    caption: 'Format conversion is separated from paper processing and color mode.',
+    payload: `{"output_path":"/tmp/sdk-demo/converted.png","output_format":"png","asset":{"asset_id":"asset-converted","content_type":"image/png"}}`,
   },
   sane: {
     id: 'sane-json',
