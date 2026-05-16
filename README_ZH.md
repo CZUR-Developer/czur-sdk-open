@@ -82,6 +82,10 @@
 - `video.set_format`
 - `image.process`
 - `ocr.recognize`
+- `ocr.get`
+- `ocr.cancel`
+- `ocr.extract_text`
+- `recognition.barcode_detect`
 - `file.convert`
 
 ## 协议模型

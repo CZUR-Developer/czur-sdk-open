@@ -372,14 +372,101 @@ struct SdkThumbnailResult {
 };
 
 struct SdkOcrRecognizeRequest {
+    std::vector<std::string> input_upload_ids;
     std::vector<std::string> input_files;
     std::string output_path;
+    std::string output_dir;
+    std::string format = "docx";
+    std::string export_type = "multi-page";
+    std::string ext_params_json;
+};
+
+struct SdkOcrTaskSnapshot {
+    std::string task_id;
+    std::string status = "queued";
+    int progress = 0;
+    std::string output_path;
+    std::vector<std::string> output_paths;
+    std::string format;
+    std::string export_type = "multi-page";
+    std::string message = "queued";
+    std::string error;
 };
 
 struct SdkOcrRecognizeResult {
     int code = ToCode(SdkStatusCode::Ok);
     std::string message = "ok";
     std::string task_id;
+    SdkOcrTaskSnapshot task;
+};
+
+struct SdkOcrGetRequest {
+    std::string task_id;
+};
+
+struct SdkOcrGetResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    SdkOcrTaskSnapshot task;
+};
+
+struct SdkOcrCancelRequest {
+    std::string task_id;
+};
+
+struct SdkOcrCancelResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool cancelled = false;
+    SdkOcrTaskSnapshot task;
+};
+
+struct SdkOcrTextBlock {
+    std::string text;
+    float x = 0.0f;
+    float y = 0.0f;
+    float width = 0.0f;
+    float height = 0.0f;
+    float confidence = 0.0f;
+    float font_size = 0.0f;
+};
+
+struct SdkOcrExtractTextRequest {
+    std::string input_upload_id;
+    std::string input_path;
+};
+
+struct SdkOcrExtractTextResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool recognized = false;
+    std::string input_path;
+    int width = 0;
+    int height = 0;
+    std::vector<SdkOcrTextBlock> blocks;
+};
+
+struct SdkBarcodeResult {
+    std::string format_name;
+    int format = 0;
+    std::string text;
+    std::vector<SdkPoint2f> points;
+};
+
+struct SdkBarcodeDetectRequest {
+    std::string input_upload_id;
+    std::string input_path;
+    std::vector<std::string> formats;
+};
+
+struct SdkBarcodeDetectResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool detected = false;
+    std::string input_path;
+    int width = 0;
+    int height = 0;
+    std::vector<SdkBarcodeResult> barcodes;
 };
 
 struct SdkFileConvertRequest {

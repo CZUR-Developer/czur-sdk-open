@@ -14,6 +14,9 @@ public:
     explicit OcrFacade(const ProviderBundle& providers);
 
     SdkOcrRecognizeResult Recognize(const SdkOcrRecognizeRequest& request) const;
+    SdkOcrGetResult GetTask(const SdkOcrGetRequest& request) const;
+    SdkOcrCancelResult Cancel(const SdkOcrCancelRequest& request) const;
+    SdkOcrExtractTextResult ExtractText(const SdkOcrExtractTextRequest& request) const;
 
 private:
     ProviderBundle providers_;

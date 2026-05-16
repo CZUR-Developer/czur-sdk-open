@@ -83,6 +83,10 @@ The current runtime exposes:
 - `video.set_format`
 - `image.process`
 - `ocr.recognize`
+- `ocr.get`
+- `ocr.cancel`
+- `ocr.extract_text`
+- `recognition.barcode_detect`
 - `file.convert`
 
 ## Protocol Model

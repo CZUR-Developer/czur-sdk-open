@@ -33,6 +33,20 @@ std::string MaskToken(const std::string& token) {
            " (len=" + std::to_string(token.size()) + ")";
 }
 
+std::string BaseNameWithoutExtension(const std::string& path) {
+    const std::string::size_type slash_pos = path.find_last_of("/\\");
+    const std::string leaf = slash_pos == std::string::npos ? path : path.substr(slash_pos + 1);
+    const std::string::size_type dot_pos = leaf.find_last_of('.');
+    if (dot_pos == std::string::npos || dot_pos == 0) {
+        return leaf.empty() ? "output" : leaf;
+    }
+    return leaf.substr(0, dot_pos);
+}
+
+std::string ExtensionForOcrFormat(const std::string& format) {
+    return format.empty() ? "docx" : format;
+}
+
 class MockAuthProvider : public ISdkAuthProvider {
 public:
     std::string ProviderName() const override { return "mock-auth-provider"; }
@@ -98,6 +112,10 @@ public:
             "image.process_page",
             "image.apply_color_mode",
             "ocr.recognize",
+            "ocr.get",
+            "ocr.cancel",
+            "ocr.extract_text",
+            "recognition.barcode_detect",
             "file.convert",
         };
         SDK_OPEN_LOG_INFO("[mock_auth_provider] ValidateToken success, account_type={}, auth_scene={}, device_scope_count={}",
@@ -611,9 +629,108 @@ private:
 class MockOcrProvider : public ISdkOcrProvider {
 public:
     std::string ProviderName() const override { return "mock-ocr-provider"; }
-    SdkOcrRecognizeResult Recognize(const SdkOcrRecognizeRequest&) override {
+    SdkOcrRecognizeResult Recognize(const SdkOcrRecognizeRequest& request) override {
         SdkOcrRecognizeResult result;
-        result.task_id = "mock-ocr-task-1";
+        result.task_id = "mock-ocr-task-" + std::to_string(next_task_id_++);
+        result.task.task_id = result.task_id;
+        result.task.status = "completed";
+        result.task.progress = 100;
+        result.task.output_path = request.output_path;
+        result.task.export_type = request.export_type;
+        result.task.format = request.format;
+        result.task.message = "mock ocr completed";
+        if (request.export_type == "single-page") {
+            const std::string output_dir = request.output_dir.empty() ? request.output_path : request.output_dir;
+            for (std::vector<std::string>::const_iterator it = request.input_files.begin(); it != request.input_files.end(); ++it) {
+                result.task.output_paths.push_back(JoinPath(output_dir, BaseNameWithoutExtension(*it) + "." + ExtensionForOcrFormat(request.format)));
+            }
+            result.task.output_path = output_dir;
+        } else {
+            result.task.output_paths.push_back(request.output_path);
+        }
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            tasks_[result.task_id] = result.task;
+        }
+        return result;
+    }
+    SdkOcrGetResult GetTask(const SdkOcrGetRequest& request) override {
+        SdkOcrGetResult result;
+        std::lock_guard<std::mutex> lock(mu_);
+        const std::map<std::string, SdkOcrTaskSnapshot>::const_iterator it = tasks_.find(request.task_id);
+        if (it == tasks_.end()) {
+            result.code = ToCode(SdkStatusCode::InvalidParams);
+            result.message = "ocr task not found";
+            return result;
+        }
+        result.task = it->second;
+        return result;
+    }
+    SdkOcrCancelResult Cancel(const SdkOcrCancelRequest& request) override {
+        SdkOcrCancelResult result;
+        std::lock_guard<std::mutex> lock(mu_);
+        std::map<std::string, SdkOcrTaskSnapshot>::iterator it = tasks_.find(request.task_id);
+        if (it == tasks_.end()) {
+            result.code = ToCode(SdkStatusCode::InvalidParams);
+            result.message = "ocr task not found";
+            return result;
+        }
+        it->second.status = "cancelled";
+        it->second.message = "mock ocr cancelled";
+        result.cancelled = true;
+        result.task = it->second;
+        return result;
+    }
+    SdkOcrExtractTextResult ExtractText(const SdkOcrExtractTextRequest& request) override {
+        SdkOcrExtractTextResult result;
+        result.recognized = true;
+        result.input_path = request.input_path;
+        result.width = 1200;
+        result.height = 800;
+        SdkOcrTextBlock block;
+        block.text = "SDK OCR demo text";
+        block.x = 80.0f;
+        block.y = 96.0f;
+        block.width = 420.0f;
+        block.height = 48.0f;
+        block.confidence = 0.98f;
+        block.font_size = 18.0f;
+        result.blocks.push_back(block);
+        return result;
+    }
+
+private:
+    std::mutex mu_;
+    std::map<std::string, SdkOcrTaskSnapshot> tasks_;
+    int next_task_id_ = 1;
+};
+
+class MockRecognitionProvider : public ISdkRecognitionProvider {
+public:
+    std::string ProviderName() const override { return "mock-recognition-provider"; }
+    SdkBarcodeDetectResult DetectBarcode(const SdkBarcodeDetectRequest& request) override {
+        SdkBarcodeDetectResult result;
+        result.detected = true;
+        result.input_path = request.input_path;
+        result.width = 1200;
+        result.height = 800;
+        SdkBarcodeResult barcode;
+        barcode.format_name = "QR_CODE";
+        barcode.text = "https://www.czur.com";
+        SdkPoint2f point;
+        point.x = 120.0f;
+        point.y = 120.0f;
+        barcode.points.push_back(point);
+        point.x = 280.0f;
+        point.y = 120.0f;
+        barcode.points.push_back(point);
+        point.x = 280.0f;
+        point.y = 280.0f;
+        barcode.points.push_back(point);
+        point.x = 120.0f;
+        point.y = 280.0f;
+        barcode.points.push_back(point);
+        result.barcodes.push_back(barcode);
         return result;
     }
 };
@@ -638,6 +755,7 @@ ProviderBundle CreateProviderBundle() {
     bundle.graphic_provider = std::make_shared<MockGraphicProvider>();
     bundle.ocr_provider = std::make_shared<MockOcrProvider>();
     bundle.ofd_provider = std::make_shared<MockOfdProvider>();
+    bundle.recognition_provider = std::make_shared<MockRecognitionProvider>();
     return bundle;
 }
 

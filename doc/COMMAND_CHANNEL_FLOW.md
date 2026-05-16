@@ -310,6 +310,65 @@ The demo site uploads local browser-selected images with `POST /api/uploads/imag
 
 For `selected_area`, pass frontend-scaled points in `params.selected_area.points` and the coordinate basis in `params.selected_area.source.width/height`. The backend scales those points to the real input image size before cropping. The response returns `output_path` for the first page and `outputs[]` for single or multi-page results.
 
+OCR and recognition methods:
+
+- `ocr.extract_text`: runs lightweight OCR on one image and returns text blocks with image-space rectangles.
+- `ocr.recognize`: starts an asynchronous OCR export task. It accepts `input_upload_ids` or `input_files`, `output_path` or `output_dir`, `format`, and optional export parameters such as `encoding`, `paperSize`, `exportType`, `ocrPreference`, `quality`, and `exportFormat`. Supported export formats are `txt`, `pdf`, `docx`, `xlsx`, `ofd`, and `json`.
+- `ocr.get`: returns the current OCR task snapshot.
+- `ocr.cancel`: requests cancellation of one OCR task.
+- `recognition.barcode_detect`: detects barcode/QR content from one static image. Realtime barcode recognition belongs to the capture/video flow and is not started by this method.
+
+OCR text extraction example:
+
+```json
+{
+  "request_id": "req-ocr-text-001",
+  "method": "ocr.extract_text",
+  "params": {
+    "input_upload_id": "img-1760000000-1"
+  }
+}
+```
+
+OCR export example:
+
+```json
+{
+  "request_id": "req-ocr-001",
+  "method": "ocr.recognize",
+  "params": {
+    "input_upload_ids": ["img-1760000000-1", "img-1760000000-2"],
+    "output_path": "/tmp/demo.txt",
+    "format": "txt",
+    "exportType": "multi-page",
+    "encoding": "utf-8",
+    "quality": 90
+  }
+}
+```
+
+Use `exportType: "single-page"` with `output_dir` to export one file per input image. The response includes `data.output_paths` and `data.task.output_paths`.
+
+OCR task query/cancel examples:
+
+```json
+{ "request_id": "req-ocr-get-001", "method": "ocr.get", "params": { "task_id": "ocr-1" } }
+{ "request_id": "req-ocr-cancel-001", "method": "ocr.cancel", "params": { "task_id": "ocr-1" } }
+```
+
+Barcode detection example:
+
+```json
+{
+  "request_id": "req-barcode-001",
+  "method": "recognition.barcode_detect",
+  "params": {
+    "input_upload_id": "img-1760000000-1",
+    "formats": ["qrcode", "pdf417", "code128"]
+  }
+}
+```
+
 ### 6. Refresh or destroy the session
 
 Supported lifecycle methods:

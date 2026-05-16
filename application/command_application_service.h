@@ -18,6 +18,7 @@
 #include "graphic_facade.h"
 #include "ocr_facade.h"
 #include "ofd_facade.h"
+#include "recognition_facade.h"
 #include "sdk_config.h"
 #include "sdk_json_utils.h"
 #include "sdk_provider_bundle.h"
@@ -103,6 +104,10 @@ private:
     Json HandleImageProcessPage(const std::string& connection_id, const Request& request);
     Json HandleImageApplyColorMode(const std::string& connection_id, const Request& request);
     Json HandleOcrRecognize(const std::string& connection_id, const Request& request);
+    Json HandleOcrGet(const std::string& connection_id, const Request& request);
+    Json HandleOcrCancel(const std::string& connection_id, const Request& request);
+    Json HandleOcrExtractText(const std::string& connection_id, const Request& request);
+    Json HandleBarcodeDetect(const std::string& connection_id, const Request& request);
     Json HandleFileConvert(const std::string& connection_id, const Request& request);
 
     AuthorizationService::SessionResult RequireCapability(const std::string& connection_id,
@@ -133,6 +138,7 @@ private:
     GraphicFacade graphic_facade_;
     OcrFacade ocr_facade_;
     OfdFacade ofd_facade_;
+    RecognitionFacade recognition_facade_;
     CaptureTaskService capture_task_service_;
     StatusSupplier status_supplier_;
     VideoFrameSink video_frame_sink_;

@@ -75,6 +75,7 @@ set(SDK_OPEN_RUNTIME_SRCS
     facade/graphic_facade.cpp
     facade/ocr_facade.cpp
     facade/ofd_facade.cpp
+    facade/recognition_facade.cpp
 )
 
 add_library(sdk_open_logging STATIC
