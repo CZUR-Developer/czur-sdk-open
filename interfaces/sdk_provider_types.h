@@ -471,16 +471,33 @@ struct SdkBarcodeDetectResult {
 
 struct SdkFileConvertRequest {
     std::string input_upload_id;
+    std::vector<std::string> input_upload_ids;
     std::string input_path;
+    std::vector<std::string> input_paths;
     std::string output_path;
+    std::string output_dir;
     std::string output_format;
+    std::string source_type = "image";
+    std::string source_format;
+    std::string target_type;
+    std::string export_type = "multi-page";
+    std::string pages = "all";
+    int quality = 90;
+    int render_dpi = 144;
+    std::string tiff_color = "color";
+    std::string tiff_compression = "lzw";
 };
 
 struct SdkFileConvertResult {
     int code = ToCode(SdkStatusCode::Ok);
     std::string message = "ok";
-    bool accepted = false;
+    int accepted = 0;
+    int converted = 0;
     std::string output_path;
+    std::vector<std::string> output_paths;
+    std::string source_format;
+    int source_page_count = 0;
+    int selected_page_count = 0;
 };
 
 } // namespace sdk

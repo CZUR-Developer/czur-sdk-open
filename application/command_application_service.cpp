@@ -3,6 +3,7 @@
 
 #include "command_application_service.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <ctime>
@@ -132,6 +133,16 @@ bool IsSupportedImageExtension(const std::string& extension) {
            value == "tif" || value == "tiff" || value == "webp";
 }
 
+bool IsSupportedUploadExtension(const std::string& extension) {
+    std::string value = NormalizeLower(extension);
+    if (value == "jpeg") {
+        value = "jpg";
+    } else if (value == "tif") {
+        value = "tiff";
+    }
+    return IsSupportedImageExtension(value) || value == "pdf" || value == "ofd";
+}
+
 std::string ContentTypeForImageExtension(const std::string& extension) {
     const std::string value = NormalizeLower(extension);
     if (value == "png") {
@@ -147,6 +158,39 @@ std::string ContentTypeForImageExtension(const std::string& extension) {
         return "image/webp";
     }
     return "image/jpeg";
+}
+
+std::string ContentTypeForUploadExtension(const std::string& extension) {
+    std::string value = NormalizeLower(extension);
+    if (value == "tif") {
+        value = "tiff";
+    } else if (value == "jpeg") {
+        value = "jpg";
+    }
+    if (value == "pdf") {
+        return "application/pdf";
+    }
+    if (value == "ofd") {
+        return "application/vnd.ofd";
+    }
+    return ContentTypeForImageExtension(value);
+}
+
+std::string UploadExtensionForContentType(const std::string& content_type, const std::string& filename) {
+    const std::string type = NormalizeLower(content_type);
+    std::string extension = NormalizeLower(ExtensionFromFilename(filename));
+    if (extension == "jpeg") {
+        extension = "jpg";
+    } else if (extension == "tif") {
+        extension = "tiff";
+    }
+    if (type.find("pdf") != std::string::npos || extension == "pdf") {
+        return "pdf";
+    }
+    if (type.find("ofd") != std::string::npos || extension == "ofd") {
+        return "ofd";
+    }
+    return ImageExtensionForContentType(content_type, filename);
 }
 
 std::string ContentTypeForOutputFormat(const std::string& format) {
@@ -555,6 +599,129 @@ bool IsGraphicConvertFormat(const std::string& format) {
     return value == "jpg" || value == "png" || value == "tiff";
 }
 
+bool IsFileConvertFormat(const std::string& format) {
+    const std::string value = NormalizeImageFormat(format);
+    return value == "jpg" || value == "png" || value == "tiff" || value == "pdf" || value == "ofd";
+}
+
+bool IsFileConvertDocumentSourceFormat(const std::string& format) {
+    const std::string value = NormalizeImageFormat(format);
+    return value == "pdf" || value == "ofd" || value == "tiff";
+}
+
+bool IsFileConvertSourceType(const std::string& source_type) {
+    const std::string value = NormalizeImageFormat(source_type);
+    return value == "image" || value == "images" || value == "base64" ||
+           value == "pdf" || value == "ofd" || value == "tiff";
+}
+
+bool IsFileConvertImageSourceType(const std::string& source_type) {
+    const std::string value = NormalizeImageFormat(source_type);
+    return value == "image" || value == "images" || value == "base64";
+}
+
+std::string ExtensionForFileConvertFormat(const std::string& format) {
+    const std::string value = NormalizeImageFormat(format);
+    if (value == "jpg") {
+        return "jpg";
+    }
+    if (value == "tiff") {
+        return "tiff";
+    }
+    return value;
+}
+
+std::string ContentTypeForFileConvertFormat(const std::string& format) {
+    const std::string value = NormalizeImageFormat(format);
+    if (value == "pdf") {
+        return "application/pdf";
+    }
+    if (value == "ofd") {
+        return "application/vnd.ofd";
+    }
+    return ContentTypeForImageExtension(value);
+}
+
+std::string NormalizeExportType(std::string value) {
+    value = NormalizeLower(value);
+    if (value == "single_page") {
+        return "single-page";
+    }
+    if (value == "multi_page") {
+        return "multi-page";
+    }
+    return value;
+}
+
+std::string DefaultExportTypeForFileConvert(const std::string& output_format) {
+    const std::string value = NormalizeImageFormat(output_format);
+    if (value == "jpg" || value == "png") {
+        return "single-page";
+    }
+    return "multi-page";
+}
+
+std::string DataUrlImageExtension(const std::string& value) {
+    const std::string lower = NormalizeLower(value.substr(0, std::min<std::size_t>(value.size(), 64)));
+    if (lower.find("data:image/png") == 0) {
+        return "png";
+    }
+    if (lower.find("data:image/tiff") == 0 || lower.find("data:image/tif") == 0) {
+        return "tiff";
+    }
+    if (lower.find("data:image/bmp") == 0) {
+        return "bmp";
+    }
+    if (lower.find("data:image/webp") == 0) {
+        return "webp";
+    }
+    return "jpg";
+}
+
+bool DecodeBase64ImagePayload(std::string value, std::string* decoded) {
+    if (decoded == NULL) {
+        return false;
+    }
+    const std::string::size_type comma_pos = value.find(',');
+    if (value.find("data:") == 0 && comma_pos != std::string::npos) {
+        value = value.substr(comma_pos + 1);
+    }
+
+    std::string compact;
+    compact.reserve(value.size());
+    for (std::string::const_iterator it = value.begin(); it != value.end(); ++it) {
+        if (!std::isspace(static_cast<unsigned char>(*it))) {
+            compact.push_back(*it);
+        }
+    }
+
+    const std::string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::vector<int> table(256, -1);
+    for (std::size_t i = 0; i < alphabet.size(); ++i) {
+        table[static_cast<unsigned char>(alphabet[i])] = static_cast<int>(i);
+    }
+
+    int value_accumulator = 0;
+    int bit_count = -8;
+    decoded->clear();
+    for (std::string::const_iterator it = compact.begin(); it != compact.end(); ++it) {
+        const unsigned char ch = static_cast<unsigned char>(*it);
+        if (ch == '=') {
+            break;
+        }
+        if (table[ch] == -1) {
+            return false;
+        }
+        value_accumulator = (value_accumulator << 6) + table[ch];
+        bit_count += 6;
+        if (bit_count >= 0) {
+            decoded->push_back(static_cast<char>((value_accumulator >> bit_count) & 0xFF));
+            bit_count -= 8;
+        }
+    }
+    return !decoded->empty();
+}
+
 std::string OutputPathForIndexedAsset(const std::string& output_dir,
                                       const std::string& output_path,
                                       const std::string& prefix,
@@ -833,7 +1000,11 @@ CommandApplicationService::ImageUploadResult CommandApplicationService::UploadIm
         result.message = session_result.message;
         return result;
     }
-    if (!IsOkStatusCode(authorization_service_.RequireCapability(session_result.connection_id, "image.process").code)) {
+    const bool can_upload_for_image =
+        IsOkStatusCode(authorization_service_.RequireCapability(session_result.connection_id, "image.process").code);
+    const bool can_upload_for_file =
+        IsOkStatusCode(authorization_service_.RequireCapability(session_result.connection_id, "file.convert").code);
+    if (!can_upload_for_image && !can_upload_for_file) {
         result.code = ToCode(SdkStatusCode::CapabilityNotAllowed);
         result.message = "capability not allowed";
         return result;
@@ -841,18 +1012,27 @@ CommandApplicationService::ImageUploadResult CommandApplicationService::UploadIm
     const std::size_t max_upload_bytes = 50U * 1024U * 1024U;
     if (content.empty() || content.size() > max_upload_bytes) {
         result.code = ToCode(SdkStatusCode::InvalidParams);
-        result.message = "image upload is empty or too large";
+        result.message = "uploaded file is empty or too large";
         return result;
     }
     const std::string normalized_type = NormalizeLower(content_type);
-    if (!normalized_type.empty() && normalized_type.find("image/") != 0) {
+    const std::string extension_from_name = NormalizeLower(ExtensionFromFilename(filename));
+    const bool has_supported_typed_content =
+        normalized_type.find("image/") == 0 ||
+        normalized_type.find("pdf") != std::string::npos ||
+        normalized_type.find("ofd") != std::string::npos;
+    const bool is_supported_content_type =
+        normalized_type.empty() ||
+        has_supported_typed_content ||
+        normalized_type == "application/octet-stream";
+    if (!is_supported_content_type) {
         result.code = ToCode(SdkStatusCode::InvalidParams);
-        result.message = "uploaded file is not an image";
+        result.message = "uploaded file must be an image, PDF, OFD, or TIFF";
         return result;
     }
-    if (normalized_type.empty() && !IsSupportedImageExtension(ExtensionFromFilename(filename))) {
+    if (extension_from_name.empty() ? !has_supported_typed_content : !IsSupportedUploadExtension(extension_from_name)) {
         result.code = ToCode(SdkStatusCode::InvalidParams);
-        result.message = "uploaded file is not an image";
+        result.message = "uploaded file must be an image, PDF, OFD, or TIFF";
         return result;
     }
 
@@ -863,11 +1043,11 @@ CommandApplicationService::ImageUploadResult CommandApplicationService::UploadIm
         result.message = "failed to create image upload directory";
         return result;
     }
-    const std::string extension = ImageExtensionForContentType(content_type, filename);
+    const std::string extension = UploadExtensionForContentType(content_type, filename);
     const std::string output_path = JoinLocalPath(asset_dir, "original." + extension);
     if (!WriteBinaryFile(output_path, content)) {
         result.code = ToCode(SdkStatusCode::InternalError);
-        result.message = "failed to write uploaded image";
+        result.message = "failed to write uploaded file";
         return result;
     }
 
@@ -875,7 +1055,7 @@ CommandApplicationService::ImageUploadResult CommandApplicationService::UploadIm
     asset.asset_id = "asset-original";
     asset.kind = "original";
     asset.path = output_path;
-    asset.content_type = content_type.empty() ? ContentTypeForImageExtension(extension) : content_type;
+    asset.content_type = content_type.empty() || content_type == "application/octet-stream" ? ContentTypeForUploadExtension(extension) : content_type;
     asset.size = FileSize(output_path);
     asset = AttachImageAssetUrls(task_id, asset);
     RegisterImageAsset(session_result.connection_id, task_id, asset);
@@ -2096,48 +2276,222 @@ Json CommandApplicationService::HandleFileConvert(const std::string& connection_
     }
 
     SdkFileConvertRequest convert_request;
+    bool export_type_set = false;
+    const Json source_json = GetOptionalObjectField(request.params, "source");
+    const Json target_json = GetOptionalObjectField(request.params, "target");
+    const Json options_json = GetOptionalObjectField(request.params, "options");
+
     convert_request.input_upload_id = GetOptionalStringField(request.params, "input_upload_id");
+    convert_request.input_upload_ids = GetOptionalStringArrayField(request.params, "input_upload_ids");
     convert_request.input_path = GetOptionalStringField(request.params, "input_path");
+    convert_request.input_paths = GetOptionalStringArrayField(request.params, "input_paths");
     convert_request.output_path = GetOptionalStringField(request.params, "output_path");
+    convert_request.output_dir = GetOptionalStringAnyField(request.params, {"output_dir", "target_dir"}, "");
     convert_request.output_format = NormalizeImageFormat(GetOptionalStringField(request.params, "output_format"));
+    const std::string flat_export_type = GetOptionalStringAnyField(request.params, {"export_type", "exportType"}, "");
+    if (!flat_export_type.empty()) {
+        convert_request.export_type = NormalizeExportType(flat_export_type);
+        export_type_set = true;
+    }
+    const std::string flat_pages = GetOptionalStringField(request.params, "pages");
+    if (!flat_pages.empty()) {
+        convert_request.pages = flat_pages;
+    }
+
+    if (!source_json.empty()) {
+        convert_request.source_type = NormalizeImageFormat(GetOptionalStringField(source_json, "type"));
+        convert_request.source_format = NormalizeImageFormat(GetOptionalStringField(source_json, "format"));
+        if (!GetOptionalStringField(source_json, "input_upload_id").empty()) {
+            convert_request.input_upload_id = GetOptionalStringField(source_json, "input_upload_id");
+        }
+        const std::vector<std::string> upload_ids = GetOptionalStringArrayField(source_json, "input_upload_ids");
+        if (!upload_ids.empty()) {
+            convert_request.input_upload_ids = upload_ids;
+        }
+        if (!GetOptionalStringField(source_json, "input_path").empty()) {
+            convert_request.input_path = GetOptionalStringField(source_json, "input_path");
+        }
+        const std::vector<std::string> input_paths = GetOptionalStringArrayField(source_json, "input_paths");
+        if (!input_paths.empty()) {
+            convert_request.input_paths = input_paths;
+        }
+        const std::string source_pages = GetOptionalStringField(source_json, "pages");
+        if (!source_pages.empty()) {
+            convert_request.pages = source_pages;
+        }
+    }
+    if (convert_request.source_type.empty()) {
+        convert_request.source_type = "image";
+    }
+
+    if (!target_json.empty()) {
+        convert_request.target_type = NormalizeImageFormat(GetOptionalStringField(target_json, "type"));
+        if (!GetOptionalStringField(target_json, "path").empty()) {
+            convert_request.output_path = GetOptionalStringField(target_json, "path");
+        }
+        if (!GetOptionalStringField(target_json, "dir").empty()) {
+            convert_request.output_dir = GetOptionalStringField(target_json, "dir");
+        }
+    }
+    if (!options_json.empty()) {
+        const std::string export_type = GetOptionalStringField(options_json, "export_type");
+        if (!export_type.empty()) {
+            convert_request.export_type = NormalizeExportType(export_type);
+            export_type_set = true;
+        }
+        convert_request.quality = GetOptionalIntField(options_json, "quality", convert_request.quality);
+        convert_request.render_dpi = GetOptionalIntField(options_json, "render_dpi", convert_request.render_dpi);
+        const std::string option_pages = GetOptionalStringField(options_json, "pages");
+        if (!option_pages.empty()) {
+            convert_request.pages = option_pages;
+        }
+        const std::string tiff_color = GetOptionalStringField(options_json, "tiff_color");
+        if (!tiff_color.empty()) {
+            convert_request.tiff_color = NormalizeLower(tiff_color);
+        }
+        const std::string tiff_compression = GetOptionalStringField(options_json, "tiff_compression");
+        if (!tiff_compression.empty()) {
+            convert_request.tiff_compression = NormalizeLower(tiff_compression);
+        }
+    }
+
+    if (convert_request.output_format.empty() && !convert_request.target_type.empty()) {
+        convert_request.output_format = convert_request.target_type;
+    }
     if (convert_request.output_format.empty() && !convert_request.output_path.empty()) {
         convert_request.output_format = NormalizeImageFormat(InferOutputFormatFromPath(convert_request.output_path));
     }
+    convert_request.target_type = convert_request.output_format;
+
+    if (!export_type_set) {
+        convert_request.export_type = DefaultExportTypeForFileConvert(convert_request.output_format);
+    }
+    if (convert_request.export_type != "multi-page" && convert_request.export_type != "single-page") {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "export_type must be multi-page or single-page");
+    }
+    if (convert_request.output_format.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "target.type, output_format, or output_path required");
+    }
+    if (!IsFileConvertFormat(convert_request.output_format)) {
+        return BuildWsResponse(request.request_id,
+                               SdkStatusCode::UnsupportedMethod,
+                               "unsupported output format: " + convert_request.output_format);
+    }
 
     std::string image_task_id = convert_request.input_upload_id;
+    if (image_task_id.empty()) {
+        image_task_id = NextImageTaskId();
+    }
     if (!convert_request.input_upload_id.empty()) {
-        AssetAccessResult input_asset = ResolveImageAsset(connection_id, convert_request.input_upload_id, "asset-original");
+        if (std::find(convert_request.input_upload_ids.begin(),
+                      convert_request.input_upload_ids.end(),
+                      convert_request.input_upload_id) == convert_request.input_upload_ids.end()) {
+            convert_request.input_upload_ids.insert(convert_request.input_upload_ids.begin(), convert_request.input_upload_id);
+        }
+    }
+    for (std::vector<std::string>::const_iterator it = convert_request.input_upload_ids.begin();
+         it != convert_request.input_upload_ids.end();
+         ++it) {
+        AssetAccessResult input_asset = ResolveImageAsset(connection_id, *it, "asset-original");
         if (!IsOkStatusCode(input_asset.code)) {
             return BuildWsResponse(request.request_id, input_asset.code, input_asset.message);
         }
-        convert_request.input_path = input_asset.asset.path;
-    }
-    if (convert_request.input_path.empty()) {
-        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "input_path or input_upload_id required");
+        convert_request.input_paths.push_back(input_asset.asset.path);
     }
 
-    const std::string input_extension = NormalizeImageFormat(ExtensionFromFilename(convert_request.input_path));
-    if (IsSupportedImageExtension(input_extension) && convert_request.output_format.empty()) {
-        return BuildWsResponse(request.request_id,
-                               SdkStatusCode::InvalidParams,
-                               "file.convert image conversion requires output_format or output_path");
-    }
-    if (IsSupportedImageExtension(input_extension) && !IsGraphicConvertFormat(convert_request.output_format)) {
-        return BuildWsResponse(request.request_id,
-                               SdkStatusCode::UnsupportedMethod,
-                               "unsupported image output format: " + convert_request.output_format);
-    }
-    if (IsSupportedImageExtension(input_extension)) {
-        if (image_task_id.empty()) {
-            image_task_id = NextImageTaskId();
-        }
-        if (convert_request.output_path.empty()) {
-            const std::string output_dir = GetSdkOpenTaskAssetDir("file", image_task_id, "assets");
-            if (!EnsureDirectoryRecursive(output_dir)) {
-                return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "failed to create file convert output directory");
+    if (!source_json.empty() || request.params.find("base64") != request.params.end()) {
+        const std::string base64_payload =
+            !GetOptionalStringField(source_json, "base64").empty()
+                ? GetOptionalStringField(source_json, "base64")
+                : GetOptionalStringField(request.params, "base64");
+        if (!base64_payload.empty()) {
+            std::string decoded;
+            if (!DecodeBase64ImagePayload(base64_payload, &decoded)) {
+                return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "invalid base64 image");
             }
+            const std::string input_dir = GetSdkOpenTaskAssetDir("file", image_task_id, "input");
+            if (!EnsureDirectoryRecursive(input_dir)) {
+                return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "failed to create file convert input directory");
+            }
+            const std::string base64_input_path = JoinLocalPath(input_dir, "base64." + DataUrlImageExtension(base64_payload));
+            if (!WriteBinaryFile(base64_input_path, decoded)) {
+                return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "failed to write base64 image");
+            }
+            convert_request.source_type = "base64";
+            convert_request.input_paths.push_back(base64_input_path);
+        }
+    }
+
+    if (!convert_request.input_path.empty() &&
+        std::find(convert_request.input_paths.begin(), convert_request.input_paths.end(), convert_request.input_path) == convert_request.input_paths.end()) {
+        convert_request.input_paths.insert(convert_request.input_paths.begin(), convert_request.input_path);
+    }
+    if (convert_request.input_paths.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "input_path, input_paths, input_upload_id, input_upload_ids, or source.base64 required");
+    }
+    convert_request.input_path = convert_request.input_paths.front();
+
+    if (convert_request.source_format.empty()) {
+        convert_request.source_format = IsFileConvertDocumentSourceFormat(convert_request.source_type)
+                                            ? convert_request.source_type
+                                            : NormalizeImageFormat(ExtensionFromFilename(convert_request.input_path));
+    }
+    if (IsFileConvertDocumentSourceFormat(convert_request.source_format) &&
+        IsFileConvertImageSourceType(convert_request.source_type) &&
+        convert_request.input_upload_ids.empty() &&
+        convert_request.input_upload_id.empty()) {
+        convert_request.source_type = convert_request.source_format;
+    }
+
+    if (!IsFileConvertSourceType(convert_request.source_type)) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "source.type must be image, images, base64, pdf, ofd, or tiff");
+    }
+    if (IsFileConvertDocumentSourceFormat(convert_request.source_type) && convert_request.input_paths.size() > 1) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "pdf, ofd, and tiff document sources accept one input file");
+    }
+
+    for (std::vector<std::string>::const_iterator it = convert_request.input_paths.begin();
+         it != convert_request.input_paths.end();
+         ++it) {
+        if (!FileExists(*it)) {
+            return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "input file does not exist: " + *it);
+        }
+        const std::string input_extension = NormalizeImageFormat(ExtensionFromFilename(*it));
+        if (IsFileConvertImageSourceType(convert_request.source_type)) {
+            if (!IsSupportedImageExtension(input_extension)) {
+                return BuildWsResponse(request.request_id, SdkStatusCode::UnsupportedMethod, "unsupported image input format: " + input_extension);
+            }
+        } else if (input_extension != convert_request.source_type) {
+            return BuildWsResponse(request.request_id,
+                                   SdkStatusCode::UnsupportedMethod,
+                                   "source.type does not match input extension: " + input_extension);
+        }
+    }
+    if ((convert_request.output_format == "jpg" || convert_request.output_format == "png") &&
+        convert_request.export_type == "multi-page") {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "jpg and png targets only support export_type=single-page");
+    }
+    if (convert_request.output_dir.empty()) {
+        convert_request.output_dir = GetSdkOpenTaskAssetDir("file", image_task_id, "assets");
+    }
+    if (!EnsureDirectoryRecursive(convert_request.output_dir)) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "failed to create file convert output directory");
+    }
+    if (convert_request.output_path.empty() && convert_request.export_type == "multi-page") {
+        convert_request.output_path =
+            JoinLocalPath(convert_request.output_dir,
+                          "converted." + ExtensionForFileConvertFormat(convert_request.output_format));
+    }
+
+    const bool use_graphic_convert =
+        IsFileConvertImageSourceType(convert_request.source_type) &&
+        convert_request.input_paths.size() == 1 &&
+        IsGraphicConvertFormat(convert_request.output_format) &&
+        convert_request.export_type == "single-page";
+    if (use_graphic_convert) {
+        if (convert_request.output_path.empty()) {
             convert_request.output_path =
-                JoinLocalPath(output_dir, "converted." + ExtensionForImageFormat(convert_request.output_format));
+                JoinLocalPath(convert_request.output_dir, "converted." + ExtensionForImageFormat(convert_request.output_format));
         }
 
         SdkFormatConvertRequest format_request;
@@ -2164,11 +2518,23 @@ Json CommandApplicationService::HandleFileConvert(const std::string& connection_
                                "ok",
                                Json{{"task_id", image_task_id},
                                     {"input_upload_id", convert_request.input_upload_id},
+                                    {"input_upload_ids", convert_request.input_upload_ids},
                                     {"input_path", convert_request.input_path},
+                                    {"input_paths", convert_request.input_paths},
                                     {"output_path", final_path},
+                                    {"output_paths", Json::array({final_path})},
                                     {"output_format", convert_request.output_format},
-                                    {"converted", result.converted},
+                                    {"export_type", convert_request.export_type},
+                                    {"source_format", convert_request.source_format},
+                                    {"source_page_count", 1},
+                                    {"selected_page_count", 1},
+                                    {"accepted", 1},
+                                    {"converted", result.converted ? 1 : 0},
                                     {"asset", BuildAssetJson(asset)},
+                                    {"assets", Json::array({BuildAssetJson(asset)})},
+                                    {"outputs", Json::array({Json{{"path", final_path},
+                                                                  {"format", convert_request.output_format},
+                                                                  {"asset", BuildAssetJson(asset)}}})},
                                     {"provider", providers_.graphic_provider ? providers_.graphic_provider->ProviderName() : ""}});
     }
 
@@ -2176,13 +2542,56 @@ Json CommandApplicationService::HandleFileConvert(const std::string& connection_
     if (!IsOkStatusCode(result.code)) {
         return BuildWsResponse(request.request_id, result.code, result.message);
     }
+    std::vector<std::string> output_paths = result.output_paths;
+    if (output_paths.empty() && !result.output_path.empty()) {
+        output_paths.push_back(result.output_path);
+    }
+    if (output_paths.empty() && !convert_request.output_path.empty()) {
+        output_paths.push_back(convert_request.output_path);
+    }
+    Json output_paths_json = Json::array();
+    Json assets_json = Json::array();
+    Json outputs_json = Json::array();
+    for (std::size_t i = 0; i < output_paths.size(); ++i) {
+        output_paths_json.push_back(output_paths[i]);
+        SdkCaptureAsset asset;
+        std::ostringstream asset_id;
+        asset_id << "asset-converted";
+        if (output_paths.size() > 1) {
+            asset_id << "-" << std::setw(3) << std::setfill('0') << (i + 1);
+        }
+        asset.asset_id = asset_id.str();
+        asset.kind = "converted";
+        asset.path = output_paths[i];
+        asset.content_type = ContentTypeForFileConvertFormat(convert_request.output_format);
+        asset.size = FileSize(output_paths[i]);
+        asset = AttachImageAssetUrls(image_task_id, asset);
+        RegisterImageAsset(connection_id, image_task_id, asset);
+        const Json asset_json = BuildAssetJson(asset);
+        assets_json.push_back(asset_json);
+        outputs_json.push_back(Json{{"path", output_paths[i]},
+                                    {"format", convert_request.output_format},
+                                    {"asset", asset_json}});
+    }
+    const std::string final_output_path =
+        !result.output_path.empty() ? result.output_path : (!output_paths.empty() ? output_paths.front() : convert_request.output_path);
     return BuildWsResponse(request.request_id,
                            SdkStatusCode::Ok,
                            "ok",
                            Json{{"input_path", convert_request.input_path},
-                                {"output_path", result.output_path.empty() ? convert_request.output_path : result.output_path},
+                                {"input_paths", convert_request.input_paths},
+                                {"output_path", final_output_path},
+                                {"output_paths", output_paths_json},
                                 {"output_format", convert_request.output_format},
+                                {"export_type", convert_request.export_type},
+                                {"source_format", result.source_format.empty() ? convert_request.source_format : result.source_format},
+                                {"source_page_count", result.source_page_count},
+                                {"selected_page_count", result.selected_page_count},
                                 {"accepted", result.accepted},
+                                {"converted", result.converted},
+                                {"asset", assets_json.empty() ? Json::object() : assets_json.front()},
+                                {"assets", assets_json},
+                                {"outputs", outputs_json},
                                 {"provider", providers_.ofd_provider ? providers_.ofd_provider->ProviderName() : ""}});
 }
 

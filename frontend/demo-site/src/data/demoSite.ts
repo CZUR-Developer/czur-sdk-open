@@ -868,8 +868,8 @@ export const sharedJsonSnippets: Record<string, JsonSnippet> = {
   file: {
     id: 'file-json',
     title: 'file.convert result',
-    caption: 'Format conversion is separated from paper processing and color mode.',
-    payload: `{"output_path":"/tmp/sdk-demo/converted.png","output_format":"png","asset":{"asset_id":"asset-converted","content_type":"image/png"}}`,
+    caption: 'Format and document conversion are separated from paper processing and color mode.',
+    payload: `{"output_path":"/tmp/sdk-demo/converted.pdf","output_paths":["/tmp/sdk-demo/converted.pdf"],"output_format":"pdf","asset":{"asset_id":"asset-converted","content_type":"application/pdf"}}`,
   },
   sane: {
     id: 'sane-json',

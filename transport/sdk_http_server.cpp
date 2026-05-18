@@ -122,7 +122,7 @@ bool SdkHttpServer::ConfigureRoutes() {
         res.set_content(DumpJson(body), kJsonContentType);
     });
 
-    server_->Post("/api/uploads/images", [this](const httplib::Request& req, httplib::Response& res) {
+    server_->Post(R"(/api/uploads/(images|files))", [this](const httplib::Request& req, httplib::Response& res) {
         SetCorsHeaders(&res);
         if (!image_upload_handler_) {
             res.status = 404;

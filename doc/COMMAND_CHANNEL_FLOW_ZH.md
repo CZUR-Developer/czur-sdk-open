@@ -239,7 +239,7 @@ ws://127.0.0.1:17090
 
 - `image.process_page`：只执行页面/纸张处理，并保持源图片格式。
 - `image.apply_color_mode`：只执行色彩模式处理，并保持源图片格式。
-- `file.convert`：执行图片格式转换，例如 JPG 转 PNG 或 TIFF。
+- `file.convert`：执行图片输入的文件转换，包括 JPG/PNG/TIFF 图片格式转换，以及图片生成 PDF/OFD/TIFF 文档。
 
 兼容 `image.process` 示例：
 
@@ -293,7 +293,7 @@ ws://127.0.0.1:17090
 }
 ```
 
-图片格式转换归属 `file.convert`：
+图片和文档转换归属 `file.convert`。旧版 flat 参数继续兼容：
 
 ```json
 {
@@ -306,7 +306,71 @@ ws://127.0.0.1:17090
 }
 ```
 
-Demo 站点通过资源服务的 `POST /api/uploads/images` 上传浏览器选择的本地图片，默认地址为 `http://127.0.0.1:17082`。请求使用 multipart form-data，字段名为 `file`，并携带 `Authorization: Bearer <session_token>`。响应会返回 `upload_id` 和原图 asset。图像处理类方法既可以使用 `input_upload_id`，也继续兼容已有的本地 `input_path + output_path` 模式。
+推荐使用结构化参数传入单张或多张上传图片，也可以传入一个已上传的 PDF/OFD/TIFF 文档：
+
+```json
+{
+  "request_id": "req-convert-002",
+  "method": "file.convert",
+  "params": {
+    "source": {
+      "type": "images",
+      "input_upload_ids": ["img-1760000000-1", "img-1760000000-2"]
+    },
+    "target": {
+      "type": "pdf",
+      "path": "/tmp/sdk-demo/converted.pdf"
+    },
+    "options": {
+      "export_type": "multi-page",
+      "quality": 90,
+      "tiff_color": "color",
+      "tiff_compression": "lzw"
+    }
+  }
+}
+```
+
+目标格式支持 `jpg`、`jpeg`、`png`、`tiff`、`pdf`、`ofd`。JPG/PNG 目标是逐页/逐图输出；PDF/OFD/TIFF 目标既可以多页合一，也可以逐页/逐图输出。`export_type: "single-page"` 会把输出写到 `target.dir`，响应返回 `output_paths`。
+
+`file.convert` 会把输入统一视为有序页集合。图片输入是一图一页；PDF/OFD/TIFF 输入可以通过 `source.pages` 选择页码，页码从 1 开始，支持 `"all"` 或 `"1,3-5"`。
+
+| 输入 | 目标 | `export_type` | 行为 |
+| --- | --- | --- | --- |
+| 单张或多张图片 | `pdf` / `ofd` / `tiff` | `multi-page` | 合成为一个多页文件 |
+| 单张或多张图片 | `jpg` / `png` / `tiff` / `pdf` / `ofd` | `single-page` | 每张图片输出一个文件 |
+| PDF/OFD/TIFF 文档 | `jpg` / `png` / `tiff` | `single-page` | 每个选中页渲染为一个图片/TIFF 文件 |
+| PDF/OFD/TIFF 文档 | `pdf` / `ofd` / `tiff` | `single-page` | 每个选中页输出一个单页文档 |
+| PDF/OFD/TIFF 文档 | `pdf` / `ofd` / `tiff` | `multi-page` | 选中页合成为一个目标文档 |
+
+JPG/PNG 目标只支持 `export_type: "single-page"`。PDF/OFD/TIFF 文档来源本轮每次请求只接受一个输入文档。跨文档格式转换按页面视觉结果转换，不承诺保留文本、矢量和语义结构。
+
+文档拆分页示例：
+
+```json
+{
+  "request_id": "req-convert-003",
+  "method": "file.convert",
+  "params": {
+    "source": {
+      "type": "pdf",
+      "input_upload_id": "img-1760000000-3",
+      "pages": "1,3-5"
+    },
+    "target": {
+      "type": "png",
+      "dir": "/tmp/sdk-demo/pages"
+    },
+    "options": {
+      "export_type": "single-page",
+      "quality": 90,
+      "render_dpi": 144
+    }
+  }
+}
+```
+
+Demo 站点通过资源服务的 `POST /api/uploads/files` 上传浏览器选择的本地文件，默认地址为 `http://127.0.0.1:17082`。请求使用 multipart form-data，字段名为 `file`，并携带 `Authorization: Bearer <session_token>`。响应会返回 `upload_id` 和原始 asset。图像处理类方法可以使用图片 upload id；`file.convert` 可以使用图片、PDF、OFD 或 TIFF 的 upload id。
 
 `selected_area` 模式下，前端把换算后的区域点传入 `params.selected_area.points`，并通过 `params.selected_area.source.width/height` 传入坐标基准尺寸。后端会再按实际输入图片尺寸缩放坐标后裁剪。响应里 `output_path` 指向第一页，`outputs[]` 返回单页或多页结果。
 

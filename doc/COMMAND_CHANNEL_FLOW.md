@@ -239,7 +239,7 @@ Standalone `image.process` curved-book processing uses edge-based flattening onl
 
 - `image.process_page`: runs only page/paper processing and keeps the source image format.
 - `image.apply_color_mode`: runs only color mode processing and keeps the source image format.
-- `file.convert`: performs image format conversion, for example JPG to PNG or TIFF.
+- `file.convert`: performs file conversion for image inputs, including JPG/PNG/TIFF image format conversion and image-to-PDF/OFD/TIFF document generation.
 
 Compatibility `image.process` example:
 
@@ -293,7 +293,7 @@ Split color-mode example:
 }
 ```
 
-Image format conversion belongs to `file.convert`:
+Image and document conversion belongs to `file.convert`. The flat legacy shape is still supported:
 
 ```json
 {
@@ -306,7 +306,71 @@ Image format conversion belongs to `file.convert`:
 }
 ```
 
-The demo site uploads local browser-selected images with `POST /api/uploads/images` on the asset service (`http://127.0.0.1:17082` by default). The request must be multipart form-data with field `file` and `Authorization: Bearer <session_token>`. The response returns `upload_id` and an original image asset. Image methods can use either `input_upload_id` or the existing local `input_path + output_path` mode.
+The recommended structured shape accepts one or more uploaded images, or one uploaded PDF/OFD/TIFF document:
+
+```json
+{
+  "request_id": "req-convert-002",
+  "method": "file.convert",
+  "params": {
+    "source": {
+      "type": "images",
+      "input_upload_ids": ["img-1760000000-1", "img-1760000000-2"]
+    },
+    "target": {
+      "type": "pdf",
+      "path": "/tmp/sdk-demo/converted.pdf"
+    },
+    "options": {
+      "export_type": "multi-page",
+      "quality": 90,
+      "tiff_color": "color",
+      "tiff_compression": "lzw"
+    }
+  }
+}
+```
+
+Supported targets are `jpg`, `jpeg`, `png`, `tiff`, `pdf`, and `ofd`. JPG/PNG targets are per-page/per-image outputs. PDF/OFD/TIFF targets can be either one multi-page file or one file per page/image. `export_type: "single-page"` writes outputs to `target.dir` and returns `output_paths`.
+
+`file.convert` treats every source as an ordered page set. Image inputs contribute one page per image. PDF/OFD/TIFF inputs can be split or converted by page with `source.pages`, using a 1-based expression such as `"all"` or `"1,3-5"`.
+
+| Source | Target | `export_type` | Behavior |
+| --- | --- | --- | --- |
+| one or more images | `pdf` / `ofd` / `tiff` | `multi-page` | merge images into one multi-page file |
+| one or more images | `jpg` / `png` / `tiff` / `pdf` / `ofd` | `single-page` | write one output file per image |
+| PDF/OFD/TIFF document | `jpg` / `png` / `tiff` | `single-page` | render each selected page to one image/TIFF file |
+| PDF/OFD/TIFF document | `pdf` / `ofd` / `tiff` | `single-page` | write one single-page document per selected page |
+| PDF/OFD/TIFF document | `pdf` / `ofd` / `tiff` | `multi-page` | merge selected pages into one output document |
+
+JPG and PNG targets only support `export_type: "single-page"`. PDF/OFD/TIFF document sources currently accept one input document per request. Cross-format document conversion is page-visual conversion; it does not preserve text or vector semantics.
+
+Document split example:
+
+```json
+{
+  "request_id": "req-convert-003",
+  "method": "file.convert",
+  "params": {
+    "source": {
+      "type": "pdf",
+      "input_upload_id": "img-1760000000-3",
+      "pages": "1,3-5"
+    },
+    "target": {
+      "type": "png",
+      "dir": "/tmp/sdk-demo/pages"
+    },
+    "options": {
+      "export_type": "single-page",
+      "quality": 90,
+      "render_dpi": 144
+    }
+  }
+}
+```
+
+The demo site uploads local browser-selected files with `POST /api/uploads/files` on the asset service (`http://127.0.0.1:17082` by default). The request must be multipart form-data with field `file` and `Authorization: Bearer <session_token>`. The response returns `upload_id` and an original asset. Image methods can use image upload IDs; `file.convert` can use image, PDF, OFD, or TIFF upload IDs.
 
 For `selected_area`, pass frontend-scaled points in `params.selected_area.points` and the coordinate basis in `params.selected_area.source.width/height`. The backend scales those points to the real input image size before cropping. The response returns `output_path` for the first page and `outputs[]` for single or multi-page results.
 
