@@ -358,7 +358,7 @@ function handleCommandEvent(event: CommandEvent<Record<string, unknown>>): void 
   if (!event.event) {
     return;
   }
-  if (/^(capture|device|video|stream)\./.test(event.event)) {
+  if (/^(capture|device|video|stream|sane)\./.test(event.event)) {
     recordRuntimeEvent({
       title: event.event,
       detail: event.message || event.event,

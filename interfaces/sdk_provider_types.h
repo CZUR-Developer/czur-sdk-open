@@ -469,6 +469,256 @@ struct SdkBarcodeDetectResult {
     std::vector<SdkBarcodeResult> barcodes;
 };
 
+struct SdkSaneStatusResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool available = false;
+    std::string platform;
+    std::vector<std::string> supported_platforms;
+    int sane_major = 0;
+    int sane_minor = 0;
+    std::string sane_version;
+    std::string reason;
+};
+
+struct SdkSaneDevice {
+    std::string device_id;
+    std::string device_name;
+    std::string vendor;
+    std::string model;
+    std::string type;
+    std::string backend;
+    std::string status = "online";
+    std::string discovery_source;
+    bool openable = true;
+};
+
+struct SdkSaneListRequest {
+    bool refresh = true;
+    bool include_detected = false;
+};
+
+struct SdkSaneListResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    int generation = 0;
+    std::vector<SdkSaneDevice> devices;
+    std::vector<SdkSaneDevice> detected_devices;
+};
+
+struct SdkSaneWatchRequest {
+    std::string connection_id;
+    bool enabled = true;
+};
+
+struct SdkSaneWatchResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool watching = false;
+    int generation = 0;
+};
+
+struct SdkSaneDeviceEvent {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    std::string connection_id;
+    std::string event_name;
+    int generation = 0;
+    std::vector<SdkSaneDevice> devices;
+    std::vector<SdkSaneDevice> detected_devices;
+    std::vector<SdkSaneDevice> added_devices;
+    std::vector<SdkSaneDevice> removed_devices;
+};
+
+using SdkSaneDeviceEventCallback = std::function<void(const SdkSaneDeviceEvent&)>;
+
+struct SdkSaneOpenRequest {
+    std::string device_id;
+    std::string device_name;
+    std::string profile_id;
+    std::vector<std::string> option_keys;
+    std::vector<std::string> option_values_json;
+};
+
+struct SdkSaneOpenResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool opened = false;
+    std::string session_id;
+    SdkSaneDevice device;
+};
+
+struct SdkSaneCloseRequest {
+    std::string session_id;
+};
+
+struct SdkSaneCloseResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool closed = false;
+    bool was_opened = false;
+};
+
+struct SdkSaneOptionConstraint {
+    std::string type = "none";
+    double min = 0.0;
+    double max = 0.0;
+    double quant = 0.0;
+    std::vector<std::string> values_json;
+};
+
+struct SdkSaneOption {
+    int index = -1;
+    std::string name;
+    std::string title;
+    std::string description;
+    std::string group;
+    std::string type;
+    std::string unit;
+    std::string value_json;
+    SdkSaneOptionConstraint constraint;
+    bool readonly = false;
+    bool settable = true;
+    bool automatic = false;
+    bool inactive = false;
+    bool advanced = false;
+    bool requires_reload = false;
+};
+
+struct SdkSaneGetOptionsRequest {
+    std::string session_id;
+};
+
+struct SdkSaneGetOptionsResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    std::vector<SdkSaneOption> options;
+};
+
+struct SdkSaneOptionSetItem {
+    std::string key;
+    int index = -1;
+    std::string value_json;
+};
+
+struct SdkSaneSetOptionsRequest {
+    std::string session_id;
+    std::vector<SdkSaneOptionSetItem> options;
+};
+
+struct SdkSaneOptionSetResultItem {
+    std::string key;
+    int index = -1;
+    std::string status;
+    std::string message;
+    std::string value_json;
+    bool inexact = false;
+    bool requires_reload = false;
+};
+
+struct SdkSaneSetOptionsResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool applied = false;
+    bool requires_reload = false;
+    std::vector<SdkSaneOptionSetResultItem> results;
+};
+
+struct SdkSaneProfile {
+    std::string profile_id;
+    std::string device_key;
+    std::string name;
+    std::vector<SdkSaneOptionSetItem> options;
+    std::string created_at;
+    std::string updated_at;
+};
+
+struct SdkSaneProfileRequest {
+    std::string session_id;
+    std::string device_id;
+    std::string device_name;
+    std::string device_key;
+    std::string profile_id;
+    std::string name;
+    std::vector<SdkSaneOptionSetItem> options;
+};
+
+struct SdkSaneProfileListResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    std::vector<SdkSaneProfile> profiles;
+};
+
+struct SdkSaneProfileResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool applied = false;
+    bool saved = false;
+    bool deleted = false;
+    SdkSaneProfile profile;
+};
+
+struct SdkSaneScanRequest {
+    std::string connection_id;
+    std::string session_id;
+    std::vector<SdkSaneOptionSetItem> options;
+    std::string output_type = "images";
+    std::string output_format = "jpg";
+    std::string output_path;
+    std::string output_dir;
+    std::string export_type = "multi-page";
+};
+
+struct SdkSaneScanTask {
+    std::string task_id;
+    std::string connection_id;
+    std::string session_id;
+    std::string status = "queued";
+    std::string phase = "queued";
+    int progress = 0;
+    int page_count = 0;
+    int current_page = 0;
+    std::string output_type = "images";
+    std::string output_format = "jpg";
+    std::string output_dir;
+    std::string export_type = "multi-page";
+    std::string output_path;
+    std::vector<std::string> output_paths;
+    std::string last_page_path;
+    std::vector<SdkCaptureAsset> assets;
+    std::string message = "queued";
+    std::string error;
+    std::string started_at;
+    std::string updated_at;
+    bool cancel_requested = false;
+};
+
+struct SdkSaneScanResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool accepted = false;
+    std::string task_id;
+    SdkSaneScanTask task;
+};
+
+struct SdkSaneScanTaskEvent {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    std::string connection_id;
+    std::string event_name = "sane.scan_changed";
+    SdkSaneScanTask task;
+};
+
+using SdkSaneScanTaskEventCallback = std::function<void(const SdkSaneScanTaskEvent&)>;
+
+struct SdkSaneScanGetRequest {
+    std::string task_id;
+};
+
+struct SdkSaneScanCancelRequest {
+    std::string task_id;
+};
+
 struct SdkFileConvertRequest {
     std::string input_upload_id;
     std::vector<std::string> input_upload_ids;

@@ -544,6 +544,197 @@ Json BuildBarcodeJson(const SdkBarcodeResult& barcode) {
                 {"points", points}};
 }
 
+Json JsonFromEncodedValue(const std::string& value_json) {
+    if (value_json.empty()) {
+        return nullptr;
+    }
+    try {
+        return Json::parse(value_json);
+    } catch (...) {
+        return value_json;
+    }
+}
+
+std::string EncodeJsonValue(const Json& value) {
+    return value.dump();
+}
+
+Json BuildSaneStatusJson(const SdkSaneStatusResult& result, const std::string& provider) {
+    return Json{{"available", result.available},
+                {"platform", result.platform},
+                {"supported_platforms", result.supported_platforms},
+                {"sane_version", result.sane_version},
+                {"sane_major", result.sane_major},
+                {"sane_minor", result.sane_minor},
+                {"reason", result.reason},
+                {"provider", provider}};
+}
+
+Json BuildSaneDeviceJson(const SdkSaneDevice& device) {
+    return Json{{"device_id", device.device_id},
+                {"device_name", device.device_name},
+                {"vendor", device.vendor},
+                {"model", device.model},
+                {"type", device.type},
+                {"backend", device.backend},
+                {"status", device.status},
+                {"discovery_source", device.discovery_source},
+                {"openable", device.openable}};
+}
+
+Json BuildSaneDevicesJson(const std::vector<SdkSaneDevice>& devices) {
+    Json root = Json::array();
+    for (std::vector<SdkSaneDevice>::const_iterator it = devices.begin(); it != devices.end(); ++it) {
+        root.push_back(BuildSaneDeviceJson(*it));
+    }
+    return root;
+}
+
+Json BuildSaneDeviceEventJson(const SdkSaneDeviceEvent& event) {
+    return Json{{"generation", event.generation},
+                {"devices", BuildSaneDevicesJson(event.devices)},
+                {"detected_devices", BuildSaneDevicesJson(event.detected_devices)},
+                {"detected_count", event.detected_devices.size()},
+                {"added_devices", BuildSaneDevicesJson(event.added_devices)},
+                {"removed_devices", BuildSaneDevicesJson(event.removed_devices)}};
+}
+
+Json BuildSaneOptionConstraintJson(const SdkSaneOptionConstraint& constraint) {
+    Json values = Json::array();
+    for (std::vector<std::string>::const_iterator it = constraint.values_json.begin();
+         it != constraint.values_json.end();
+         ++it) {
+        values.push_back(JsonFromEncodedValue(*it));
+    }
+    return Json{{"type", constraint.type},
+                {"min", constraint.min},
+                {"max", constraint.max},
+                {"quant", constraint.quant},
+                {"values", values}};
+}
+
+Json BuildSaneOptionJson(const SdkSaneOption& option) {
+    return Json{{"index", option.index},
+                {"name", option.name},
+                {"title", option.title},
+                {"description", option.description},
+                {"group", option.group},
+                {"type", option.type},
+                {"unit", option.unit},
+                {"value", JsonFromEncodedValue(option.value_json)},
+                {"constraint", BuildSaneOptionConstraintJson(option.constraint)},
+                {"readonly", option.readonly},
+                {"settable", option.settable},
+                {"automatic", option.automatic},
+                {"inactive", option.inactive},
+                {"advanced", option.advanced},
+                {"requires_reload", option.requires_reload}};
+}
+
+Json BuildSaneOptionSetResultJson(const SdkSaneOptionSetResultItem& item) {
+    return Json{{"key", item.key},
+                {"index", item.index},
+                {"status", item.status},
+                {"message", item.message},
+                {"value", JsonFromEncodedValue(item.value_json)},
+                {"inexact", item.inexact},
+                {"requires_reload", item.requires_reload}};
+}
+
+Json BuildSaneProfileJson(const SdkSaneProfile& profile) {
+    Json options = Json::object();
+    for (std::vector<SdkSaneOptionSetItem>::const_iterator it = profile.options.begin();
+         it != profile.options.end();
+         ++it) {
+        const std::string key = !it->key.empty() ? it->key : std::to_string(it->index);
+        options[key] = JsonFromEncodedValue(it->value_json);
+    }
+    return Json{{"profile_id", profile.profile_id},
+                {"device_key", profile.device_key},
+                {"name", profile.name},
+                {"options", options},
+                {"created_at", profile.created_at},
+                {"updated_at", profile.updated_at}};
+}
+
+Json BuildSaneScanTaskJson(const SdkSaneScanTask& task) {
+    Json output_paths = Json::array();
+    for (std::vector<std::string>::const_iterator it = task.output_paths.begin(); it != task.output_paths.end(); ++it) {
+        output_paths.push_back(*it);
+    }
+    Json assets = Json::array();
+    for (std::vector<SdkCaptureAsset>::const_iterator it = task.assets.begin(); it != task.assets.end(); ++it) {
+        assets.push_back(BuildAssetJson(*it));
+    }
+    return Json{{"task_id", task.task_id},
+                {"connection_id", task.connection_id},
+                {"session_id", task.session_id},
+                {"status", task.status},
+                {"phase", task.phase},
+                {"progress", task.progress},
+                {"page_count", task.page_count},
+                {"current_page", task.current_page},
+                {"output_type", task.output_type},
+                {"output_format", task.output_format},
+                {"output_dir", task.output_dir},
+                {"export_type", task.export_type},
+                {"output_path", task.output_path},
+                {"output_paths", output_paths},
+                {"last_page_path", task.last_page_path},
+                {"assets", assets},
+                {"message", task.message},
+                {"error", task.error},
+                {"started_at", task.started_at},
+                {"updated_at", task.updated_at},
+                {"cancel_requested", task.cancel_requested}};
+}
+
+std::vector<SdkSaneOptionSetItem> ParseSaneOptionSetItems(const Json& value) {
+    std::vector<SdkSaneOptionSetItem> options;
+    if (value.is_object()) {
+        for (Json::const_iterator it = value.begin(); it != value.end(); ++it) {
+            SdkSaneOptionSetItem item;
+            item.key = it.key();
+            item.value_json = EncodeJsonValue(*it);
+            options.push_back(item);
+        }
+    } else if (value.is_array()) {
+        for (Json::const_iterator it = value.begin(); it != value.end(); ++it) {
+            if (!it->is_object()) {
+                continue;
+            }
+            SdkSaneOptionSetItem item;
+            item.key = GetOptionalStringField(*it, "key");
+            if (item.key.empty()) {
+                item.key = GetOptionalStringField(*it, "name");
+            }
+            item.index = GetOptionalIntField(*it, "index", -1);
+            if (it->find("value") != it->end()) {
+                item.value_json = EncodeJsonValue((*it)["value"]);
+            } else if (it->find("value_json") != it->end() && (*it)["value_json"].is_string()) {
+                item.value_json = (*it)["value_json"].get<std::string>();
+            }
+            if (!item.key.empty() || item.index >= 0) {
+                options.push_back(item);
+            }
+        }
+    }
+    return options;
+}
+
+SdkSaneProfileRequest ParseSaneProfileRequest(const Json& params) {
+    SdkSaneProfileRequest request;
+    request.session_id = GetOptionalStringField(params, "session_id");
+    request.device_id = GetOptionalStringField(params, "device_id");
+    request.device_name = GetOptionalStringField(params, "device_name");
+    request.device_key = GetOptionalStringField(params, "device_key");
+    request.profile_id = GetOptionalStringField(params, "profile_id");
+    request.name = GetOptionalStringField(params, "name");
+    const Json options = params.find("options") == params.end() ? Json() : params["options"];
+    request.options = ParseSaneOptionSetItems(options);
+    return request;
+}
+
 CommandApplicationService::MethodDescriptor MakeMethod(const std::string& method,
                                                        bool requires_session,
                                                        const std::string& summary) {
@@ -750,6 +941,7 @@ CommandApplicationService::CommandApplicationService(const SdkConfig& config, co
       ocr_facade_(providers_),
       ofd_facade_(providers_),
       recognition_facade_(providers_),
+      sane_facade_(providers_),
       capture_task_service_(providers_, BuildDefaultAssetBaseUrl(config_)),
       next_image_task_seq_(1) {
     methods_.push_back(MakeMethod("system.ping", false, "SDK heartbeat probe"));
@@ -779,6 +971,21 @@ CommandApplicationService::CommandApplicationService(const SdkConfig& config, co
     methods_.push_back(MakeMethod("ocr.extract_text", true, "Extract OCR text blocks from one image"));
     methods_.push_back(MakeMethod("recognition.barcode_detect", true, "Detect barcode or QR code from one image"));
     methods_.push_back(MakeMethod("file.convert", true, "Submit one file conversion request"));
+    methods_.push_back(MakeMethod("sane.status", true, "Get Linux-only SANE runtime status"));
+    methods_.push_back(MakeMethod("sane.list", true, "List SANE scanner devices on Linux"));
+    methods_.push_back(MakeMethod("sane.watch_start", true, "Start SANE device hotplug monitoring"));
+    methods_.push_back(MakeMethod("sane.watch_stop", true, "Stop SANE device hotplug monitoring"));
+    methods_.push_back(MakeMethod("sane.open", true, "Open one SANE scanner session"));
+    methods_.push_back(MakeMethod("sane.close", true, "Close one SANE scanner session"));
+    methods_.push_back(MakeMethod("sane.get_options", true, "Get normalized SANE scanner options"));
+    methods_.push_back(MakeMethod("sane.set_options", true, "Set normalized SANE scanner options"));
+    methods_.push_back(MakeMethod("sane.profile_list", true, "List saved SANE option profiles"));
+    methods_.push_back(MakeMethod("sane.profile_save", true, "Save one SANE option profile"));
+    methods_.push_back(MakeMethod("sane.profile_apply", true, "Apply one saved SANE option profile"));
+    methods_.push_back(MakeMethod("sane.profile_delete", true, "Delete one saved SANE option profile"));
+    methods_.push_back(MakeMethod("sane.scan", true, "Submit one SANE scan task"));
+    methods_.push_back(MakeMethod("sane.scan_get", true, "Get one SANE scan task snapshot"));
+    methods_.push_back(MakeMethod("sane.scan_cancel", true, "Cancel one SANE scan task"));
 }
 
 void CommandApplicationService::SetStatusSupplier(StatusSupplier supplier) {
@@ -794,7 +1001,17 @@ void CommandApplicationService::SetVideoStreamClosedSink(VideoStreamClosedSink s
 }
 
 void CommandApplicationService::SetCommandEventSink(CommandEventSink sink) {
-    capture_task_service_.SetEventSink(std::move(sink));
+    capture_task_service_.SetEventSink(sink);
+    {
+        std::lock_guard<std::mutex> lock(command_event_sink_mu_);
+        command_event_sink_ = std::move(sink);
+    }
+    sane_facade_.SetDeviceEventSink([this](const SdkSaneDeviceEvent& event) {
+        DispatchSaneDeviceEvent(event);
+    });
+    sane_facade_.SetScanTaskEventSink([this](const SdkSaneScanTaskEvent& event) {
+        DispatchSaneScanTaskEvent(event);
+    });
 }
 
 Json CommandApplicationService::HandleRequest(const std::string& connection_id, const Json& request_json) {
@@ -901,11 +1118,61 @@ Json CommandApplicationService::HandleRequest(const std::string& connection_id, 
     if (request.method == "file.convert") {
         return HandleFileConvert(connection_id, request);
     }
+    if (request.method == "sane.status") {
+        return HandleSaneStatus(connection_id, request);
+    }
+    if (request.method == "sane.list") {
+        return HandleSaneList(connection_id, request);
+    }
+    if (request.method == "sane.watch_start") {
+        return HandleSaneWatchStart(connection_id, request);
+    }
+    if (request.method == "sane.watch_stop") {
+        return HandleSaneWatchStop(connection_id, request);
+    }
+    if (request.method == "sane.open") {
+        return HandleSaneOpen(connection_id, request);
+    }
+    if (request.method == "sane.close") {
+        return HandleSaneClose(connection_id, request);
+    }
+    if (request.method == "sane.get_options") {
+        return HandleSaneGetOptions(connection_id, request);
+    }
+    if (request.method == "sane.set_options") {
+        return HandleSaneSetOptions(connection_id, request);
+    }
+    if (request.method == "sane.profile_list") {
+        return HandleSaneProfileList(connection_id, request);
+    }
+    if (request.method == "sane.profile_save") {
+        return HandleSaneProfileSave(connection_id, request);
+    }
+    if (request.method == "sane.profile_apply") {
+        return HandleSaneProfileApply(connection_id, request);
+    }
+    if (request.method == "sane.profile_delete") {
+        return HandleSaneProfileDelete(connection_id, request);
+    }
+    if (request.method == "sane.scan") {
+        return HandleSaneScan(connection_id, request);
+    }
+    if (request.method == "sane.scan_get") {
+        return HandleSaneScanGet(connection_id, request);
+    }
+    if (request.method == "sane.scan_cancel") {
+        return HandleSaneScanCancel(connection_id, request);
+    }
 
     return BuildWsResponse(request.request_id, SdkStatusCode::UnsupportedMethod, "unsupported method");
 }
 
 void CommandApplicationService::OnConnectionClosed(const std::string& connection_id) {
+    SdkSaneWatchRequest sane_watch_request;
+    sane_watch_request.connection_id = connection_id;
+    sane_watch_request.enabled = false;
+    sane_facade_.WatchStop(sane_watch_request);
+
     authorization_service_.ClearConnection(connection_id);
     const std::vector<VideoSessionService::StreamBinding> removed = video_session_service_.ClearConnection(connection_id);
     for (std::vector<VideoSessionService::StreamBinding>::const_iterator it = removed.begin();
@@ -928,6 +1195,138 @@ void CommandApplicationService::OnConnectionClosed(const std::string& connection
     }
 }
 
+void CommandApplicationService::DispatchSaneDeviceEvent(const SdkSaneDeviceEvent& event) {
+    CommandEventSink sink;
+    {
+        std::lock_guard<std::mutex> lock(command_event_sink_mu_);
+        sink = command_event_sink_;
+    }
+    if (!sink || event.connection_id.empty() || event.event_name.empty()) {
+        return;
+    }
+    sink(event.connection_id,
+         BuildWsEvent(event.event_name,
+                      BuildSaneDeviceEventJson(event),
+                      event.code,
+                      event.message));
+}
+
+void CommandApplicationService::DispatchSaneScanTaskEvent(const SdkSaneScanTaskEvent& event) {
+    SdkSaneScanTask task = event.task;
+    for (std::vector<SdkCaptureAsset>::iterator it = task.assets.begin(); it != task.assets.end(); ++it) {
+        *it = AttachImageAssetUrls(task.task_id, *it);
+        RegisterImageAsset(task.connection_id, task.task_id, *it);
+    }
+
+    const std::string document_target = NormalizeImageFormat(task.output_type);
+    if (task.status == "completed" &&
+        (document_target == "pdf" || document_target == "ofd" || document_target == "tiff") &&
+        !task.output_paths.empty()) {
+        SdkSaneScanTask converting_task = task;
+        converting_task.status = "converting";
+        converting_task.phase = "converting";
+        converting_task.progress = 95;
+        converting_task.message = "converting scan pages";
+        {
+            std::lock_guard<std::mutex> lock(sane_tasks_mu_);
+            sane_tasks_[converting_task.task_id] = converting_task;
+        }
+
+        CommandEventSink sink;
+        {
+            std::lock_guard<std::mutex> lock(command_event_sink_mu_);
+            sink = command_event_sink_;
+        }
+        if (sink && !converting_task.connection_id.empty()) {
+            sink(converting_task.connection_id,
+                 BuildWsEvent("sane.scan_changed",
+                              Json{{"task_id", converting_task.task_id},
+                                   {"task", BuildSaneScanTaskJson(converting_task)},
+                                   {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}},
+                              ToCode(SdkStatusCode::Ok),
+                              "converting scan pages"));
+        }
+
+        SdkFileConvertRequest convert_request;
+        convert_request.input_paths = task.output_paths;
+        convert_request.source_type = "images";
+        convert_request.source_format = "image";
+        convert_request.target_type = document_target;
+        convert_request.output_format = document_target;
+        convert_request.export_type = task.export_type.empty() ? "multi-page" : task.export_type;
+        convert_request.output_dir = task.output_dir.empty()
+                                         ? GetSdkOpenTaskAssetDir("sane", task.task_id, "outputs")
+                                         : task.output_dir;
+        convert_request.output_path = task.output_path;
+        if (convert_request.export_type != "single-page" && convert_request.output_path.empty()) {
+            convert_request.output_path = JoinLocalPath(convert_request.output_dir, "scan." + ExtensionForFileConvertFormat(document_target));
+        }
+
+        if (!EnsureDirectoryRecursive(convert_request.output_dir)) {
+            task.status = "failed";
+            task.phase = "failed";
+            task.progress = 100;
+            task.message = "failed to create SANE conversion output directory";
+            task.error = task.message;
+        } else {
+            const SdkFileConvertResult convert_result = ofd_facade_.Convert(convert_request);
+            if (IsOkStatusCode(convert_result.code)) {
+                task.output_type = document_target;
+                task.output_format = document_target;
+                task.output_dir = convert_request.output_dir;
+                task.output_path = convert_result.output_path;
+                task.output_paths = convert_result.output_paths;
+                task.assets.clear();
+                for (std::vector<std::string>::const_iterator it = task.output_paths.begin();
+                     it != task.output_paths.end();
+                     ++it) {
+                    SdkCaptureAsset asset;
+                    asset.asset_id = "asset-sane-output-" + std::to_string(static_cast<long long>(task.assets.size() + 1));
+                    asset.kind = "sane_scan_output";
+                    asset.path = *it;
+                    asset.content_type = ContentTypeForFileConvertFormat(document_target);
+                    asset.size = FileSize(*it);
+                    asset = AttachImageAssetUrls(task.task_id, asset);
+                    RegisterImageAsset(task.connection_id, task.task_id, asset);
+                    task.assets.push_back(asset);
+                }
+                task.status = "completed";
+                task.phase = "completed";
+                task.progress = 100;
+                task.message = "scan converted";
+                task.error.clear();
+            } else {
+                task.status = "failed";
+                task.phase = "failed";
+                task.progress = 100;
+                task.message = convert_result.message;
+                task.error = convert_result.message;
+            }
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(sane_tasks_mu_);
+        sane_tasks_[task.task_id] = task;
+    }
+
+    CommandEventSink sink;
+    {
+        std::lock_guard<std::mutex> lock(command_event_sink_mu_);
+        sink = command_event_sink_;
+    }
+    if (!sink || task.connection_id.empty()) {
+        return;
+    }
+    sink(task.connection_id,
+         BuildWsEvent(event.event_name.empty() ? "sane.scan_changed" : event.event_name,
+                      Json{{"task_id", task.task_id},
+                           {"task", BuildSaneScanTaskJson(task)},
+                           {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}},
+                      event.code,
+                      task.message.empty() ? event.message : task.message));
+}
+
 Json CommandApplicationService::BuildCapabilitiesJson() const {
     Json methods = Json::array();
     for (std::vector<MethodDescriptor>::const_iterator it = methods_.begin(); it != methods_.end(); ++it) {
@@ -947,6 +1346,11 @@ Json CommandApplicationService::BuildCapabilitiesJson() const {
              {"video_binding", "session_token + stream_id"},
          }},
         {"methods", std::move(methods)},
+        {"platform_capabilities",
+         Json{{"sane",
+               Json{{"supported_platforms", Json::array({"linux"})},
+                    {"linux_only", true},
+                    {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}}}}},
     };
 }
 
@@ -2263,6 +2667,365 @@ Json CommandApplicationService::HandleBarcodeDetect(const std::string& connectio
                                 {"height", result.height},
                                 {"barcodes", barcodes},
                                 {"provider", providers_.recognition_provider ? providers_.recognition_provider->ProviderName() : ""}});
+}
+
+Json CommandApplicationService::HandleSaneStatus(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    const SdkSaneStatusResult result = sane_facade_.GetStatus();
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           BuildSaneStatusJson(result, providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""));
+}
+
+Json CommandApplicationService::HandleSaneList(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkSaneListRequest list_request;
+    list_request.refresh = GetOptionalBoolField(request.params, "refresh", true);
+    list_request.include_detected = GetOptionalBoolField(request.params, "include_detected", false);
+    const SdkSaneListResult result = sane_facade_.ListDevices(list_request);
+    Json payload{{"devices", BuildSaneDevicesJson(result.devices)},
+                 {"count", result.devices.size()},
+                 {"generation", result.generation},
+                 {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}};
+    if (list_request.include_detected) {
+        payload["detected_devices"] = BuildSaneDevicesJson(result.detected_devices);
+        payload["detected_count"] = result.detected_devices.size();
+    }
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           payload);
+}
+
+Json CommandApplicationService::HandleSaneWatchStart(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkSaneWatchRequest watch_request;
+    watch_request.connection_id = connection_id;
+    watch_request.enabled = true;
+    const SdkSaneWatchResult result = sane_facade_.WatchStart(watch_request);
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"watching", result.watching},
+                                {"generation", result.generation},
+                                {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+}
+
+Json CommandApplicationService::HandleSaneWatchStop(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkSaneWatchRequest watch_request;
+    watch_request.connection_id = connection_id;
+    watch_request.enabled = false;
+    const SdkSaneWatchResult result = sane_facade_.WatchStop(watch_request);
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"watching", result.watching},
+                                {"generation", result.generation},
+                                {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+}
+
+Json CommandApplicationService::HandleSaneOpen(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkSaneOpenRequest open_request;
+    open_request.device_id = GetOptionalStringField(request.params, "device_id");
+    open_request.device_name = GetOptionalStringField(request.params, "device_name");
+    open_request.profile_id = GetOptionalStringField(request.params, "profile_id");
+    const Json options = request.params.find("options") == request.params.end() ? Json() : request.params["options"];
+    const std::vector<SdkSaneOptionSetItem> items = ParseSaneOptionSetItems(options);
+    for (std::vector<SdkSaneOptionSetItem>::const_iterator it = items.begin(); it != items.end(); ++it) {
+        open_request.option_keys.push_back(!it->key.empty() ? it->key : std::to_string(it->index));
+        open_request.option_values_json.push_back(it->value_json);
+    }
+    if (open_request.device_id.empty() && open_request.device_name.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "device_id or device_name required");
+    }
+    const SdkSaneOpenResult result = sane_facade_.OpenDevice(open_request);
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"opened", result.opened},
+                                {"session_id", result.session_id},
+                                {"device", BuildSaneDeviceJson(result.device)},
+                                {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+}
+
+Json CommandApplicationService::HandleSaneClose(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkSaneCloseRequest close_request;
+    close_request.session_id = GetOptionalStringField(request.params, "session_id");
+    if (close_request.session_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "session_id required");
+    }
+    const SdkSaneCloseResult result = sane_facade_.CloseDevice(close_request);
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"closed", result.closed}, {"was_opened", result.was_opened}});
+}
+
+Json CommandApplicationService::HandleSaneGetOptions(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkSaneGetOptionsRequest options_request;
+    options_request.session_id = GetOptionalStringField(request.params, "session_id");
+    if (options_request.session_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "session_id required");
+    }
+    const SdkSaneGetOptionsResult result = sane_facade_.GetOptions(options_request);
+    Json options = Json::array();
+    for (std::vector<SdkSaneOption>::const_iterator it = result.options.begin(); it != result.options.end(); ++it) {
+        options.push_back(BuildSaneOptionJson(*it));
+    }
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"options", options},
+                                {"count", result.options.size()},
+                                {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+}
+
+Json CommandApplicationService::HandleSaneSetOptions(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkSaneSetOptionsRequest set_request;
+    set_request.session_id = GetOptionalStringField(request.params, "session_id");
+    const Json options = request.params.find("options") == request.params.end() ? Json() : request.params["options"];
+    set_request.options = ParseSaneOptionSetItems(options);
+    if (set_request.session_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "session_id required");
+    }
+    if (set_request.options.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "options required");
+    }
+    const SdkSaneSetOptionsResult result = sane_facade_.SetOptions(set_request);
+    Json results = Json::array();
+    for (std::vector<SdkSaneOptionSetResultItem>::const_iterator it = result.results.begin(); it != result.results.end(); ++it) {
+        results.push_back(BuildSaneOptionSetResultJson(*it));
+    }
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"applied", result.applied},
+                                {"requires_reload", result.requires_reload},
+                                {"results", results},
+                                {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+}
+
+Json CommandApplicationService::HandleSaneProfileList(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    const SdkSaneProfileListResult result = sane_facade_.ListProfiles(ParseSaneProfileRequest(request.params));
+    Json profiles = Json::array();
+    for (std::vector<SdkSaneProfile>::const_iterator it = result.profiles.begin(); it != result.profiles.end(); ++it) {
+        profiles.push_back(BuildSaneProfileJson(*it));
+    }
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"profiles", profiles},
+                                {"count", result.profiles.size()},
+                                {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+}
+
+Json CommandApplicationService::HandleSaneProfileSave(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkSaneProfileRequest profile_request = ParseSaneProfileRequest(request.params);
+    if (profile_request.name.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "name required");
+    }
+    const SdkSaneProfileResult result = sane_facade_.SaveProfile(profile_request);
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"saved", result.saved},
+                                {"profile", BuildSaneProfileJson(result.profile)},
+                                {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+}
+
+Json CommandApplicationService::HandleSaneProfileApply(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkSaneProfileRequest profile_request = ParseSaneProfileRequest(request.params);
+    if (profile_request.profile_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "profile_id required");
+    }
+    const SdkSaneProfileResult result = sane_facade_.ApplyProfile(profile_request);
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"applied", result.applied},
+                                {"profile", BuildSaneProfileJson(result.profile)},
+                                {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+}
+
+Json CommandApplicationService::HandleSaneProfileDelete(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkSaneProfileRequest profile_request = ParseSaneProfileRequest(request.params);
+    if (profile_request.profile_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "profile_id required");
+    }
+    const SdkSaneProfileResult result = sane_facade_.DeleteProfile(profile_request);
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"deleted", result.deleted},
+                                {"profile", BuildSaneProfileJson(result.profile)},
+                                {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+}
+
+Json CommandApplicationService::HandleSaneScan(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = ConsumeQuota(connection_id, request.method, request.request_id);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkSaneScanRequest scan_request;
+    scan_request.connection_id = connection_id;
+    scan_request.session_id = GetOptionalStringField(request.params, "session_id");
+    scan_request.output_type = GetOptionalStringField(request.params, "output_type");
+    scan_request.output_format = GetOptionalStringField(request.params, "output_format");
+    scan_request.output_path = GetOptionalStringField(request.params, "output_path");
+    scan_request.output_dir = GetOptionalStringField(request.params, "output_dir");
+    scan_request.export_type = NormalizeExportType(GetOptionalStringField(request.params, "export_type"));
+    const Json output = GetOptionalObjectField(request.params, "output");
+    if (!output.empty()) {
+        const std::string output_type = GetOptionalStringField(output, "type");
+        const std::string output_format = GetOptionalStringField(output, "format");
+        const std::string output_path = GetOptionalStringField(output, "path");
+        const std::string output_dir = GetOptionalStringField(output, "dir");
+        const std::string export_type = GetOptionalStringField(output, "export_type");
+        if (!output_type.empty()) scan_request.output_type = output_type;
+        if (!output_format.empty()) scan_request.output_format = output_format;
+        if (!output_path.empty()) scan_request.output_path = output_path;
+        if (!output_dir.empty()) scan_request.output_dir = output_dir;
+        if (!export_type.empty()) scan_request.export_type = NormalizeExportType(export_type);
+    }
+    if (scan_request.output_type.empty()) {
+        scan_request.output_type = "images";
+    }
+    if (scan_request.output_format.empty()) {
+        scan_request.output_format = scan_request.output_type == "images" ? "jpg" : scan_request.output_type;
+    }
+    if (scan_request.export_type.empty()) {
+        scan_request.export_type = "multi-page";
+    }
+    const Json options = request.params.find("options") == request.params.end() ? Json() : request.params["options"];
+    scan_request.options = ParseSaneOptionSetItems(options);
+    if (scan_request.session_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "session_id required");
+    }
+    SdkSaneScanResult result = sane_facade_.Scan(scan_request);
+    if (!result.task_id.empty()) {
+        for (std::vector<SdkCaptureAsset>::iterator it = result.task.assets.begin();
+             it != result.task.assets.end();
+             ++it) {
+            *it = AttachImageAssetUrls(result.task_id, *it);
+            RegisterImageAsset(connection_id, result.task_id, *it);
+        }
+        std::lock_guard<std::mutex> lock(sane_tasks_mu_);
+        sane_tasks_[result.task_id] = result.task;
+    }
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"accepted", result.accepted},
+                                {"task_id", result.task_id},
+                                {"task", BuildSaneScanTaskJson(result.task)},
+                                {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+}
+
+Json CommandApplicationService::HandleSaneScanGet(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkSaneScanGetRequest get_request;
+    get_request.task_id = GetOptionalStringField(request.params, "task_id");
+    if (get_request.task_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "task_id required");
+    }
+    {
+        std::lock_guard<std::mutex> lock(sane_tasks_mu_);
+        std::map<std::string, SdkSaneScanTask>::const_iterator it = sane_tasks_.find(get_request.task_id);
+        if (it != sane_tasks_.end()) {
+            return BuildWsResponse(request.request_id,
+                                   SdkStatusCode::Ok,
+                                   "ok",
+                                   Json{{"task_id", get_request.task_id},
+                                        {"accepted", true},
+                                        {"task", BuildSaneScanTaskJson(it->second)},
+                                        {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+        }
+    }
+    const SdkSaneScanResult result = sane_facade_.GetScan(get_request);
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"accepted", result.accepted},
+                                {"task_id", result.task_id},
+                                {"task", BuildSaneScanTaskJson(result.task)},
+                                {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+}
+
+Json CommandApplicationService::HandleSaneScanCancel(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkSaneScanCancelRequest cancel_request;
+    cancel_request.task_id = GetOptionalStringField(request.params, "task_id");
+    if (cancel_request.task_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "task_id required");
+    }
+    const SdkSaneScanResult result = sane_facade_.CancelScan(cancel_request);
+    {
+        std::lock_guard<std::mutex> lock(sane_tasks_mu_);
+        std::map<std::string, SdkSaneScanTask>::iterator it = sane_tasks_.find(cancel_request.task_id);
+        if (it != sane_tasks_.end()) {
+            it->second.status = "cancelled";
+            it->second.message = "cancelled";
+        }
+    }
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"accepted", result.accepted},
+                                {"task_id", result.task_id},
+                                {"task", BuildSaneScanTaskJson(result.task)},
+                                {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
 }
 
 Json CommandApplicationService::HandleFileConvert(const std::string& connection_id, const Request& request) {

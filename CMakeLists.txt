@@ -76,6 +76,7 @@ set(SDK_OPEN_RUNTIME_SRCS
     facade/ocr_facade.cpp
     facade/ofd_facade.cpp
     facade/recognition_facade.cpp
+    facade/sane_facade.cpp
 )
 
 add_library(sdk_open_logging STATIC
@@ -149,6 +150,9 @@ if(BUILD_SDK_PRIVATE)
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${CMAKE_SOURCE_DIR}/src/module/devices/device_config_compact.conf"
             "$<TARGET_FILE_DIR:sdk_open_app>/configs/device_config_compact.conf"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/src/app/process/publicd/sane_open_source_devices.json"
+            "$<TARGET_FILE_DIR:sdk_open_app>/configs/sane_open_source_devices.json"
         COMMENT "Copy device config into sdk_open_app runtime directory"
     )
 endif()

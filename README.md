@@ -78,16 +78,41 @@ The current runtime exposes:
 - `device.open`
 - `device.close`
 - `capture.take`
+- `capture.get`
 - `video.start`
 - `video.stop`
 - `video.set_format`
+- `video.set_profile`
 - `image.process`
+- `image.process_page`
+- `image.apply_color_mode`
 - `ocr.recognize`
 - `ocr.get`
 - `ocr.cancel`
 - `ocr.extract_text`
 - `recognition.barcode_detect`
 - `file.convert`
+- `sane.status`
+- `sane.list`
+- `sane.watch_start`
+- `sane.watch_stop`
+- `sane.open`
+- `sane.close`
+- `sane.get_options`
+- `sane.set_options`
+- `sane.profile_list`
+- `sane.profile_save`
+- `sane.profile_apply`
+- `sane.profile_delete`
+- `sane.scan`
+- `sane.scan_get`
+- `sane.scan_cancel`
+
+### SANE Linux-only Notes
+
+`sane.*` is a Linux-only scanner capability domain for third-party SANE scanner discovery, hotplug watching, sessions, option reads/writes, option profiles, and scan tasks. The SDK does not reuse the legacy publicd/subprocess management path; the private provider manages the SANE runtime and sessions in-process. Non-Linux runtimes keep the methods visible, but `sane.status` reports `available=false` and other `sane.*` methods return a SANE unavailable error.
+
+`sane.list` returns only devices recognized by a SANE backend and openable by default. USB/finder detections are used to trigger hotplug refreshes and diagnostics only. Pass `include_detected=true` to also receive `detected_devices/detected_count`; the Demo keeps these diagnostic rows out of the scan device list so one scanner is not displayed twice. SANE support is Linux-only. When `sane.scan` is called without an output directory, files are written under the SDK task asset directory, whose root can be overridden with `SDK_OPEN_WORK_DIR`; the legacy client work directory is not used. The SDK does not expose a synthetic preview/page mode for SANE. Page behavior follows device options: Flatbed-like `source` values scan one page, while ADF/Feeder/Duplex-like `source` values keep pulling pages until the device reports no documents. `sane.scan` submits an async task and returns `accepted/task_id/task`; use `sane.scan_get`, `sane.scan_cancel`, and the `sane.scan_changed` event for task status, page progress, conversion, completion, failure, or cancellation.
 
 ## Protocol Model
 

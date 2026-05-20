@@ -77,16 +77,41 @@
 - `device.open`
 - `device.close`
 - `capture.take`
+- `capture.get`
 - `video.start`
 - `video.stop`
 - `video.set_format`
+- `video.set_profile`
 - `image.process`
+- `image.process_page`
+- `image.apply_color_mode`
 - `ocr.recognize`
 - `ocr.get`
 - `ocr.cancel`
 - `ocr.extract_text`
 - `recognition.barcode_detect`
 - `file.convert`
+- `sane.status`
+- `sane.list`
+- `sane.watch_start`
+- `sane.watch_stop`
+- `sane.open`
+- `sane.close`
+- `sane.get_options`
+- `sane.set_options`
+- `sane.profile_list`
+- `sane.profile_save`
+- `sane.profile_apply`
+- `sane.profile_delete`
+- `sane.scan`
+- `sane.scan_get`
+- `sane.scan_cancel`
+
+### SANE Linux-only 说明
+
+`sane.*` 是 Linux 专属扫描仪能力域，用于第三方 SANE 扫描仪的发现、插拔监听、打开会话、配置读取/设置、配置记录和扫描任务。SDK 不沿用旧客户端的 publicd/子进程管理链路，私有 provider 在进程内直接管理 SANE runtime 和会话。非 Linux 平台保留方法可见性，但 `sane.status` 会返回 `available=false`，其他 `sane.*` 方法返回 SANE 不可用错误。
+
+`sane.list` 默认只返回 SANE backend 已识别且可打开的设备，USB/finder 发现结果仅用于触发热插拔刷新和诊断。需要查看 finder 原始发现结果时，可传 `include_detected=true`，响应会额外返回 `detected_devices/detected_count`；Demo 默认不把这些诊断设备展示为可扫描设备，避免同一台扫描仪出现两行。SANE 只支持 Linux runtime。`sane.scan` 未指定输出目录时，会写入 SDK 自己的任务资产目录（可通过 `SDK_OPEN_WORK_DIR` 调整根目录），不再使用旧客户端工作目录。SDK 不对 SANE 暴露模拟的预览模式或分页模式；单页/连续取纸完全跟随设备参数：`source` 类似 Flatbed 时扫描一页，`source` 类似 ADF/Feeder/Duplex 时持续拉取页面直到设备返回无纸。`sane.scan` 是异步任务提交接口，立即返回 `accepted/task_id/task`；通过 `sane.scan_get`、`sane.scan_cancel` 和 `sane.scan_changed` 事件查看任务状态、当前页、转换阶段、完成、失败或取消。
 
 ## 协议模型
 

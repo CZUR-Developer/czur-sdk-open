@@ -9,6 +9,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <thread>
 #include <utility>
 
@@ -117,6 +118,21 @@ public:
             "ocr.extract_text",
             "recognition.barcode_detect",
             "file.convert",
+            "sane.status",
+            "sane.list",
+            "sane.watch_start",
+            "sane.watch_stop",
+            "sane.open",
+            "sane.close",
+            "sane.get_options",
+            "sane.set_options",
+            "sane.profile_list",
+            "sane.profile_save",
+            "sane.profile_apply",
+            "sane.profile_delete",
+            "sane.scan",
+            "sane.scan_get",
+            "sane.scan_cancel",
         };
         SDK_OPEN_LOG_INFO("[mock_auth_provider] ValidateToken success, account_type={}, auth_scene={}, device_scope_count={}",
                           ToAccountTypeString(result.auth_context.account_type),
@@ -742,8 +758,374 @@ public:
         SdkFileConvertResult result;
         result.accepted = true;
         result.output_path = request.output_path;
+        if (request.export_type == "single-page") {
+            const std::string output_dir = request.output_dir.empty() ? "." : request.output_dir;
+            const std::string extension = request.output_format.empty() ? "pdf" : request.output_format;
+            for (std::vector<std::string>::const_iterator it = request.input_paths.begin(); it != request.input_paths.end(); ++it) {
+                result.output_paths.push_back(JoinPath(output_dir, BaseNameWithoutExtension(*it) + "." + extension));
+            }
+            if (!result.output_paths.empty()) {
+                result.output_path = result.output_paths.front();
+            }
+        } else if (!request.output_path.empty()) {
+            result.output_paths.push_back(request.output_path);
+        }
         return result;
     }
+};
+
+class MockSaneProvider : public ISdkSaneProvider {
+public:
+    std::string ProviderName() const override { return "mock-sane-provider"; }
+
+    void SetDeviceEventSink(SdkSaneDeviceEventCallback sink) override {
+        event_sink_ = std::move(sink);
+    }
+
+    void SetScanTaskEventSink(SdkSaneScanTaskEventCallback sink) override {
+        scan_task_event_sink_ = std::move(sink);
+    }
+
+    SdkSaneStatusResult GetStatus() override {
+        SdkSaneStatusResult result;
+        result.available = true;
+        result.platform = "mock";
+        result.supported_platforms.push_back("linux");
+        result.sane_major = 1;
+        result.sane_minor = 2;
+        result.sane_version = "1.2 mock";
+        result.reason = "mock provider; real SANE is Linux-only";
+        return result;
+    }
+
+    SdkSaneListResult ListDevices(const SdkSaneListRequest& request) override {
+        SdkSaneListResult result;
+        result.generation = generation_;
+        result.devices.push_back(DefaultDevice());
+        if (request.include_detected) {
+            result.detected_devices.push_back(DefaultDetectedDevice());
+        }
+        return result;
+    }
+
+    SdkSaneWatchResult WatchStart(const SdkSaneWatchRequest& request) override {
+        SdkSaneWatchResult result;
+        result.watching = true;
+        result.generation = generation_;
+        if (event_sink_ && !request.connection_id.empty()) {
+            SdkSaneDeviceEvent event;
+            event.connection_id = request.connection_id;
+            event.event_name = "sane.device_snapshot";
+            event.generation = generation_;
+            event.devices.push_back(DefaultDevice());
+            event.detected_devices.push_back(DefaultDetectedDevice());
+            event.added_devices.push_back(DefaultDevice());
+            event_sink_(event);
+        }
+        return result;
+    }
+
+    SdkSaneWatchResult WatchStop(const SdkSaneWatchRequest&) override {
+        SdkSaneWatchResult result;
+        result.watching = false;
+        result.generation = generation_;
+        return result;
+    }
+
+    SdkSaneOpenResult OpenDevice(const SdkSaneOpenRequest& request) override {
+        SdkSaneOpenResult result;
+        result.opened = true;
+        result.session_id = "sane-session-mock";
+        result.device = DefaultDevice();
+        if (!request.device_id.empty()) {
+            result.device.device_id = request.device_id;
+        }
+        return result;
+    }
+
+    SdkSaneCloseResult CloseDevice(const SdkSaneCloseRequest&) override {
+        SdkSaneCloseResult result;
+        result.closed = true;
+        result.was_opened = true;
+        return result;
+    }
+
+    SdkSaneGetOptionsResult GetOptions(const SdkSaneGetOptionsRequest&) override {
+        SdkSaneGetOptionsResult result;
+        result.options.push_back(MakeStringOption(1, "mode", "Scan Mode", "General", "\"Color\"", {"\"Color\"", "\"Gray\"", "\"Lineart\""}));
+        result.options.push_back(MakeNumberOption(2, "resolution", "Scan Resolution", "General", "300", 75, 600, 75));
+        result.options.push_back(MakeStringOption(3, "source", "Scan Source", "General", "\"Flatbed\"", {"\"Flatbed\"", "\"ADF Front\"", "\"ADF Duplex\""}));
+        result.options.push_back(MakeNumberOption(4, "brightness", "Brightness", "Image", "0", -100, 100, 1));
+        return result;
+    }
+
+    SdkSaneSetOptionsResult SetOptions(const SdkSaneSetOptionsRequest& request) override {
+        SdkSaneSetOptionsResult result;
+        result.applied = true;
+        for (std::vector<SdkSaneOptionSetItem>::const_iterator it = request.options.begin(); it != request.options.end(); ++it) {
+            SdkSaneOptionSetResultItem item;
+            item.key = it->key;
+            item.index = it->index;
+            item.status = "applied";
+            item.message = "ok";
+            item.value_json = it->value_json;
+            result.results.push_back(item);
+        }
+        return result;
+    }
+
+    SdkSaneProfileListResult ListProfiles(const SdkSaneProfileRequest&) override {
+        std::lock_guard<std::mutex> lock(mu_);
+        SdkSaneProfileListResult result;
+        for (std::map<std::string, SdkSaneProfile>::const_iterator it = profiles_.begin(); it != profiles_.end(); ++it) {
+            result.profiles.push_back(it->second);
+        }
+        return result;
+    }
+
+    SdkSaneProfileResult SaveProfile(const SdkSaneProfileRequest& request) override {
+        std::lock_guard<std::mutex> lock(mu_);
+        SdkSaneProfileResult result;
+        result.saved = true;
+        SdkSaneProfile profile;
+        profile.profile_id = request.profile_id.empty() ? "sane-profile-" + std::to_string(next_profile_id_++) : request.profile_id;
+        profile.device_key = request.device_key.empty() ? "mock:sane0" : request.device_key;
+        profile.name = request.name;
+        profile.options = request.options;
+        profile.created_at = "mock";
+        profile.updated_at = "mock";
+        profiles_[profile.profile_id] = profile;
+        result.profile = profile;
+        return result;
+    }
+
+    SdkSaneProfileResult ApplyProfile(const SdkSaneProfileRequest& request) override {
+        std::lock_guard<std::mutex> lock(mu_);
+        SdkSaneProfileResult result;
+        std::map<std::string, SdkSaneProfile>::const_iterator it = profiles_.find(request.profile_id);
+        if (it == profiles_.end()) {
+            result.code = ToCode(SdkStatusCode::SaneProfileNotFound);
+            result.message = "SANE profile not found";
+            return result;
+        }
+        result.applied = true;
+        result.profile = it->second;
+        return result;
+    }
+
+    SdkSaneProfileResult DeleteProfile(const SdkSaneProfileRequest& request) override {
+        std::lock_guard<std::mutex> lock(mu_);
+        SdkSaneProfileResult result;
+        std::map<std::string, SdkSaneProfile>::iterator it = profiles_.find(request.profile_id);
+        if (it == profiles_.end()) {
+            result.code = ToCode(SdkStatusCode::SaneProfileNotFound);
+            result.message = "SANE profile not found";
+            return result;
+        }
+        result.deleted = true;
+        result.profile = it->second;
+        profiles_.erase(it);
+        return result;
+    }
+
+    SdkSaneScanResult Scan(const SdkSaneScanRequest& request) override {
+        SdkSaneScanResult result;
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            result.task_id = "sane-scan-" + std::to_string(next_task_id_++);
+            result.accepted = true;
+            result.task.task_id = result.task_id;
+            result.task.connection_id = request.connection_id;
+            result.task.session_id = request.session_id;
+            result.task.status = "queued";
+            result.task.phase = "queued";
+            result.task.progress = 0;
+            result.task.output_type = request.output_type.empty() ? "images" : request.output_type;
+            result.task.output_format = request.output_format.empty() ? "jpg" : request.output_format;
+            result.task.output_dir = request.output_dir.empty() ? "/tmp" : request.output_dir;
+            result.task.export_type = request.export_type.empty() ? "multi-page" : request.export_type;
+            result.task.output_path = request.output_path;
+            result.task.message = "mock scan queued";
+            tasks_[result.task_id] = result.task;
+        }
+        EmitScanTask(result.task);
+        const std::string task_id = result.task_id;
+        std::thread([this, request, task_id]() {
+            SdkSaneScanTask task;
+            {
+                std::lock_guard<std::mutex> lock(mu_);
+                task = tasks_[task_id];
+                task.status = "running";
+                task.phase = "scanning";
+                task.message = "mock scan running";
+                tasks_[task_id] = task;
+            }
+            EmitScanTask(task);
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            {
+                std::lock_guard<std::mutex> lock(mu_);
+                task = tasks_[task_id];
+                if (task.cancel_requested) {
+                    task.status = "cancelled";
+                    task.phase = "cancelled";
+                    task.progress = 100;
+                    task.message = "cancelled";
+                    tasks_[task_id] = task;
+                    EmitScanTask(task);
+                    return;
+                }
+                const int page_count = 3;
+                for (int page = 1; page <= page_count; ++page) {
+                    std::ostringstream path;
+                    if (!request.output_path.empty() && task.output_type == "images" && page == 1) {
+                        path << request.output_path;
+                    } else if (!request.output_path.empty() && task.output_type == "images") {
+                        path << request.output_path << "_page" << page;
+                    } else {
+                        path << "/tmp/czur-sdk-mock-sane-page-" << page << ".jpg";
+                    }
+                    task.output_paths.push_back(path.str());
+                    task.last_page_path = path.str();
+                    if (task.output_type == "images" && task.output_path.empty()) {
+                        task.output_path = path.str();
+                    }
+                }
+                task.status = "completed";
+                task.phase = "completed";
+                task.progress = 100;
+                task.page_count = page_count;
+                task.current_page = page_count;
+                task.message = "mock scan completed";
+                tasks_[task_id] = task;
+            }
+            EmitScanTask(task);
+        }).detach();
+        return result;
+    }
+
+    SdkSaneScanResult GetScan(const SdkSaneScanGetRequest& request) override {
+        std::lock_guard<std::mutex> lock(mu_);
+        SdkSaneScanResult result;
+        std::map<std::string, SdkSaneScanTask>::const_iterator it = tasks_.find(request.task_id);
+        if (it == tasks_.end()) {
+            result.code = ToCode(SdkStatusCode::InvalidParams);
+            result.message = "SANE scan task not found";
+            return result;
+        }
+        result.task_id = request.task_id;
+        result.task = it->second;
+        result.accepted = true;
+        return result;
+    }
+
+    SdkSaneScanResult CancelScan(const SdkSaneScanCancelRequest& request) override {
+        std::lock_guard<std::mutex> lock(mu_);
+        SdkSaneScanResult result;
+        result.task_id = request.task_id;
+        std::map<std::string, SdkSaneScanTask>::iterator it = tasks_.find(request.task_id);
+        if (it == tasks_.end()) {
+            result.code = ToCode(SdkStatusCode::InvalidParams);
+            result.message = "SANE scan task not found";
+            return result;
+        }
+        it->second.cancel_requested = true;
+        it->second.message = "cancel requested";
+        result.task = it->second;
+        result.accepted = true;
+        EmitScanTask(result.task);
+        return result;
+    }
+
+private:
+    void EmitScanTask(const SdkSaneScanTask& task) {
+        SdkSaneScanTaskEventCallback sink = scan_task_event_sink_;
+        if (!sink || task.connection_id.empty()) {
+            return;
+        }
+        SdkSaneScanTaskEvent event;
+        event.connection_id = task.connection_id;
+        event.event_name = "sane.scan_changed";
+        event.task = task;
+        event.message = task.message;
+        sink(event);
+    }
+
+    SdkSaneDevice DefaultDevice() const {
+        SdkSaneDevice device;
+        device.device_id = "sane-mock-0";
+        device.device_name = "test:0";
+        device.vendor = "CZUR";
+        device.model = "SANE Mock Scanner";
+        device.type = "flatbed";
+        device.backend = "test";
+        device.status = "online";
+        device.discovery_source = "mock";
+        device.openable = true;
+        return device;
+    }
+
+    SdkSaneDevice DefaultDetectedDevice() const {
+        SdkSaneDevice device;
+        device.device_id = "sane-finder-mock-0";
+        device.device_name = "USB Scanner";
+        device.vendor = "CZUR";
+        device.model = "SANE Mock Scanner";
+        device.type = "Document Scanner";
+        device.backend = "finder";
+        device.status = "detected";
+        device.discovery_source = "finder";
+        device.openable = false;
+        return device;
+    }
+
+    SdkSaneOption MakeStringOption(int index,
+                                   const std::string& name,
+                                   const std::string& title,
+                                   const std::string& group,
+                                   const std::string& value_json,
+                                   const std::vector<std::string>& values_json) const {
+        SdkSaneOption option;
+        option.index = index;
+        option.name = name;
+        option.title = title;
+        option.group = group;
+        option.type = "string";
+        option.value_json = value_json;
+        option.constraint.type = "string_list";
+        option.constraint.values_json = values_json;
+        return option;
+    }
+
+    SdkSaneOption MakeNumberOption(int index,
+                                   const std::string& name,
+                                   const std::string& title,
+                                   const std::string& group,
+                                   const std::string& value_json,
+                                   double min,
+                                   double max,
+                                   double quant) const {
+        SdkSaneOption option;
+        option.index = index;
+        option.name = name;
+        option.title = title;
+        option.group = group;
+        option.type = "int";
+        option.value_json = value_json;
+        option.constraint.type = "range";
+        option.constraint.min = min;
+        option.constraint.max = max;
+        option.constraint.quant = quant;
+        return option;
+    }
+
+    int generation_ = 1;
+    SdkSaneDeviceEventCallback event_sink_;
+    SdkSaneScanTaskEventCallback scan_task_event_sink_;
+    std::mutex mu_;
+    std::map<std::string, SdkSaneProfile> profiles_;
+    std::map<std::string, SdkSaneScanTask> tasks_;
+    int next_profile_id_ = 1;
+    int next_task_id_ = 1;
 };
 
 } // namespace
@@ -756,6 +1138,7 @@ ProviderBundle CreateProviderBundle() {
     bundle.ocr_provider = std::make_shared<MockOcrProvider>();
     bundle.ofd_provider = std::make_shared<MockOfdProvider>();
     bundle.recognition_provider = std::make_shared<MockRecognitionProvider>();
+    bundle.sane_provider = std::make_shared<MockSaneProvider>();
     return bundle;
 }
 
