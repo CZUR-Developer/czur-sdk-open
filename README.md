@@ -86,6 +86,7 @@ The current runtime exposes:
 - `image.process`
 - `image.process_page`
 - `image.apply_color_mode`
+<<<<<<< HEAD
 - `image.enhance_capabilities`
 - `image.enhance`
 - `image.enhance_get`
@@ -94,6 +95,8 @@ The current runtime exposes:
 - `image.enhance_workflow_get`
 - `image.enhance_workflow_save`
 - `image.enhance_workflow_delete`
+=======
+>>>>>>> Feature(sane): add async scan workflow
 - `ocr.recognize`
 - `ocr.get`
 - `ocr.cancel`
@@ -116,6 +119,7 @@ The current runtime exposes:
 - `sane.scan_get`
 - `sane.scan_cancel`
 
+<<<<<<< HEAD
 ### Image Enhancement Pipeline
 
 `image.enhance_capabilities` returns the image enhancement capabilities exposed by the current provider, including runtime type, availability, defaults, parameter schema, and `localized.en/zh-CN` display text. Demo and third-party clients should use this method to render capability choices dynamically instead of hard-coding algorithm lists. The built-in offline capability list includes black edge optimization, normalization, rotation, blank page detection, and red/green head detection. The private provider also exposes online capabilities `doc_crop_enhance`, `remove_handwriting`, `doc_repair`, and `remove_moire`; they use the API key supplied to `auth.create_session` as `X-Api-Key`. The online enhancement gateway host is resolved as `CZUR_SDK_IMAGE_ENHANCE_BASE_URL`, then Admin runtime config, then the default `https://gateway-cn.czur.com`. Online authorization uses a separate host resolved as `CZUR_SDK_AUTHZ_BASE_URL`, then Admin runtime config, then the same default gateway.
@@ -123,6 +127,13 @@ The current runtime exposes:
 `image.enhance` submits an async enhancement task for one or more image pages. `pipeline.steps` run in the user-provided order, and final output can be image pages or PDF/OFD/TIFF through the existing file conversion provider. `sane.scan` and `capture.take` accept the same optional `pipeline` for post-processing; SANE enhances scanned pages before export, and Capture enhances the existing final image assets. Blank page detection defaults to `action=drop`.
 
 `image.enhance_workflow_*` methods store reusable user-defined enhancement pipelines in the SDK work directory. The Demo uses these methods to save workflows from the Image Enhancement page and reuse the selected workflow from Capture or SANE scan flows.
+=======
+### SANE Linux-only Notes
+
+`sane.*` is a Linux-only scanner capability domain for third-party SANE scanner discovery, hotplug watching, sessions, option reads/writes, option profiles, and scan tasks. The SDK does not reuse the legacy publicd/subprocess management path; the private provider manages the SANE runtime and sessions in-process. Non-Linux runtimes keep the methods visible, but `sane.status` reports `available=false` and other `sane.*` methods return a SANE unavailable error.
+
+`sane.list` returns only devices recognized by a SANE backend and openable by default. USB/finder detections are used to trigger hotplug refreshes and diagnostics only. Pass `include_detected=true` to also receive `detected_devices/detected_count`; the Demo keeps these diagnostic rows out of the scan device list so one scanner is not displayed twice. SANE support is Linux-only. When `sane.scan` is called without an output directory, files are written under the SDK task asset directory, whose root can be overridden with `SDK_OPEN_WORK_DIR`; the legacy client work directory is not used. The SDK does not expose a synthetic preview/page mode for SANE. Page behavior follows device options: Flatbed-like `source` values scan one page, while ADF/Feeder/Duplex-like `source` values keep pulling pages until the device reports no documents. `sane.scan` submits an async task and returns `accepted/task_id/task`; use `sane.scan_get`, `sane.scan_cancel`, and the `sane.scan_changed` event for task status, page progress, conversion, completion, failure, or cancellation.
+>>>>>>> Feature(sane): add async scan workflow
 
 ## Protocol Model
 
