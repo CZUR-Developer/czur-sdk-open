@@ -19,6 +19,7 @@
 #include "ocr_facade.h"
 #include "ofd_facade.h"
 #include "recognition_facade.h"
+#include "sane_facade.h"
 #include "sdk_config.h"
 #include "sdk_json_utils.h"
 #include "sdk_provider_bundle.h"
@@ -109,6 +110,21 @@ private:
     Json HandleOcrExtractText(const std::string& connection_id, const Request& request);
     Json HandleBarcodeDetect(const std::string& connection_id, const Request& request);
     Json HandleFileConvert(const std::string& connection_id, const Request& request);
+    Json HandleSaneStatus(const std::string& connection_id, const Request& request);
+    Json HandleSaneList(const std::string& connection_id, const Request& request);
+    Json HandleSaneWatchStart(const std::string& connection_id, const Request& request);
+    Json HandleSaneWatchStop(const std::string& connection_id, const Request& request);
+    Json HandleSaneOpen(const std::string& connection_id, const Request& request);
+    Json HandleSaneClose(const std::string& connection_id, const Request& request);
+    Json HandleSaneGetOptions(const std::string& connection_id, const Request& request);
+    Json HandleSaneSetOptions(const std::string& connection_id, const Request& request);
+    Json HandleSaneProfileList(const std::string& connection_id, const Request& request);
+    Json HandleSaneProfileSave(const std::string& connection_id, const Request& request);
+    Json HandleSaneProfileApply(const std::string& connection_id, const Request& request);
+    Json HandleSaneProfileDelete(const std::string& connection_id, const Request& request);
+    Json HandleSaneScan(const std::string& connection_id, const Request& request);
+    Json HandleSaneScanGet(const std::string& connection_id, const Request& request);
+    Json HandleSaneScanCancel(const std::string& connection_id, const Request& request);
 
     AuthorizationService::SessionResult RequireCapability(const std::string& connection_id,
                                                           const std::string& capability) const;
@@ -120,6 +136,8 @@ private:
     Json BuildAuthContextJson(const AuthContext& auth_context) const;
     Json BuildDeviceJson(const SdkDeviceDescriptor& device) const;
     const MethodDescriptor* FindMethod(const std::string& method) const;
+    void DispatchSaneDeviceEvent(const SdkSaneDeviceEvent& event);
+    void DispatchSaneScanTaskEvent(const SdkSaneScanTaskEvent& event);
     void RememberOpenedDevice(const std::string& connection_id, const std::string& device_id);
     void ForgetOpenedDevice(const std::string& connection_id, const std::string& device_id);
     std::vector<std::string> ClearOpenedDevices(const std::string& connection_id);
@@ -131,6 +149,8 @@ private:
                                         const std::string& asset_id) const;
 
     SdkConfig config_;
+    mutable std::mutex command_event_sink_mu_;
+    CommandEventSink command_event_sink_;
     ProviderBundle providers_;
     AuthorizationService authorization_service_;
     VideoSessionService video_session_service_;
@@ -139,6 +159,7 @@ private:
     OcrFacade ocr_facade_;
     OfdFacade ofd_facade_;
     RecognitionFacade recognition_facade_;
+    SaneFacade sane_facade_;
     CaptureTaskService capture_task_service_;
     StatusSupplier status_supplier_;
     VideoFrameSink video_frame_sink_;
@@ -148,6 +169,8 @@ private:
     mutable std::mutex image_assets_mu_;
     std::map<std::string, std::string> image_asset_connection_by_task_;
     std::map<std::string, std::map<std::string, SdkCaptureAsset> > image_assets_by_task_;
+    mutable std::mutex sane_tasks_mu_;
+    std::map<std::string, SdkSaneScanTask> sane_tasks_;
     mutable std::mutex opened_devices_mu_;
     std::map<std::string, std::set<std::string> > opened_devices_by_connection_;
 };
