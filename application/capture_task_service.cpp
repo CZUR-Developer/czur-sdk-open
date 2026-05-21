@@ -4,6 +4,11 @@
 #include "capture_task_service.h"
 
 #include <ctime>
+#include <iomanip>
+#include <sstream>
+#include <sys/stat.h>
+
+#include "sdk_runtime_paths.h"
 
 namespace editor {
 namespace sdk {
@@ -57,10 +62,25 @@ std::string TrimTrailingSlash(const std::string& value) {
     return value;
 }
 
+uint64_t LocalFileSize(const std::string& path) {
+    struct stat st;
+    if (path.empty() || ::stat(path.c_str(), &st) != 0) {
+        return 0;
+    }
+    return static_cast<uint64_t>(st.st_size);
+}
+
+std::string CaptureEnhanceStepDir(const std::string& task_id, std::size_t index) {
+    std::ostringstream name;
+    name << "enhance-step-" << std::setw(3) << std::setfill('0') << (index + 1);
+    return JoinPath(GetSdkOpenTaskAssetDir("capture", task_id, "assets"), name.str());
+}
+
 } // namespace
 
 CaptureTaskService::CaptureTaskService(const ProviderBundle& providers, const std::string& asset_base_url)
     : pipeline_service_(providers),
+      providers_(providers),
       asset_base_url_(TrimTrailingSlash(asset_base_url)),
       next_task_seq_(1) {}
 
@@ -192,19 +212,94 @@ void CaptureTaskService::RunTask(const std::string& task_id, CaptureTaskStartReq
             PublishEvent(request.connection_id, "capture.stage.updated", snapshot, &stage);
         });
 
+    CapturePipelineResult final_pipeline_result = pipeline_result;
+    if (IsOkStatusCode(final_pipeline_result.code) &&
+        !request.pipeline.steps.empty() &&
+        providers_.image_enhance_provider) {
+        std::vector<SdkImageEnhancePage> pages;
+        for (std::vector<SdkCaptureAsset>::const_iterator it = final_pipeline_result.assets.begin();
+             it != final_pipeline_result.assets.end();
+             ++it) {
+            if (it->path.empty()) {
+                continue;
+            }
+            if (it->kind == "final" || it->kind.find("final_") == 0) {
+                SdkImageEnhancePage page;
+                page.source_index = static_cast<int>(pages.size() + 1);
+                page.output_index = page.source_index;
+                page.path = it->path;
+                pages.push_back(page);
+            }
+        }
+        if (!pages.empty()) {
+            SdkCaptureStageResult enhance_stage;
+            enhance_stage.name = "image_enhance";
+            enhance_stage.status = "running";
+            enhance_stage.provider = providers_.image_enhance_provider->ProviderName();
+            enhance_stage.message = "running";
+            PublishEvent(request.connection_id, "capture.stage.updated", running, &enhance_stage);
+
+            bool failed = false;
+            std::string error;
+            for (std::size_t step_index = 0; !failed && step_index < request.pipeline.steps.size(); ++step_index) {
+                const SdkImageEnhanceStep& step = request.pipeline.steps[step_index];
+                if (!step.enabled) {
+                    continue;
+                }
+                SdkImageEnhanceStepRequest step_request;
+                step_request.task_id = task_id;
+                step_request.step = step;
+                step_request.pages = pages;
+                step_request.output_dir = CaptureEnhanceStepDir(task_id, step_index);
+                EnsureDirectoryRecursive(step_request.output_dir);
+                const SdkImageEnhanceStepResult step_result = providers_.image_enhance_provider->RunStep(step_request);
+                if (!IsOkStatusCode(step_result.code)) {
+                    if (step.on_error == "skip") {
+                        final_pipeline_result.warnings.push_back(step.type + " skipped: " + step_result.message);
+                        continue;
+                    }
+                    failed = true;
+                    error = step_result.message;
+                    break;
+                }
+                pages = step_result.pages;
+            }
+            enhance_stage.status = failed ? "failed" : "succeeded";
+            enhance_stage.message = failed ? error : "ok";
+            final_pipeline_result.stages.push_back(enhance_stage);
+            if (failed || pages.empty()) {
+                final_pipeline_result.code = ToCode(SdkStatusCode::ProviderCallFailed);
+                final_pipeline_result.message = failed ? error : "image enhance produced no output pages";
+                final_pipeline_result.status = "failed";
+            } else {
+                std::vector<SdkCaptureAsset> enhanced_assets;
+                for (std::vector<SdkImageEnhancePage>::const_iterator it = pages.begin(); it != pages.end(); ++it) {
+                    SdkCaptureAsset asset;
+                    asset.asset_id = "asset-enhanced-final-" + std::to_string(static_cast<long long>(enhanced_assets.size() + 1));
+                    asset.kind = "final";
+                    asset.path = it->path;
+                    asset.content_type = "image/jpeg";
+                    asset.size = LocalFileSize(asset.path);
+                    enhanced_assets.push_back(asset);
+                }
+                final_pipeline_result.assets = enhanced_assets;
+            }
+        }
+    }
+
     CaptureTaskSnapshot final_task;
     {
         std::lock_guard<std::mutex> lock(mu_);
         CaptureTaskSnapshot& task = tasks_[task_id];
-        task.status = pipeline_result.status;
-        task.stages = pipeline_result.stages;
-        task.assets = pipeline_result.assets;
+        task.status = final_pipeline_result.status;
+        task.stages = final_pipeline_result.stages;
+        task.assets = final_pipeline_result.assets;
         AttachAssetUrls(task_id, &task.assets);
-        task.warnings = pipeline_result.warnings;
-        task.code = pipeline_result.code;
-        task.message = pipeline_result.message;
-        if (!IsOkStatusCode(pipeline_result.code)) {
-            task.error = pipeline_result.message;
+        task.warnings = final_pipeline_result.warnings;
+        task.code = final_pipeline_result.code;
+        task.message = final_pipeline_result.message;
+        if (!IsOkStatusCode(final_pipeline_result.code)) {
+            task.error = final_pipeline_result.message;
         }
         busy_devices_.erase(request.device_id);
         final_task = task;

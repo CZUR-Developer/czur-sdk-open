@@ -85,6 +85,14 @@
 - `image.process`
 - `image.process_page`
 - `image.apply_color_mode`
+- `image.enhance_capabilities`
+- `image.enhance`
+- `image.enhance_get`
+- `image.enhance_cancel`
+- `image.enhance_workflow_list`
+- `image.enhance_workflow_get`
+- `image.enhance_workflow_save`
+- `image.enhance_workflow_delete`
 - `ocr.recognize`
 - `ocr.get`
 - `ocr.cancel`
@@ -106,6 +114,14 @@
 - `sane.scan`
 - `sane.scan_get`
 - `sane.scan_cancel`
+
+### 图像增强 Pipeline
+
+`image.enhance_capabilities` 返回当前 provider 暴露的图像增强能力、运行方式、可用状态、默认参数、参数 schema 和 `localized.en/zh-CN` 展示文案。Demo 和第三方应用应优先通过这个接口动态展示能力，而不是硬编码算法列表。当前内置离线能力包括黑边优化、统一规格、旋转、空白页检测和红绿头；在线能力会在能力列表中暴露，但在未配置在线 provider 时返回不可用。
+
+`image.enhance` 是异步图像增强任务入口，输入为一张或多张图片，`pipeline.steps` 按用户传入顺序执行，最终可输出图片页，或通过现有文件转换能力导出 PDF/OFD/TIFF。`sane.scan` 和 `capture.take` 也支持传入同一份 `pipeline` 作为后置处理；SANE 会在扫描页完成后先增强再导出，Capture 会在现有 final 图片资产上执行增强步骤。空白页检测默认参数为 `action=drop`。
+
+`image.enhance_workflow_*` 方法用于把用户自定义的增强 pipeline 保存到 SDK 工作目录。Demo 会在图像增强页保存工作流，并在拍照采集或 SANE 扫描流程中选择复用。
 
 ### SANE Linux-only 说明
 

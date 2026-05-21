@@ -213,6 +213,31 @@ bool WriteBinaryFile(const std::string& path, const std::string& content) {
     return static_cast<bool>(out);
 }
 
+bool ReadJsonFile(const std::string& path, Json* out_json) {
+    if (out_json == NULL) {
+        return false;
+    }
+    std::ifstream in(path.c_str(), std::ios::binary);
+    if (!in) {
+        return false;
+    }
+    try {
+        in >> *out_json;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool WriteJsonFile(const std::string& path, const Json& value) {
+    std::ofstream out(path.c_str(), std::ios::binary | std::ios::trunc);
+    if (!out) {
+        return false;
+    }
+    out << value.dump(2);
+    return static_cast<bool>(out);
+}
+
 int GetOptionalIntField(const Json& obj, const char* key, int default_value) {
     const auto it = obj.find(key);
     if (it != obj.end() && it->is_number_integer()) {
@@ -557,6 +582,147 @@ Json JsonFromEncodedValue(const std::string& value_json) {
 
 std::string EncodeJsonValue(const Json& value) {
     return value.dump();
+}
+
+SdkImageEnhancePipeline ParseImageEnhancePipeline(const Json& pipeline_json) {
+    SdkImageEnhancePipeline pipeline;
+    if (pipeline_json.empty()) {
+        return pipeline;
+    }
+    const std::string version = GetOptionalStringField(pipeline_json, "version");
+    if (!version.empty()) {
+        pipeline.version = version;
+    }
+    const Json target_json = GetOptionalObjectField(pipeline_json, "target");
+    if (!target_json.empty()) {
+        const std::string type = GetOptionalStringField(target_json, "type");
+        const std::string format = GetOptionalStringField(target_json, "format");
+        const std::string export_type = GetOptionalStringField(target_json, "export_type");
+        if (!type.empty()) {
+            pipeline.target.type = type;
+        }
+        if (!format.empty()) {
+            pipeline.target.format = format;
+        }
+        if (!export_type.empty()) {
+            pipeline.target.export_type = export_type;
+        }
+        pipeline.target.output_path = GetOptionalStringField(target_json, "path");
+        if (pipeline.target.output_path.empty()) {
+            pipeline.target.output_path = GetOptionalStringField(target_json, "output_path");
+        }
+        pipeline.target.output_dir = GetOptionalStringField(target_json, "dir");
+        if (pipeline.target.output_dir.empty()) {
+            pipeline.target.output_dir = GetOptionalStringField(target_json, "output_dir");
+        }
+        pipeline.target.quality = GetOptionalIntField(target_json, "quality", pipeline.target.quality);
+        const std::string tiff_color = GetOptionalStringField(target_json, "tiff_color");
+        const std::string tiff_compression = GetOptionalStringField(target_json, "tiff_compression");
+        if (!tiff_color.empty()) {
+            pipeline.target.tiff_color = tiff_color;
+        }
+        if (!tiff_compression.empty()) {
+            pipeline.target.tiff_compression = tiff_compression;
+        }
+    }
+    const Json options_json = GetOptionalObjectField(pipeline_json, "options");
+    pipeline.keep_intermediate = GetOptionalBoolField(options_json, "keep_intermediate", pipeline.keep_intermediate);
+    pipeline.include_metadata = GetOptionalBoolField(options_json, "include_metadata", pipeline.include_metadata);
+    const Json::const_iterator steps_it = pipeline_json.find("steps");
+    if (steps_it != pipeline_json.end() && steps_it->is_array()) {
+        int index = 1;
+        for (Json::const_iterator it = steps_it->begin(); it != steps_it->end(); ++it) {
+            if (!it->is_object()) {
+                continue;
+            }
+            SdkImageEnhanceStep step;
+            step.id = GetOptionalStringField(*it, "id");
+            if (step.id.empty()) {
+                step.id = "step-" + std::to_string(index);
+            }
+            step.type = GetOptionalStringField(*it, "type");
+            step.provider = GetOptionalStringField(*it, "provider");
+            if (step.provider.empty()) {
+                step.provider = "auto";
+            }
+            step.enabled = GetOptionalBoolField(*it, "enabled", true);
+            step.on_error = GetOptionalStringField(*it, "on_error");
+            if (step.on_error.empty()) {
+                step.on_error = "fail";
+            }
+            const Json params_json = GetOptionalObjectField(*it, "params");
+            step.params_json = params_json.empty() ? "{}" : EncodeJsonValue(params_json);
+            if (!step.type.empty()) {
+                pipeline.steps.push_back(step);
+                ++index;
+            }
+        }
+    }
+    return pipeline;
+}
+
+std::string ImageEnhanceWorkflowDir() {
+    return JoinPath(GetSdkOpenWorkDir(), "profiles");
+}
+
+std::string ImageEnhanceWorkflowStorePath() {
+    return JoinPath(ImageEnhanceWorkflowDir(), "image_enhance_workflows.json");
+}
+
+Json LoadImageEnhanceWorkflowStore() {
+    Json store;
+    if (!ReadJsonFile(ImageEnhanceWorkflowStorePath(), &store) || !store.is_object()) {
+        store = Json::object();
+    }
+    if (store.find("workflows") == store.end() || !store["workflows"].is_array()) {
+        store["workflows"] = Json::array();
+    }
+    return store;
+}
+
+bool SaveImageEnhanceWorkflowStore(const Json& store) {
+    if (!EnsureDirectoryRecursive(ImageEnhanceWorkflowDir())) {
+        return false;
+    }
+    return WriteJsonFile(ImageEnhanceWorkflowStorePath(), store);
+}
+
+std::string CurrentTimestampString() {
+    return std::to_string(static_cast<long long>(std::time(NULL)));
+}
+
+std::string NextWorkflowId() {
+    static uint64_t seq = 1;
+    return "wf-" + CurrentTimestampString() + "-" + std::to_string(static_cast<long long>(seq++));
+}
+
+Json NormalizeImageEnhanceWorkflow(Json workflow) {
+    if (!workflow.is_object()) {
+        workflow = Json::object();
+    }
+    if (!workflow.contains("workflow_id") || !workflow["workflow_id"].is_string() || workflow["workflow_id"].get<std::string>().empty()) {
+        workflow["workflow_id"] = NextWorkflowId();
+    }
+    if (!workflow.contains("name") || !workflow["name"].is_string() || workflow["name"].get<std::string>().empty()) {
+        workflow["name"] = "Untitled workflow";
+    }
+    if (!workflow.contains("description") || !workflow["description"].is_string()) {
+        workflow["description"] = "";
+    }
+    if (!workflow.contains("pipeline") || !workflow["pipeline"].is_object()) {
+        workflow["pipeline"] = Json{{"version", "image.enhance.pipeline.v1"},
+                                    {"steps", Json::array()},
+                                    {"target", Json{{"type", "images"}, {"format", "jpg"}, {"export_type", "single-page"}}}};
+    }
+    if (!workflow["pipeline"].contains("target") || !workflow["pipeline"]["target"].is_object()) {
+        workflow["pipeline"]["target"] = Json{{"type", "images"}, {"format", "jpg"}, {"export_type", "single-page"}};
+    }
+    const std::string now = CurrentTimestampString();
+    if (!workflow.contains("created_at") || !workflow["created_at"].is_string()) {
+        workflow["created_at"] = now;
+    }
+    workflow["updated_at"] = now;
+    return workflow;
 }
 
 Json BuildSaneStatusJson(const SdkSaneStatusResult& result, const std::string& provider) {
@@ -943,6 +1109,7 @@ CommandApplicationService::CommandApplicationService(const SdkConfig& config, co
       recognition_facade_(providers_),
       sane_facade_(providers_),
       capture_task_service_(providers_, BuildDefaultAssetBaseUrl(config_)),
+      image_enhance_task_service_(providers_, BuildDefaultAssetBaseUrl(config_)),
       next_image_task_seq_(1) {
     methods_.push_back(MakeMethod("system.ping", false, "SDK heartbeat probe"));
     methods_.push_back(MakeMethod("system.info", false, "SDK runtime status snapshot"));
@@ -965,6 +1132,14 @@ CommandApplicationService::CommandApplicationService(const SdkConfig& config, co
     methods_.push_back(MakeMethod("image.process", true, "Run one combined image-processing request"));
     methods_.push_back(MakeMethod("image.process_page", true, "Run page processing and keep the source image format"));
     methods_.push_back(MakeMethod("image.apply_color_mode", true, "Apply one color mode and keep the source image format"));
+    methods_.push_back(MakeMethod("image.enhance_capabilities", true, "List image enhancement pipeline capabilities"));
+    methods_.push_back(MakeMethod("image.enhance", true, "Submit one image enhancement pipeline task"));
+    methods_.push_back(MakeMethod("image.enhance_get", true, "Get one image enhancement task snapshot"));
+    methods_.push_back(MakeMethod("image.enhance_cancel", true, "Cancel one image enhancement task"));
+    methods_.push_back(MakeMethod("image.enhance_workflow_list", true, "List saved image enhancement workflows"));
+    methods_.push_back(MakeMethod("image.enhance_workflow_get", true, "Get one saved image enhancement workflow"));
+    methods_.push_back(MakeMethod("image.enhance_workflow_save", true, "Save one image enhancement workflow"));
+    methods_.push_back(MakeMethod("image.enhance_workflow_delete", true, "Delete one image enhancement workflow"));
     methods_.push_back(MakeMethod("ocr.recognize", true, "Submit one OCR request"));
     methods_.push_back(MakeMethod("ocr.get", true, "Get one OCR task snapshot"));
     methods_.push_back(MakeMethod("ocr.cancel", true, "Cancel one OCR task"));
@@ -1002,6 +1177,7 @@ void CommandApplicationService::SetVideoStreamClosedSink(VideoStreamClosedSink s
 
 void CommandApplicationService::SetCommandEventSink(CommandEventSink sink) {
     capture_task_service_.SetEventSink(sink);
+    image_enhance_task_service_.SetEventSink(sink);
     {
         std::lock_guard<std::mutex> lock(command_event_sink_mu_);
         command_event_sink_ = std::move(sink);
@@ -1099,6 +1275,30 @@ Json CommandApplicationService::HandleRequest(const std::string& connection_id, 
     }
     if (request.method == "image.apply_color_mode") {
         return HandleImageApplyColorMode(connection_id, request);
+    }
+    if (request.method == "image.enhance_capabilities") {
+        return HandleImageEnhanceCapabilities(connection_id, request);
+    }
+    if (request.method == "image.enhance") {
+        return HandleImageEnhance(connection_id, request);
+    }
+    if (request.method == "image.enhance_get") {
+        return HandleImageEnhanceGet(connection_id, request);
+    }
+    if (request.method == "image.enhance_cancel") {
+        return HandleImageEnhanceCancel(connection_id, request);
+    }
+    if (request.method == "image.enhance_workflow_list") {
+        return HandleImageEnhanceWorkflowList(connection_id, request);
+    }
+    if (request.method == "image.enhance_workflow_get") {
+        return HandleImageEnhanceWorkflowGet(connection_id, request);
+    }
+    if (request.method == "image.enhance_workflow_save") {
+        return HandleImageEnhanceWorkflowSave(connection_id, request);
+    }
+    if (request.method == "image.enhance_workflow_delete") {
+        return HandleImageEnhanceWorkflowDelete(connection_id, request);
     }
     if (request.method == "ocr.recognize") {
         return HandleOcrRecognize(connection_id, request);
@@ -1216,6 +1416,107 @@ void CommandApplicationService::DispatchSaneScanTaskEvent(const SdkSaneScanTaskE
     for (std::vector<SdkCaptureAsset>::iterator it = task.assets.begin(); it != task.assets.end(); ++it) {
         *it = AttachImageAssetUrls(task.task_id, *it);
         RegisterImageAsset(task.connection_id, task.task_id, *it);
+    }
+
+    SdkImageEnhancePipeline sane_pipeline;
+    {
+        std::lock_guard<std::mutex> lock(sane_tasks_mu_);
+        std::map<std::string, SdkImageEnhancePipeline>::const_iterator pipeline_it = sane_pipelines_by_task_.find(task.task_id);
+        if (pipeline_it != sane_pipelines_by_task_.end()) {
+            sane_pipeline = pipeline_it->second;
+        }
+    }
+    if (task.status == "completed" && !sane_pipeline.steps.empty() && !task.output_paths.empty()) {
+        task.status = "enhancing";
+        task.phase = "enhancing";
+        task.progress = 90;
+        task.message = "enhancing scan pages";
+        {
+            std::lock_guard<std::mutex> lock(sane_tasks_mu_);
+            sane_tasks_[task.task_id] = task;
+        }
+        CommandEventSink enhance_sink;
+        {
+            std::lock_guard<std::mutex> lock(command_event_sink_mu_);
+            enhance_sink = command_event_sink_;
+        }
+        if (enhance_sink && !task.connection_id.empty()) {
+            enhance_sink(task.connection_id,
+                         BuildWsEvent("sane.scan_changed",
+                                      Json{{"task_id", task.task_id},
+                                           {"task", BuildSaneScanTaskJson(task)},
+                                           {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}},
+                                      ToCode(SdkStatusCode::Ok),
+                                      task.message));
+        }
+
+        std::vector<SdkImageEnhancePage> pages;
+        for (std::size_t i = 0; i < task.output_paths.size(); ++i) {
+            SdkImageEnhancePage page;
+            page.source_index = static_cast<int>(i + 1);
+            page.output_index = static_cast<int>(i + 1);
+            page.path = task.output_paths[i];
+            pages.push_back(page);
+        }
+        bool enhance_failed = false;
+        std::string enhance_error;
+        if (!providers_.image_enhance_provider) {
+            enhance_failed = true;
+            enhance_error = "image enhance provider is not available";
+        }
+        for (std::size_t step_index = 0; !enhance_failed && step_index < sane_pipeline.steps.size(); ++step_index) {
+            const SdkImageEnhanceStep& step = sane_pipeline.steps[step_index];
+            if (!step.enabled) {
+                continue;
+            }
+            SdkImageEnhanceStepRequest step_request;
+            step_request.task_id = task.task_id;
+            step_request.step = step;
+            step_request.pages = pages;
+            step_request.output_dir = JoinLocalPath(task.output_dir.empty() ? GetSdkOpenTaskAssetDir("sane", task.task_id, "enhance")
+                                                                            : task.output_dir,
+                                                    "enhance-step-" + std::to_string(static_cast<long long>(step_index + 1)));
+            EnsureDirectoryRecursive(step_request.output_dir);
+            const SdkImageEnhanceStepResult step_result = providers_.image_enhance_provider->RunStep(step_request);
+            if (!IsOkStatusCode(step_result.code)) {
+                if (step.on_error == "skip") {
+                    continue;
+                }
+                enhance_failed = true;
+                enhance_error = step_result.message;
+                break;
+            }
+            pages = step_result.pages;
+        }
+
+        if (enhance_failed || pages.empty()) {
+            task.status = "failed";
+            task.phase = "failed";
+            task.progress = 100;
+            task.message = enhance_failed ? enhance_error : "image enhance produced no output pages";
+            task.error = task.message;
+        } else {
+            task.output_paths.clear();
+            task.assets.clear();
+            for (std::vector<SdkImageEnhancePage>::const_iterator it = pages.begin(); it != pages.end(); ++it) {
+                task.output_paths.push_back(it->path);
+                SdkCaptureAsset asset;
+                asset.asset_id = "asset-sane-enhanced-page-" + std::to_string(static_cast<long long>(task.assets.size() + 1));
+                asset.kind = "sane_scan_enhanced_page";
+                asset.path = it->path;
+                asset.content_type = ContentTypeForImageExtension(ExtensionFromFilename(it->path));
+                asset.size = FileSize(it->path);
+                asset = AttachImageAssetUrls(task.task_id, asset);
+                RegisterImageAsset(task.connection_id, task.task_id, asset);
+                task.assets.push_back(asset);
+            }
+            task.output_path = task.output_paths.empty() ? "" : task.output_paths.front();
+            task.page_count = static_cast<int>(task.output_paths.size());
+            task.status = "completed";
+            task.phase = "enhanced";
+            task.progress = 94;
+            task.message = "scan pages enhanced";
+        }
     }
 
     const std::string document_target = NormalizeImageFormat(task.output_type);
@@ -1372,12 +1673,27 @@ CommandApplicationService::AssetAccessResult CommandApplicationService::ResolveA
 
     AssetAccessResult image_asset = ResolveImageAsset(session_result.connection_id, task_id, asset_id);
     if (IsOkStatusCode(image_asset.code)) {
-        if (!IsOkStatusCode(authorization_service_.RequireCapability(session_result.connection_id, "image.process").code)) {
+        const bool can_read_image_asset =
+            IsOkStatusCode(authorization_service_.RequireCapability(session_result.connection_id, "image.process").code) ||
+            IsOkStatusCode(authorization_service_.RequireCapability(session_result.connection_id, "image.enhance").code);
+        if (!can_read_image_asset) {
             result.code = ToCode(SdkStatusCode::CapabilityNotAllowed);
             result.message = "capability not allowed";
             return result;
         }
         return image_asset;
+    }
+
+    if (IsOkStatusCode(authorization_service_.RequireCapability(session_result.connection_id, "image.enhance").code)) {
+        const SdkImageEnhanceTaskSnapshot enhance_task = image_enhance_task_service_.GetTask(session_result.connection_id, task_id);
+        if (IsOkStatusCode(enhance_task.code)) {
+            for (std::vector<SdkCaptureAsset>::const_iterator it = enhance_task.assets.begin(); it != enhance_task.assets.end(); ++it) {
+                if (it->asset_id == asset_id) {
+                    result.asset = *it;
+                    return result;
+                }
+            }
+        }
     }
 
     if (!IsOkStatusCode(authorization_service_.RequireCapability(session_result.connection_id, "capture.get").code)) {
@@ -1406,9 +1722,11 @@ CommandApplicationService::ImageUploadResult CommandApplicationService::UploadIm
     }
     const bool can_upload_for_image =
         IsOkStatusCode(authorization_service_.RequireCapability(session_result.connection_id, "image.process").code);
+    const bool can_upload_for_enhance =
+        IsOkStatusCode(authorization_service_.RequireCapability(session_result.connection_id, "image.enhance").code);
     const bool can_upload_for_file =
         IsOkStatusCode(authorization_service_.RequireCapability(session_result.connection_id, "file.convert").code);
-    if (!can_upload_for_image && !can_upload_for_file) {
+    if (!can_upload_for_image && !can_upload_for_enhance && !can_upload_for_file) {
         result.code = ToCode(SdkStatusCode::CapabilityNotAllowed);
         result.message = "capability not allowed";
         return result;
@@ -1759,6 +2077,7 @@ Json CommandApplicationService::HandleCaptureTake(const std::string& connection_
     start_request.timeout_ms = GetOptionalIntField(request.params, "timeout_ms", 15000);
     start_request.auth_context = session_result.auth_context;
     start_request.profile = ParseCaptureProfile(request.params, device_id);
+    start_request.pipeline = ParseImageEnhancePipeline(GetOptionalObjectField(request.params, "pipeline"));
     if (start_request.profile.device_id.empty()) {
         start_request.profile.device_id = device_id;
     }
@@ -2402,6 +2721,232 @@ Json CommandApplicationService::HandleImageApplyColorMode(const std::string& con
                                 {"provider", providers_.graphic_provider ? providers_.graphic_provider->ProviderName() : ""}});
 }
 
+Json CommandApplicationService::HandleImageEnhanceCapabilities(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, "image.enhance");
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    Json providers = Json::array();
+    if (providers_.image_enhance_provider) {
+        const SdkImageEnhanceCapabilityResult result = providers_.image_enhance_provider->ListCapabilities();
+        if (!IsOkStatusCode(result.code)) {
+            return BuildWsResponse(request.request_id, result.code, result.message);
+        }
+        providers.push_back(BuildImageEnhanceCapabilityProviderJson(result));
+    }
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"providers", providers},
+                                {"pipeline_version", "image.enhance.pipeline.v1"}});
+}
+
+Json CommandApplicationService::HandleImageEnhance(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+
+    SdkImageEnhanceTaskRequest enhance_request;
+    enhance_request.connection_id = connection_id;
+    enhance_request.output_dir = GetOptionalStringField(request.params, "output_dir");
+    Json source_json = GetOptionalObjectField(request.params, "source");
+    if (source_json.empty()) {
+        source_json = request.params;
+    }
+
+    std::vector<std::string> upload_ids = GetOptionalStringArrayField(source_json, "input_upload_ids");
+    const std::string single_upload_id = GetOptionalStringField(source_json, "input_upload_id");
+    if (!single_upload_id.empty()) {
+        upload_ids.push_back(single_upload_id);
+    }
+    enhance_request.input_paths = GetOptionalStringArrayField(source_json, "input_paths");
+    const std::string single_input_path = GetOptionalStringField(source_json, "input_path");
+    if (!single_input_path.empty()) {
+        enhance_request.input_paths.push_back(single_input_path);
+    }
+
+    for (std::vector<std::string>::const_iterator it = upload_ids.begin(); it != upload_ids.end(); ++it) {
+        AssetAccessResult input_asset = ResolveImageAsset(connection_id, *it, "asset-original");
+        if (!IsOkStatusCode(input_asset.code)) {
+            return BuildWsResponse(request.request_id, input_asset.code, input_asset.message);
+        }
+        enhance_request.input_paths.push_back(input_asset.asset.path);
+    }
+    if (enhance_request.input_paths.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "image.enhance source is empty");
+    }
+
+    const AuthorizationService::SessionResult quota_result =
+        ConsumeQuota(connection_id, request.method, request.request_id, static_cast<int>(enhance_request.input_paths.size()));
+    if (!IsOkStatusCode(quota_result.code)) {
+        return BuildWsResponse(request.request_id, quota_result.code, quota_result.message);
+    }
+
+    enhance_request.pipeline = ParseImageEnhancePipeline(GetOptionalObjectField(request.params, "pipeline"));
+    const SdkImageEnhanceTaskResult result = image_enhance_task_service_.StartTask(enhance_request);
+    if (!IsOkStatusCode(result.code)) {
+        return BuildWsResponse(request.request_id, result.code, result.message);
+    }
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"accepted", result.accepted},
+                                {"task_id", result.task_id},
+                                {"status", result.task.status},
+                                {"task", BuildImageEnhanceTaskJson(result.task)}});
+}
+
+Json CommandApplicationService::HandleImageEnhanceGet(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    const std::string task_id = GetOptionalStringField(request.params, "task_id");
+    if (task_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "task_id required");
+    }
+    const SdkImageEnhanceTaskSnapshot task = image_enhance_task_service_.GetTask(connection_id, task_id);
+    if (!IsOkStatusCode(task.code)) {
+        return BuildWsResponse(request.request_id, task.code, task.message);
+    }
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"task_id", task_id},
+                                {"task", BuildImageEnhanceTaskJson(task)}});
+}
+
+Json CommandApplicationService::HandleImageEnhanceCancel(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkImageEnhanceCancelRequest cancel_request;
+    cancel_request.task_id = GetOptionalStringField(request.params, "task_id");
+    if (cancel_request.task_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "task_id required");
+    }
+    const SdkImageEnhanceTaskResult result = image_enhance_task_service_.CancelTask(connection_id, cancel_request);
+    if (!IsOkStatusCode(result.code)) {
+        return BuildWsResponse(request.request_id, result.code, result.message);
+    }
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"accepted", result.accepted},
+                                {"task_id", result.task_id},
+                                {"task", BuildImageEnhanceTaskJson(result.task)}});
+}
+
+Json CommandApplicationService::HandleImageEnhanceWorkflowList(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, "image.enhance");
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    const Json store = LoadImageEnhanceWorkflowStore();
+    const Json workflows = store.find("workflows") != store.end() && store["workflows"].is_array() ? store["workflows"] : Json::array();
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"workflows", workflows},
+                                {"count", workflows.size()},
+                                {"provider", providers_.image_enhance_provider ? providers_.image_enhance_provider->ProviderName() : ""}});
+}
+
+Json CommandApplicationService::HandleImageEnhanceWorkflowGet(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, "image.enhance");
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    const std::string workflow_id = GetOptionalStringField(request.params, "workflow_id");
+    if (workflow_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "workflow_id required");
+    }
+    const Json store = LoadImageEnhanceWorkflowStore();
+    const Json workflows = store.find("workflows") != store.end() && store["workflows"].is_array() ? store["workflows"] : Json::array();
+    for (Json::const_iterator it = workflows.begin(); it != workflows.end(); ++it) {
+        if (it->is_object() && GetOptionalStringField(*it, "workflow_id") == workflow_id) {
+            return BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", Json{{"workflow", *it}});
+        }
+    }
+    return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "image enhance workflow not found");
+}
+
+Json CommandApplicationService::HandleImageEnhanceWorkflowSave(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, "image.enhance");
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    Json workflow = GetOptionalObjectField(request.params, "workflow");
+    if (workflow.empty()) {
+        workflow = request.params;
+    }
+    workflow = NormalizeImageEnhanceWorkflow(workflow);
+    const std::string workflow_id = GetOptionalStringField(workflow, "workflow_id");
+    Json store = LoadImageEnhanceWorkflowStore();
+    Json workflows = store.find("workflows") != store.end() && store["workflows"].is_array() ? store["workflows"] : Json::array();
+    bool updated = false;
+    for (Json::iterator it = workflows.begin(); it != workflows.end(); ++it) {
+        if (it->is_object() && GetOptionalStringField(*it, "workflow_id") == workflow_id) {
+            if (it->contains("created_at") && (*it)["created_at"].is_string()) {
+                workflow["created_at"] = (*it)["created_at"];
+            }
+            *it = workflow;
+            updated = true;
+            break;
+        }
+    }
+    if (!updated) {
+        workflows.push_back(workflow);
+    }
+    store["workflows"] = workflows;
+    if (!SaveImageEnhanceWorkflowStore(store)) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "failed to save image enhance workflow");
+    }
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"saved", true},
+                                {"updated", updated},
+                                {"workflow", workflow}});
+}
+
+Json CommandApplicationService::HandleImageEnhanceWorkflowDelete(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, "image.enhance");
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    const std::string workflow_id = GetOptionalStringField(request.params, "workflow_id");
+    if (workflow_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "workflow_id required");
+    }
+    Json store = LoadImageEnhanceWorkflowStore();
+    Json workflows = store.find("workflows") != store.end() && store["workflows"].is_array() ? store["workflows"] : Json::array();
+    Json kept = Json::array();
+    bool deleted = false;
+    for (Json::const_iterator it = workflows.begin(); it != workflows.end(); ++it) {
+        if (it->is_object() && GetOptionalStringField(*it, "workflow_id") == workflow_id) {
+            deleted = true;
+            continue;
+        }
+        kept.push_back(*it);
+    }
+    if (!deleted) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "image enhance workflow not found");
+    }
+    store["workflows"] = kept;
+    if (!SaveImageEnhanceWorkflowStore(store)) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "failed to delete image enhance workflow");
+    }
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"deleted", true},
+                                {"workflow_id", workflow_id},
+                                {"count", kept.size()}});
+}
+
 Json CommandApplicationService::HandleOcrRecognize(const std::string& connection_id, const Request& request) {
     const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
     if (!IsOkStatusCode(session_result.code)) {
@@ -2920,6 +3465,8 @@ Json CommandApplicationService::HandleSaneScan(const std::string& connection_id,
     scan_request.output_path = GetOptionalStringField(request.params, "output_path");
     scan_request.output_dir = GetOptionalStringField(request.params, "output_dir");
     scan_request.export_type = NormalizeExportType(GetOptionalStringField(request.params, "export_type"));
+    const Json pipeline_json = GetOptionalObjectField(request.params, "pipeline");
+    const SdkImageEnhancePipeline scan_pipeline = ParseImageEnhancePipeline(pipeline_json);
     const Json output = GetOptionalObjectField(request.params, "output");
     if (!output.empty()) {
         const std::string output_type = GetOptionalStringField(output, "type");
@@ -2942,6 +3489,31 @@ Json CommandApplicationService::HandleSaneScan(const std::string& connection_id,
     if (scan_request.export_type.empty()) {
         scan_request.export_type = "multi-page";
     }
+    const Json pipeline_target_json = GetOptionalObjectField(pipeline_json, "target");
+    if (!scan_pipeline.steps.empty() && !GetOptionalStringField(pipeline_target_json, "type").empty()) {
+        if (scan_pipeline.target.type == "pdf" ||
+            scan_pipeline.target.type == "ofd" ||
+            scan_pipeline.target.type == "tiff" ||
+            scan_pipeline.target.type == "images" ||
+            scan_pipeline.target.type == "jpg" ||
+            scan_pipeline.target.type == "png") {
+            scan_request.output_type = scan_pipeline.target.type == "jpg" || scan_pipeline.target.type == "png"
+                                           ? "images"
+                                           : scan_pipeline.target.type;
+            scan_request.output_format = scan_pipeline.target.type == "images"
+                                             ? scan_pipeline.target.format
+                                             : scan_request.output_type;
+            if (!scan_pipeline.target.export_type.empty()) {
+                scan_request.export_type = NormalizeExportType(scan_pipeline.target.export_type);
+            }
+            if (!scan_pipeline.target.output_path.empty()) {
+                scan_request.output_path = scan_pipeline.target.output_path;
+            }
+            if (!scan_pipeline.target.output_dir.empty()) {
+                scan_request.output_dir = scan_pipeline.target.output_dir;
+            }
+        }
+    }
     const Json options = request.params.find("options") == request.params.end() ? Json() : request.params["options"];
     scan_request.options = ParseSaneOptionSetItems(options);
     if (scan_request.session_id.empty()) {
@@ -2957,6 +3529,9 @@ Json CommandApplicationService::HandleSaneScan(const std::string& connection_id,
         }
         std::lock_guard<std::mutex> lock(sane_tasks_mu_);
         sane_tasks_[result.task_id] = result.task;
+        if (!scan_pipeline.steps.empty()) {
+            sane_pipelines_by_task_[result.task_id] = scan_pipeline;
+        }
     }
     return BuildWsResponse(request.request_id,
                            result.code,

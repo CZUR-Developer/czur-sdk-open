@@ -223,6 +223,18 @@
             <input v-model="outputPath" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" :disabled="scanBusy" :placeholder="t('pages.saneScanning.outputPlaceholder')">
           </label>
         </div>
+        <div class="mt-4">
+          <ImageEnhanceWorkflowPicker
+            v-model="selectedEnhanceWorkflowId"
+            :title="t('pages.saneScanning.enhanceWorkflow')"
+            :empty-label="t('pages.saneScanning.enhanceWorkflowDescription')"
+            :none-label="t('pages.saneScanning.noEnhanceWorkflow')"
+            :clear-label="t('pages.saneScanning.clearEnhanceWorkflow')"
+            :refresh-label="t('pages.saneScanning.refreshEnhanceWorkflows')"
+            :loading-label="t('pages.saneScanning.loadingEnhanceWorkflows')"
+            @selected="handleEnhanceWorkflowSelected"
+          />
+        </div>
         <div class="mt-4 flex flex-wrap gap-2">
           <button class="rounded-md bg-cyan-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50" :disabled="isRunning || scanBusy || !sessionId" @click="scan">
             {{ t('pages.saneScanning.startScan') }}
@@ -290,10 +302,12 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 
+import ImageEnhanceWorkflowPicker from '../components/blocks/ImageEnhanceWorkflowPicker.vue';
 import JsonPanel from '../components/blocks/JsonPanel.vue';
 import SectionPanel from '../components/blocks/SectionPanel.vue';
 import StatusPill from '../components/cards/StatusPill.vue';
 import { onCommandEvent, sendBoundCommand } from '../services/auth-session';
+import type { EnhancePipeline, EnhanceWorkflow } from '../services/image-enhance-workflows';
 import { buildCommandRequest, isOkResponse, type CommandEvent, type CommandResponse } from '../services/protocol';
 import saneI18nZh from '../data/sane_i18n_zh.json';
 
@@ -373,6 +387,8 @@ const selectedProfileId = ref('');
 const outputType = ref('images');
 const exportType = ref('multi-page');
 const outputPath = ref('');
+const selectedEnhanceWorkflowId = ref('');
+const selectedEnhanceWorkflow = ref<EnhanceWorkflow | null>(null);
 const lastTaskId = ref('');
 const lastTask = ref<SaneTask | null>(null);
 const lastRequest = ref<Record<string, unknown> | null>(null);
@@ -536,7 +552,26 @@ async function applyProfile(): Promise<void> {
   await loadOptions();
 }
 
+function handleEnhanceWorkflowSelected(workflow: EnhanceWorkflow | null): void {
+  selectedEnhanceWorkflow.value = workflow;
+}
+
+function buildSaneEnhancePipeline(): EnhancePipeline | undefined {
+  if (!selectedEnhanceWorkflow.value?.pipeline?.steps?.length) {
+    return undefined;
+  }
+  return {
+    ...selectedEnhanceWorkflow.value.pipeline,
+    target: {
+      type: outputType.value,
+      format: outputType.value === 'images' ? 'jpg' : outputType.value,
+      export_type: exportType.value,
+    },
+  };
+}
+
 async function scan(): Promise<void> {
+  const enhancePipeline = buildSaneEnhancePipeline();
   const response = await runCommand('sane.scan', {
     session_id: sessionId.value,
     output: {
@@ -544,6 +579,7 @@ async function scan(): Promise<void> {
       path: outputPath.value || undefined,
       export_type: exportType.value,
     },
+    ...(enhancePipeline ? { pipeline: enhancePipeline } : {}),
   });
   lastTaskId.value = asString(response.data.task_id);
   lastTask.value = asTask(response.data.task);

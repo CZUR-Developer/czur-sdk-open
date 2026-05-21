@@ -70,6 +70,7 @@ set(SDK_OPEN_RUNTIME_SRCS
     application/capture_pipeline_service.cpp
     application/capture_task_service.cpp
     application/command_application_service.cpp
+    application/image_enhance_task_service.cpp
     application/video_session_service.cpp
     facade/device_facade.cpp
     facade/graphic_facade.cpp

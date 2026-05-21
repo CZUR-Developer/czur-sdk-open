@@ -5,6 +5,7 @@ import ConnectionAuthPage from '../pages/ConnectionAuthPage.vue';
 import DeviceVideoPage from '../pages/DeviceVideoPage.vue';
 import EventsResultsPage from '../pages/EventsResultsPage.vue';
 import FileConversionPage from '../pages/FileConversionPage.vue';
+import ImageEnhancementPage from '../pages/ImageEnhancementPage.vue';
 import ImageProcessingPage from '../pages/ImageProcessingPage.vue';
 import OcrRecognitionPage from '../pages/OcrRecognitionPage.vue';
 import ProtocolDebuggerPage from '../pages/ProtocolDebuggerPage.vue';
@@ -66,6 +67,16 @@ export const router = createRouter({
         navKey: 'image-processing',
         titleKey: 'pages.imageProcessing.title',
         subtitleKey: 'pages.imageProcessing.subtitle',
+      },
+    },
+    {
+      path: '/image-enhancement',
+      name: 'image-enhancement',
+      component: ImageEnhancementPage,
+      meta: {
+        navKey: 'image-enhancement',
+        titleKey: 'pages.imageEnhancement.title',
+        subtitleKey: 'pages.imageEnhancement.subtitle',
       },
     },
     {

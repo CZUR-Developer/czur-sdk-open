@@ -719,6 +719,150 @@ struct SdkSaneScanCancelRequest {
     std::string task_id;
 };
 
+struct SdkImageEnhanceCapability {
+    std::string type;
+    std::string title;
+    std::string description;
+    std::string i18n_key;
+    std::string title_zh_cn;
+    std::string description_zh_cn;
+    std::string category;
+    std::string runtime = "offline";
+    bool available = true;
+    std::string unavailable_reason;
+    std::string unavailable_reason_zh_cn;
+    std::string requires_capability;
+    std::string quota_unit = "page";
+    std::vector<std::string> source_types;
+    int min_pages = 1;
+    int max_pages = 1000;
+    std::string page_effect = "transform";
+    bool metadata = false;
+    int order_hint = 0;
+    std::string version = "1.0";
+    std::string defaults_json = "{}";
+    std::string schema_json = "{}";
+};
+
+struct SdkImageEnhanceCapabilityResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    std::string provider;
+    std::string kind = "offline";
+    bool available = true;
+    std::vector<SdkImageEnhanceCapability> capabilities;
+};
+
+struct SdkImageEnhancePage {
+    int source_index = 0;
+    int output_index = 0;
+    std::string path;
+    bool dropped = false;
+    std::string metadata_json = "{}";
+};
+
+struct SdkImageEnhanceStep {
+    std::string id;
+    std::string type;
+    std::string provider = "auto";
+    bool enabled = true;
+    std::string on_error = "fail";
+    std::string params_json = "{}";
+};
+
+struct SdkImageEnhanceTarget {
+    std::string type = "images";
+    std::string format = "jpg";
+    std::string export_type = "single-page";
+    std::string output_path;
+    std::string output_dir;
+    int quality = 90;
+    std::string tiff_color = "color";
+    std::string tiff_compression = "lzw";
+};
+
+struct SdkImageEnhancePipeline {
+    std::string version = "image.enhance.pipeline.v1";
+    std::vector<SdkImageEnhanceStep> steps;
+    SdkImageEnhanceTarget target;
+    bool keep_intermediate = false;
+    bool include_metadata = true;
+};
+
+struct SdkImageEnhanceStepRequest {
+    std::string task_id;
+    SdkImageEnhanceStep step;
+    std::vector<SdkImageEnhancePage> pages;
+    std::string output_dir;
+};
+
+struct SdkImageEnhanceStepResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool processed = false;
+    std::vector<SdkImageEnhancePage> pages;
+    std::string metadata_json = "{}";
+    std::vector<std::string> warnings;
+};
+
+struct SdkImageEnhanceStepSnapshot {
+    std::string id;
+    std::string type;
+    std::string status = "queued";
+    std::string provider;
+    int input_page_count = 0;
+    int output_page_count = 0;
+    std::string metadata_json = "{}";
+    std::vector<std::string> warnings;
+    std::string message = "queued";
+};
+
+struct SdkImageEnhanceTaskSnapshot {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    std::string task_id;
+    std::string connection_id;
+    std::string status = "queued";
+    std::string phase = "queued";
+    int progress = 0;
+    int input_page_count = 0;
+    int output_page_count = 0;
+    std::vector<SdkImageEnhancePage> pages;
+    std::vector<SdkImageEnhanceStepSnapshot> steps;
+    std::vector<SdkCaptureAsset> assets;
+    std::vector<std::string> warnings;
+    std::string output_path;
+    std::vector<std::string> output_paths;
+    std::string output_type = "images";
+    std::string output_format = "jpg";
+    std::string export_type = "single-page";
+    std::string error;
+    bool cancel_requested = false;
+};
+
+struct SdkImageEnhanceTaskRequest {
+    std::string connection_id;
+    std::vector<std::string> input_paths;
+    std::string output_dir;
+    SdkImageEnhancePipeline pipeline;
+};
+
+struct SdkImageEnhanceTaskResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool accepted = false;
+    std::string task_id;
+    SdkImageEnhanceTaskSnapshot task;
+};
+
+struct SdkImageEnhanceGetRequest {
+    std::string task_id;
+};
+
+struct SdkImageEnhanceCancelRequest {
+    std::string task_id;
+};
+
 struct SdkFileConvertRequest {
     std::string input_upload_id;
     std::vector<std::string> input_upload_ids;

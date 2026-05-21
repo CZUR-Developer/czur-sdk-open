@@ -16,6 +16,7 @@
 #include "capture_task_service.h"
 #include "device_facade.h"
 #include "graphic_facade.h"
+#include "image_enhance_task_service.h"
 #include "ocr_facade.h"
 #include "ofd_facade.h"
 #include "recognition_facade.h"
@@ -104,6 +105,14 @@ private:
     Json HandleImageProcess(const std::string& connection_id, const Request& request);
     Json HandleImageProcessPage(const std::string& connection_id, const Request& request);
     Json HandleImageApplyColorMode(const std::string& connection_id, const Request& request);
+    Json HandleImageEnhanceCapabilities(const std::string& connection_id, const Request& request);
+    Json HandleImageEnhance(const std::string& connection_id, const Request& request);
+    Json HandleImageEnhanceGet(const std::string& connection_id, const Request& request);
+    Json HandleImageEnhanceCancel(const std::string& connection_id, const Request& request);
+    Json HandleImageEnhanceWorkflowList(const std::string& connection_id, const Request& request);
+    Json HandleImageEnhanceWorkflowGet(const std::string& connection_id, const Request& request);
+    Json HandleImageEnhanceWorkflowSave(const std::string& connection_id, const Request& request);
+    Json HandleImageEnhanceWorkflowDelete(const std::string& connection_id, const Request& request);
     Json HandleOcrRecognize(const std::string& connection_id, const Request& request);
     Json HandleOcrGet(const std::string& connection_id, const Request& request);
     Json HandleOcrCancel(const std::string& connection_id, const Request& request);
@@ -161,6 +170,7 @@ private:
     RecognitionFacade recognition_facade_;
     SaneFacade sane_facade_;
     CaptureTaskService capture_task_service_;
+    ImageEnhanceTaskService image_enhance_task_service_;
     StatusSupplier status_supplier_;
     VideoFrameSink video_frame_sink_;
     VideoStreamClosedSink video_stream_closed_sink_;
@@ -171,6 +181,7 @@ private:
     std::map<std::string, std::map<std::string, SdkCaptureAsset> > image_assets_by_task_;
     mutable std::mutex sane_tasks_mu_;
     std::map<std::string, SdkSaneScanTask> sane_tasks_;
+    std::map<std::string, SdkImageEnhancePipeline> sane_pipelines_by_task_;
     mutable std::mutex opened_devices_mu_;
     std::map<std::string, std::set<std::string> > opened_devices_by_connection_;
 };
