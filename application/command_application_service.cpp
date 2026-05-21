@@ -823,6 +823,43 @@ Json BuildSaneProfileJson(const SdkSaneProfile& profile) {
                 {"updated_at", profile.updated_at}};
 }
 
+void EnsureSaneImageAssets(SdkSaneScanTask* task) {
+    if (task == NULL || !task->assets.empty() || task->output_paths.empty()) {
+        return;
+    }
+    const std::string output_type = NormalizeLower(task->output_type);
+    const std::string output_format = NormalizeLower(task->output_format);
+    const bool image_output = output_type == "images" ||
+                              output_format == "jpg" ||
+                              output_format == "jpeg" ||
+                              output_format == "png" ||
+                              output_format == "bmp" ||
+                              output_format == "webp" ||
+                              output_format == "tif" ||
+                              output_format == "tiff";
+    if (!image_output) {
+        return;
+    }
+    for (std::vector<std::string>::const_iterator it = task->output_paths.begin();
+         it != task->output_paths.end();
+         ++it) {
+        const std::string extension = ExtensionFromFilename(*it);
+        if (!IsSupportedImageExtension(extension)) {
+            continue;
+        }
+        std::ostringstream asset_id;
+        asset_id << "asset-sane-page-" << std::setw(3) << std::setfill('0')
+                 << static_cast<long long>(task->assets.size() + 1);
+        SdkCaptureAsset asset;
+        asset.asset_id = asset_id.str();
+        asset.kind = "sane_scan_page";
+        asset.path = *it;
+        asset.content_type = ContentTypeForImageExtension(extension);
+        asset.size = FileSize(*it);
+        task->assets.push_back(asset);
+    }
+}
+
 Json BuildSaneScanTaskJson(const SdkSaneScanTask& task) {
     Json output_paths = Json::array();
     for (std::vector<std::string>::const_iterator it = task.output_paths.begin(); it != task.output_paths.end(); ++it) {
@@ -1413,6 +1450,7 @@ void CommandApplicationService::DispatchSaneDeviceEvent(const SdkSaneDeviceEvent
 
 void CommandApplicationService::DispatchSaneScanTaskEvent(const SdkSaneScanTaskEvent& event) {
     SdkSaneScanTask task = event.task;
+    EnsureSaneImageAssets(&task);
     for (std::vector<SdkCaptureAsset>::iterator it = task.assets.begin(); it != task.assets.end(); ++it) {
         *it = AttachImageAssetUrls(task.task_id, *it);
         RegisterImageAsset(task.connection_id, task.task_id, *it);
@@ -1675,7 +1713,9 @@ CommandApplicationService::AssetAccessResult CommandApplicationService::ResolveA
     if (IsOkStatusCode(image_asset.code)) {
         const bool can_read_image_asset =
             IsOkStatusCode(authorization_service_.RequireCapability(session_result.connection_id, "image.process").code) ||
-            IsOkStatusCode(authorization_service_.RequireCapability(session_result.connection_id, "image.enhance").code);
+            IsOkStatusCode(authorization_service_.RequireCapability(session_result.connection_id, "image.enhance").code) ||
+            IsOkStatusCode(authorization_service_.RequireCapability(session_result.connection_id, "file.convert").code) ||
+            IsOkStatusCode(authorization_service_.RequireCapability(session_result.connection_id, "sane.scan").code);
         if (!can_read_image_asset) {
             result.code = ToCode(SdkStatusCode::CapabilityNotAllowed);
             result.message = "capability not allowed";
@@ -3521,6 +3561,7 @@ Json CommandApplicationService::HandleSaneScan(const std::string& connection_id,
     }
     SdkSaneScanResult result = sane_facade_.Scan(scan_request);
     if (!result.task_id.empty()) {
+        EnsureSaneImageAssets(&result.task);
         for (std::vector<SdkCaptureAsset>::iterator it = result.task.assets.begin();
              it != result.task.assets.end();
              ++it) {
@@ -3554,8 +3595,15 @@ Json CommandApplicationService::HandleSaneScanGet(const std::string& connection_
     }
     {
         std::lock_guard<std::mutex> lock(sane_tasks_mu_);
-        std::map<std::string, SdkSaneScanTask>::const_iterator it = sane_tasks_.find(get_request.task_id);
+        std::map<std::string, SdkSaneScanTask>::iterator it = sane_tasks_.find(get_request.task_id);
         if (it != sane_tasks_.end()) {
+            EnsureSaneImageAssets(&it->second);
+            for (std::vector<SdkCaptureAsset>::iterator asset_it = it->second.assets.begin();
+                 asset_it != it->second.assets.end();
+                 ++asset_it) {
+                *asset_it = AttachImageAssetUrls(get_request.task_id, *asset_it);
+                RegisterImageAsset(connection_id, get_request.task_id, *asset_it);
+            }
             return BuildWsResponse(request.request_id,
                                    SdkStatusCode::Ok,
                                    "ok",
@@ -3565,7 +3613,14 @@ Json CommandApplicationService::HandleSaneScanGet(const std::string& connection_
                                         {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
         }
     }
-    const SdkSaneScanResult result = sane_facade_.GetScan(get_request);
+    SdkSaneScanResult result = sane_facade_.GetScan(get_request);
+    EnsureSaneImageAssets(&result.task);
+    for (std::vector<SdkCaptureAsset>::iterator it = result.task.assets.begin();
+         it != result.task.assets.end();
+         ++it) {
+        *it = AttachImageAssetUrls(result.task_id, *it);
+        RegisterImageAsset(connection_id, result.task_id, *it);
+    }
     return BuildWsResponse(request.request_id,
                            result.code,
                            result.message,

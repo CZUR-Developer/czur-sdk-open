@@ -29,7 +29,9 @@
                     :src="inputPreviewUrl"
                     alt=""
                     class="max-h-[420px] max-w-full select-none object-contain"
+                    :class="operation !== 'color' && form.pageProcessing === 'selected_area' ? '' : 'cursor-zoom-in'"
                     @load="handleInputImageLoad"
+                    @click="openInputImageViewer"
                   />
                   <div
                     v-if="operation !== 'color' && form.pageProcessing === 'selected_area'"
@@ -80,7 +82,8 @@
                   v-if="activeOutputPreview?.objectUrl"
                   :src="activeOutputPreview.objectUrl"
                   alt=""
-                  class="max-h-[420px] max-w-full object-contain"
+                  class="max-h-[420px] max-w-full cursor-zoom-in object-contain"
+                  @click="openOutputImageViewer(activeOutputPreview)"
                 />
                 <div v-else class="px-6 text-center text-sm text-slate-500">
                   <p>{{ processedPlaceholder }}</p>
@@ -243,7 +246,13 @@
               :class="preview.assetId === activeOutputAssetId ? 'result-thumb-active' : ''"
               @click="activeOutputAssetId = preview.assetId"
             >
-              <img v-if="preview.objectUrl" :src="preview.objectUrl" alt="" class="h-24 w-full rounded-lg bg-slate-100 object-contain" />
+              <img
+                v-if="preview.objectUrl"
+                :src="preview.objectUrl"
+                alt=""
+                class="h-24 w-full rounded-lg bg-slate-100 object-contain"
+                @click.stop="openOutputImageViewer(preview)"
+              />
               <span v-else class="flex h-24 items-center justify-center rounded-lg bg-slate-100 text-xs text-slate-500">
                 {{ preview.state === 'loading' ? t('common.loading') : t('pages.imageProcessing.previewUnavailable') }}
               </span>
@@ -268,6 +277,7 @@ import KeyValueGrid from '../components/blocks/KeyValueGrid.vue';
 import SectionPanel from '../components/blocks/SectionPanel.vue';
 import StatusPill from '../components/cards/StatusPill.vue';
 import { authSessionState, sendBoundCommand } from '../services/auth-session';
+import { openImageViewer } from '../services/image-viewer';
 import { isOkResponse, resolveRuntimeHost } from '../services/protocol';
 import type { Tone } from '../types/demo';
 
@@ -851,6 +861,28 @@ function clearOutputPreviews(): void {
   }
   outputPreviews.value = [];
   activeOutputAssetId.value = '';
+}
+
+function openInputImageViewer(): void {
+  if (operation.value !== 'color' && form.pageProcessing === 'selected_area') {
+    return;
+  }
+  openImageViewer({
+    src: inputPreviewUrl.value,
+    title: selectedFileName.value || t('pages.imageProcessing.originalPreview'),
+    subtitle: t('pages.imageProcessing.originalPreview'),
+  });
+}
+
+function openOutputImageViewer(preview: OutputPreview | undefined): void {
+  if (!preview?.objectUrl) {
+    return;
+  }
+  openImageViewer({
+    src: preview.objectUrl,
+    title: preview.role || preview.assetId,
+    subtitle: preview.contentType || t('pages.imageProcessing.processedPreview'),
+  });
 }
 
 function buildUploadUrl(): string {

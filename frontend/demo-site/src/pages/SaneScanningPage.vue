@@ -280,6 +280,24 @@
             <p class="truncate text-sm font-semibold text-slate-900">{{ lastTask.error || lastTask.message || '-' }}</p>
           </div>
         </div>
+        <div v-if="outputPreviews.length" class="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <article v-for="preview in outputPreviews" :key="preview.assetId" class="rounded-lg border border-slate-200 bg-white p-3 text-sm">
+            <div class="flex items-center justify-between gap-3 text-xs font-semibold text-slate-500">
+              <span class="truncate">{{ preview.assetId }}</span>
+              <span>{{ preview.contentType }}</span>
+            </div>
+            <img
+              v-if="preview.objectUrl"
+              :src="preview.objectUrl"
+              alt=""
+              class="mt-3 h-44 w-full cursor-zoom-in rounded-md bg-slate-100 object-contain"
+              @click="openSaneOutputViewer(preview)"
+            >
+            <p v-else class="mt-3 rounded-md bg-slate-50 px-3 py-8 text-center text-sm text-slate-500">
+              {{ preview.error || t('common.loading') }}
+            </p>
+          </article>
+        </div>
         <div v-if="lastTask?.output_paths?.length" class="mt-3 rounded-lg border border-slate-200 bg-white p-4 text-sm">
           <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ t('pages.saneScanning.resultPaths') }}</p>
           <ul class="space-y-1">
@@ -299,16 +317,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import ImageEnhanceWorkflowPicker from '../components/blocks/ImageEnhanceWorkflowPicker.vue';
 import JsonPanel from '../components/blocks/JsonPanel.vue';
 import SectionPanel from '../components/blocks/SectionPanel.vue';
 import StatusPill from '../components/cards/StatusPill.vue';
-import { onCommandEvent, sendBoundCommand } from '../services/auth-session';
+import { authSessionState, onCommandEvent, sendBoundCommand } from '../services/auth-session';
 import type { EnhancePipeline, EnhanceWorkflow } from '../services/image-enhance-workflows';
-import { buildCommandRequest, isOkResponse, type CommandEvent, type CommandResponse } from '../services/protocol';
+import { openImageViewer } from '../services/image-viewer';
+import { buildCommandRequest, isOkResponse, resolveRuntimeHost, type CommandEvent, type CommandResponse } from '../services/protocol';
 import saneI18nZh from '../data/sane_i18n_zh.json';
 
 interface SaneDevice {
@@ -361,6 +380,29 @@ interface SaneTask {
   last_page_path?: string;
   message?: string;
   error?: string;
+  assets?: SaneAsset[];
+}
+
+interface SaneAsset {
+  asset_id?: string;
+  kind?: string;
+  path?: string;
+  url?: string;
+  download_url?: string;
+  content_type?: string;
+  width?: number;
+  height?: number;
+  size?: number;
+}
+
+interface SaneOutputPreview {
+  assetId: string;
+  kind: string;
+  path: string;
+  url: string;
+  contentType: string;
+  objectUrl: string;
+  error: string;
 }
 
 type SaneI18nDict = Record<string, string>;
@@ -394,6 +436,7 @@ const lastTask = ref<SaneTask | null>(null);
 const lastRequest = ref<Record<string, unknown> | null>(null);
 const lastResponse = ref<CommandResponse<Record<string, unknown>> | null>(null);
 const lastMethod = ref('');
+const outputPreviews = ref<SaneOutputPreview[]>([]);
 
 const BASIC_OPTION_NAMES = [
   'source',
@@ -415,6 +458,7 @@ const responseJson = computed(() => JSON.stringify(lastResponse.value ?? {}, nul
 const lastStatusLabel = computed(() => (lastResponse.value ? `${lastResponse.value.code} ${lastResponse.value.message}` : t('common.response')));
 const scanBusy = computed(() => lastTask.value?.status === 'queued' || lastTask.value?.status === 'running' || lastTask.value?.status === 'converting');
 let commandEventUnsubscribe: (() => void) | null = null;
+let outputPreviewGeneration = 0;
 
 onMounted(() => {
   void initializeSanePage();
@@ -423,9 +467,14 @@ onMounted(() => {
 onUnmounted(() => {
   commandEventUnsubscribe?.();
   commandEventUnsubscribe = null;
+  clearOutputPreviews();
   if (watchEnabled.value) {
     void stopWatch().catch(() => undefined);
   }
+});
+
+watch(lastTask, (task) => {
+  void buildSaneOutputPreviews(task);
 });
 
 async function initializeSanePage(): Promise<void> {
@@ -615,6 +664,78 @@ function asString(value: unknown): string {
 
 function asTask(value: unknown): SaneTask | null {
   return value && typeof value === 'object' ? value as SaneTask : null;
+}
+
+async function buildSaneOutputPreviews(task: SaneTask | null): Promise<void> {
+  const generation = outputPreviewGeneration + 1;
+  outputPreviewGeneration = generation;
+  clearOutputPreviews();
+  const assets = (task?.assets ?? []).filter((asset) => isBrowserRenderable(asset.content_type ?? '') && Boolean(asset.url || asset.download_url));
+  outputPreviews.value = assets.map((asset, index) => ({
+    assetId: asset.asset_id || `sane-output-${index + 1}`,
+    kind: asset.kind || 'sane_scan_output',
+    path: asset.path || '',
+    url: asset.url || asset.download_url || '',
+    contentType: asset.content_type || '',
+    objectUrl: '',
+    error: '',
+  }));
+
+  await Promise.all(outputPreviews.value.map(async (preview) => {
+    if (!authSessionState.sessionToken || !preview.url) {
+      preview.error = t('pages.captureAcquisition.thumbnailAuthMissing');
+      return;
+    }
+    try {
+      const response = await fetch(resolveAssetUrl(preview.url), {
+        headers: { Authorization: `Bearer ${authSessionState.sessionToken}` },
+      });
+      if (!response.ok) {
+        throw new Error(`${response.status} ${response.statusText}`.trim());
+      }
+      const objectUrl = URL.createObjectURL(await response.blob());
+      if (outputPreviewGeneration !== generation) {
+        URL.revokeObjectURL(objectUrl);
+        return;
+      }
+      preview.objectUrl = objectUrl;
+    } catch (error) {
+      preview.error = error instanceof Error ? error.message : t('common.loadFailed');
+    }
+  }));
+}
+
+function clearOutputPreviews(): void {
+  outputPreviews.value.forEach((preview) => {
+    if (preview.objectUrl) {
+      URL.revokeObjectURL(preview.objectUrl);
+    }
+  });
+  outputPreviews.value = [];
+}
+
+function openSaneOutputViewer(preview: SaneOutputPreview): void {
+  if (!preview.objectUrl) {
+    return;
+  }
+  openImageViewer({
+    src: preview.objectUrl,
+    title: preview.assetId,
+    subtitle: [preview.kind, preview.contentType, preview.path].filter(Boolean).join(' · '),
+  });
+}
+
+function resolveAssetUrl(path: string): string {
+  if (/^https?:\/\//i.test(path)) {
+    return path;
+  }
+  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+  return `${protocol}//${resolveRuntimeHost()}:17082${path.startsWith('/') ? path : `/${path}`}`;
+}
+
+function isBrowserRenderable(contentType: string): boolean {
+  const value = contentType.toLowerCase();
+  return ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif', 'image/bmp'].includes(value);
 }
 
 function formatOptionValue(value: unknown): string {

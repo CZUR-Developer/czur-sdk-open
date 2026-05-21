@@ -46,6 +46,7 @@ export const messages = {
       loadingDevices: 'Fetching the latest device inventory from runtime.',
       loadFailed: 'Load failed',
       retryLater: 'Please try again later.',
+      imageViewer: 'Image viewer',
     },
     actions: {
       openDrawer: 'Open drawer',
@@ -66,6 +67,12 @@ export const messages = {
       inspect: 'Inspect',
       save: 'Save',
       clear: 'Clear',
+      close: 'Close',
+      zoomIn: 'Zoom in',
+      zoomOut: 'Zoom out',
+      rotateLeft: 'Rotate left',
+      rotateRight: 'Rotate right',
+      resetView: 'Reset view',
     },
     status: {
       idle: 'Idle',
@@ -572,6 +579,7 @@ export const messages = {
       loadingDevices: '正在从 runtime 拉取最新设备清单。',
       loadFailed: '加载失败',
       retryLater: '请稍后重试。',
+      imageViewer: '图片查看器',
     },
     actions: {
       openDrawer: '打开抽屉',
@@ -592,6 +600,12 @@ export const messages = {
       inspect: '查看',
       save: '保存',
       clear: '清空',
+      close: '关闭',
+      zoomIn: '放大',
+      zoomOut: '缩小',
+      rotateLeft: '向左旋转',
+      rotateRight: '向右旋转',
+      resetView: '重置视图',
     },
     status: {
       idle: '待命',

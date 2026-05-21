@@ -33,7 +33,13 @@
               <StatusPill :label="selectedImages.length ? t('pages.fileConversion.localReady') : t('status.idle')" :tone="selectedImages.length ? 'success' : 'neutral'" />
             </div>
             <div class="preview-surface">
-              <img v-if="activePreviewUrl" :src="activePreviewUrl" alt="" class="max-h-[420px] max-w-full object-contain" />
+              <img
+                v-if="activePreviewUrl"
+                :src="activePreviewUrl"
+                alt=""
+                class="max-h-[420px] max-w-full cursor-zoom-in object-contain"
+                @click="openActiveImageViewer"
+              />
               <div v-else-if="selectedImages.length" class="px-6 text-center text-sm text-slate-500">
                 <p class="font-mono">{{ selectedImages[0].file.name }}</p>
                 <p class="mt-2">{{ t('pages.fileConversion.documentPreviewHint') }}</p>
@@ -144,7 +150,13 @@
                 <span class="truncate">{{ preview.assetId }}</span>
                 <span>{{ preview.contentType }}</span>
               </div>
-              <img v-if="preview.objectUrl" :src="preview.objectUrl" alt="" class="mt-3 h-48 w-full rounded-lg bg-slate-100 object-contain" />
+              <img
+                v-if="preview.objectUrl"
+                :src="preview.objectUrl"
+                alt=""
+                class="mt-3 h-48 w-full cursor-zoom-in rounded-lg bg-slate-100 object-contain"
+                @click="openOutputImageViewer(preview)"
+              />
               <p v-else class="mt-3 rounded-lg bg-slate-50 px-3 py-8 text-center text-sm text-slate-500">{{ preview.path }}</p>
             </article>
           </div>
@@ -167,6 +179,7 @@ import KeyValueGrid from '../components/blocks/KeyValueGrid.vue';
 import SectionPanel from '../components/blocks/SectionPanel.vue';
 import StatusPill from '../components/cards/StatusPill.vue';
 import { authSessionState, sendBoundCommand } from '../services/auth-session';
+import { openImageViewer } from '../services/image-viewer';
 import { isOkResponse, resolveRuntimeHost } from '../services/protocol';
 
 type TargetType = 'png' | 'jpg' | 'tiff' | 'pdf' | 'ofd';
@@ -463,6 +476,29 @@ function clearOutputPreviews(): void {
     }
   });
   outputPreviews.value = [];
+}
+
+function openActiveImageViewer(): void {
+  const image = selectedImages.value[activeImageIndex.value];
+  if (!image?.previewUrl) {
+    return;
+  }
+  openImageViewer({
+    src: image.previewUrl,
+    title: image.file.name,
+    subtitle: image.uploadId || t('pages.fileConversion.preview'),
+  });
+}
+
+function openOutputImageViewer(preview: OutputPreview): void {
+  if (!preview.objectUrl) {
+    return;
+  }
+  openImageViewer({
+    src: preview.objectUrl,
+    title: preview.assetId,
+    subtitle: preview.contentType || preview.path,
+  });
 }
 
 function buildUploadUrl(): string {
