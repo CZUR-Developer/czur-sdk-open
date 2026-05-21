@@ -22,7 +22,13 @@
               <StatusPill :label="inputPreviewUrl ? t('pages.ocrRecognition.localReady') : t('status.idle')" :tone="inputPreviewUrl ? 'success' : 'neutral'" />
             </div>
             <div class="preview-surface">
-              <img v-if="inputPreviewUrl" :src="inputPreviewUrl" alt="" class="max-h-[420px] max-w-full object-contain" />
+              <img
+                v-if="inputPreviewUrl"
+                :src="inputPreviewUrl"
+                alt=""
+                class="max-h-[420px] max-w-full cursor-zoom-in object-contain"
+                @click="openActiveImageViewer"
+              />
               <p v-else class="px-6 text-center text-sm text-slate-500">{{ t('pages.ocrRecognition.pickImageHint') }}</p>
             </div>
             <div v-if="selectedImages.length > 1" class="grid gap-2 border-t border-slate-100 p-3 sm:grid-cols-2">
@@ -142,6 +148,7 @@ import KeyValueGrid from '../components/blocks/KeyValueGrid.vue';
 import SectionPanel from '../components/blocks/SectionPanel.vue';
 import StatusPill from '../components/cards/StatusPill.vue';
 import { authSessionState, sendBoundCommand } from '../services/auth-session';
+import { openImageViewer } from '../services/image-viewer';
 import { isOkResponse, resolveRuntimeHost } from '../services/protocol';
 
 type RunningAction = '' | 'extract' | 'recognize' | 'barcode' | 'get' | 'cancel';
@@ -298,6 +305,18 @@ function handleFileChange(event: Event): void {
   }));
   activeImageIndex.value = 0;
   input.value = '';
+}
+
+function openActiveImageViewer(): void {
+  const image = activeImage.value;
+  if (!image) {
+    return;
+  }
+  openImageViewer({
+    src: image.previewUrl,
+    title: image.file.name,
+    subtitle: image.uploadId || t('pages.ocrRecognition.preview'),
+  });
 }
 
 async function uploadSelectedImages(): Promise<string[]> {

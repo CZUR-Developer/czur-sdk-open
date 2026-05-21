@@ -186,7 +186,8 @@
                   v-if="card.thumbnailObjectUrl"
                   :src="card.thumbnailObjectUrl"
                   :alt="card.filename"
-                  class="h-full w-full object-contain"
+                  class="h-full w-full cursor-zoom-in object-contain"
+                  @click="openCapturePreviewViewer(card)"
                 />
                 <div v-else class="px-4 text-center text-sm text-slate-500">
                   <p class="font-semibold text-slate-700">{{ thumbnailStateLabel(card) }}</p>
@@ -453,6 +454,7 @@ import {
   stopVideo,
 } from '../services/device-video';
 import type { EnhancePipeline, EnhanceWorkflow } from '../services/image-enhance-workflows';
+import { openImageViewer } from '../services/image-viewer';
 import { recordRuntimeEvent, runtimeRecordState } from '../services/runtime-records';
 import type { TableColumn, TableRow, TimelineItem, Tone } from '../types/demo';
 
@@ -1439,6 +1441,17 @@ function clearCaptureResults(): void {
     title: 'capture.results_cleared',
     detail: t('pages.captureAcquisition.resultsCleared'),
     tone: 'neutral',
+  });
+}
+
+function openCapturePreviewViewer(card: CapturePreviewCard): void {
+  if (!card.thumbnailObjectUrl) {
+    return;
+  }
+  openImageViewer({
+    src: card.thumbnailObjectUrl,
+    title: card.filename,
+    subtitle: [card.thumbnailAssetKind, card.resolution, card.status].filter(Boolean).join(' · '),
   });
 }
 

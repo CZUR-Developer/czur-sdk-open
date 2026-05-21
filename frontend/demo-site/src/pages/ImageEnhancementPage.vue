@@ -18,7 +18,12 @@
 
           <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <article v-for="(image, index) in selectedImages" :key="image.previewUrl" class="rounded-xl border border-slate-200 bg-white p-3">
-              <img :src="image.previewUrl" alt="" class="h-40 w-full rounded-lg bg-slate-100 object-contain" />
+              <img
+                :src="image.previewUrl"
+                alt=""
+                class="h-40 w-full cursor-zoom-in rounded-lg bg-slate-100 object-contain"
+                @click="openSelectedImageViewer(image)"
+              />
               <p class="mt-2 truncate text-xs font-medium text-slate-700">{{ image.file.name }}</p>
               <p class="mt-1 font-mono text-[11px] text-slate-500">{{ image.uploadId || t('common.notSet') }}</p>
               <button type="button" class="mt-2 text-xs font-semibold text-rose-600" @click="removeImage(index)">
@@ -169,7 +174,13 @@
                 <span class="truncate">{{ preview.assetId }}</span>
                 <span>{{ preview.contentType }}</span>
               </div>
-              <img v-if="preview.objectUrl" :src="preview.objectUrl" alt="" class="mt-3 h-52 w-full rounded-lg bg-slate-100 object-contain" />
+              <img
+                v-if="preview.objectUrl"
+                :src="preview.objectUrl"
+                alt=""
+                class="mt-3 h-52 w-full cursor-zoom-in rounded-lg bg-slate-100 object-contain"
+                @click="openOutputImageViewer(preview)"
+              />
               <p v-else class="mt-3 rounded-lg bg-slate-50 px-3 py-8 text-center text-sm text-slate-500">{{ preview.path }}</p>
             </article>
           </div>
@@ -194,6 +205,7 @@ import KeyValueGrid from '../components/blocks/KeyValueGrid.vue';
 import SectionPanel from '../components/blocks/SectionPanel.vue';
 import StatusPill from '../components/cards/StatusPill.vue';
 import { authSessionState, sendBoundCommand } from '../services/auth-session';
+import { openImageViewer } from '../services/image-viewer';
 import {
   createDefaultPipeline,
   deleteEnhanceWorkflow,
@@ -552,6 +564,25 @@ function clearOutputPreviews(): void {
     if (preview.objectUrl) URL.revokeObjectURL(preview.objectUrl);
   });
   outputPreviews.value = [];
+}
+
+function openSelectedImageViewer(image: SelectedImage): void {
+  openImageViewer({
+    src: image.previewUrl,
+    title: image.file.name,
+    subtitle: image.uploadId || t('pages.imageEnhancement.inputImages'),
+  });
+}
+
+function openOutputImageViewer(preview: OutputPreview): void {
+  if (!preview.objectUrl) {
+    return;
+  }
+  openImageViewer({
+    src: preview.objectUrl,
+    title: preview.assetId,
+    subtitle: preview.contentType || preview.path,
+  });
 }
 
 function exportPipeline(): EnhancePipeline {

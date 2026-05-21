@@ -49,6 +49,8 @@
       @save="saveApiKey"
       @clear="clearApiKey"
     />
+
+    <ImageViewer />
   </div>
 </template>
 
@@ -61,6 +63,7 @@ import { navigationItems } from '../../data/demoSite';
 import { authSessionState, clearApiKey as clearStoredApiKey, initializeAuthSession, saveApiKey as persistApiKey } from '../../services/auth-session';
 import { runtimeRecordState } from '../../services/runtime-records';
 import type { DemoNavKey, LocaleKey } from '../../types/demo';
+import ImageViewer from '../blocks/ImageViewer.vue';
 import ApiKeyDialog from './ApiKeyDialog.vue';
 import AppHeader from './AppHeader.vue';
 import AppSidebar from './AppSidebar.vue';
