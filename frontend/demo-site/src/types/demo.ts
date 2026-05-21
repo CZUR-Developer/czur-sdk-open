@@ -6,6 +6,7 @@ export type DemoNavKey =
   | 'device-video'
   | 'capture-acquisition'
   | 'image-processing'
+  | 'image-enhancement'
   | 'ocr-recognition'
   | 'file-conversion'
   | 'sane-scanning'

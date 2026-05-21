@@ -385,6 +385,17 @@
               </div>
             </div>
 
+            <ImageEnhanceWorkflowPicker
+              v-model="selectedEnhanceWorkflowId"
+              :title="t('pages.captureAcquisition.enhanceWorkflow')"
+              :empty-label="t('pages.captureAcquisition.enhanceWorkflowDescription')"
+              :none-label="t('pages.captureAcquisition.noEnhanceWorkflow')"
+              :clear-label="t('pages.captureAcquisition.clearEnhanceWorkflow')"
+              :refresh-label="t('pages.captureAcquisition.refreshEnhanceWorkflows')"
+              :loading-label="t('pages.captureAcquisition.loadingEnhanceWorkflows')"
+              @selected="handleEnhanceWorkflowSelected"
+            />
+
             <button
               type="button"
               class="w-full rounded-xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-cyan-700 disabled:cursor-not-allowed disabled:bg-slate-300"
@@ -417,6 +428,7 @@ import { useI18n } from 'vue-i18n';
 
 import DataTableCard from '../components/blocks/DataTableCard.vue';
 import EventTimeline from '../components/blocks/EventTimeline.vue';
+import ImageEnhanceWorkflowPicker from '../components/blocks/ImageEnhanceWorkflowPicker.vue';
 import JsonPanel from '../components/blocks/JsonPanel.vue';
 import PreviewStage from '../components/blocks/PreviewStage.vue';
 import SectionPanel from '../components/blocks/SectionPanel.vue';
@@ -440,6 +452,7 @@ import {
   startVideo,
   stopVideo,
 } from '../services/device-video';
+import type { EnhancePipeline, EnhanceWorkflow } from '../services/image-enhance-workflows';
 import { recordRuntimeEvent, runtimeRecordState } from '../services/runtime-records';
 import type { TableColumn, TableRow, TimelineItem, Tone } from '../types/demo';
 
@@ -623,6 +636,8 @@ const captureConfig = reactive({
 
 const profileRevision = ref(1);
 const profileInitializedAt = ref(timeLabel());
+const selectedEnhanceWorkflowId = ref('');
+const selectedEnhanceWorkflow = ref<EnhanceWorkflow | null>(null);
 const captureResults = ref<CaptureResult[]>([]);
 const activeCaptureTasks = new Set<string>();
 const thumbnailRequests = new Map<string, number>();
@@ -1176,6 +1191,24 @@ async function startCaptureVideo(): Promise<void> {
   await startVideo(captureProfile.value);
 }
 
+function handleEnhanceWorkflowSelected(workflow: EnhanceWorkflow | null): void {
+  selectedEnhanceWorkflow.value = workflow;
+}
+
+function buildCaptureEnhancePipeline(): EnhancePipeline | undefined {
+  if (!selectedEnhanceWorkflow.value?.pipeline?.steps?.length) {
+    return undefined;
+  }
+  return {
+    ...selectedEnhanceWorkflow.value.pipeline,
+    target: {
+      type: 'images',
+      format: captureConfig.outputFormat,
+      export_type: 'single-page',
+    },
+  };
+}
+
 async function handleCapture(): Promise<void> {
   if (!canCapture.value) {
     return;
@@ -1210,11 +1243,13 @@ async function handleCapture(): Promise<void> {
 
   captureResults.value = [result, ...captureResults.value];
   try {
+    const enhancePipeline = buildCaptureEnhancePipeline();
     const response = await sendBoundCommand('capture.take', {
       params: {
         device_id: deviceVideoState.selectedDeviceId,
         profile: captureProfile.value,
         timeout_ms: 20000,
+        ...(enhancePipeline ? { pipeline: enhancePipeline } : {}),
       },
     });
     logCaptureDebug('capture.take response', {

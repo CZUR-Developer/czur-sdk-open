@@ -21,6 +21,7 @@ export const navigationItems: NavigationItem[] = [
   { key: 'device-video', labelKey: 'nav.deviceVideo', to: '/device-video' },
   { key: 'capture-acquisition', labelKey: 'nav.captureAcquisition', to: '/capture-acquisition' },
   { key: 'image-processing', labelKey: 'nav.imageProcessing', to: '/image-processing' },
+  { key: 'image-enhancement', labelKey: 'nav.imageEnhancement', to: '/image-enhancement' },
   { key: 'ocr-recognition', labelKey: 'nav.ocrRecognition', to: '/ocr-recognition' },
   { key: 'file-conversion', labelKey: 'nav.fileConversion', to: '/file-conversion' },
   { key: 'sane-scanning', labelKey: 'nav.saneScanning', to: '/sane-scanning' },

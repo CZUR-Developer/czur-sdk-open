@@ -27,6 +27,7 @@ struct CaptureTaskStartRequest {
     int timeout_ms = 15000;
     AuthContext auth_context;
     SdkCaptureProfile profile;
+    SdkImageEnhancePipeline pipeline;
 };
 
 struct CaptureTaskSnapshot {
@@ -82,6 +83,7 @@ private:
     std::string NextTaskId();
 
     CapturePipelineService pipeline_service_;
+    ProviderBundle providers_;
     std::string asset_base_url_;
     mutable std::mutex mu_;
     std::map<std::string, CaptureTaskSnapshot> tasks_;

@@ -86,6 +86,14 @@ The current runtime exposes:
 - `image.process`
 - `image.process_page`
 - `image.apply_color_mode`
+- `image.enhance_capabilities`
+- `image.enhance`
+- `image.enhance_get`
+- `image.enhance_cancel`
+- `image.enhance_workflow_list`
+- `image.enhance_workflow_get`
+- `image.enhance_workflow_save`
+- `image.enhance_workflow_delete`
 - `ocr.recognize`
 - `ocr.get`
 - `ocr.cancel`
@@ -107,6 +115,14 @@ The current runtime exposes:
 - `sane.scan`
 - `sane.scan_get`
 - `sane.scan_cancel`
+
+### Image Enhancement Pipeline
+
+`image.enhance_capabilities` returns the image enhancement capabilities exposed by the current provider, including runtime type, availability, defaults, parameter schema, and `localized.en/zh-CN` display text. Demo and third-party clients should use this method to render capability choices dynamically instead of hard-coding algorithm lists. The built-in offline capability list includes black edge optimization, normalization, rotation, blank page detection, and red/green head detection. Online capabilities are exposed in the list but marked unavailable until an online provider is configured.
+
+`image.enhance` submits an async enhancement task for one or more image pages. `pipeline.steps` run in the user-provided order, and final output can be image pages or PDF/OFD/TIFF through the existing file conversion provider. `sane.scan` and `capture.take` accept the same optional `pipeline` for post-processing; SANE enhances scanned pages before export, and Capture enhances the existing final image assets. Blank page detection defaults to `action=drop`.
+
+`image.enhance_workflow_*` methods store reusable user-defined enhancement pipelines in the SDK work directory. The Demo uses these methods to save workflows from the Image Enhancement page and reuse the selected workflow from Capture or SANE scan flows.
 
 ### SANE Linux-only Notes
 

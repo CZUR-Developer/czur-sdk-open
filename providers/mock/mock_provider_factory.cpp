@@ -112,6 +112,14 @@ public:
             "image.process",
             "image.process_page",
             "image.apply_color_mode",
+            "image.enhance_capabilities",
+            "image.enhance",
+            "image.enhance_get",
+            "image.enhance_cancel",
+            "image.enhance_workflow_list",
+            "image.enhance_workflow_get",
+            "image.enhance_workflow_save",
+            "image.enhance_workflow_delete",
             "ocr.recognize",
             "ocr.get",
             "ocr.cancel",
@@ -642,6 +650,151 @@ private:
     }
 };
 
+class MockImageEnhanceProvider : public ISdkImageEnhanceProvider {
+public:
+    std::string ProviderName() const override { return "mock-image-enhance-provider"; }
+
+    SdkImageEnhanceCapabilityResult ListCapabilities() override {
+        SdkImageEnhanceCapabilityResult result;
+        result.provider = ProviderName();
+        result.kind = "mixed";
+        result.available = true;
+        result.capabilities.push_back(MakeCapability("crop_enhance", "Crop enhancement", "cleanup", "offline", "transform", R"({"mode":"crop","top_percent":0,"bottom_percent":0,"left_percent":0,"right_percent":0})"));
+        result.capabilities.push_back(MakeCapability("normalize_spec", "Normalize specification", "normalize", "offline", "transform", R"json({"auto":true,"format":"A4-auto","width":210,"height":297,"dpi":300,"color":"rgb(255, 255, 255)","horizontal":1,"vertical":1,"fill":1,"fillValue":1.0,"useOriginalPaperScale":false,"originalWidth":0,"originalHeight":0,"quality":95})json"));
+        result.capabilities.push_back(MakeCapability("rotate", "Rotate", "normalize", "offline", "transform", R"({"mode":"auto","angle":0,"deskew":true,"max_angle":20,"border_mode":1,"border_val":0,"dl_flag":0})"));
+        result.capabilities.push_back(MakeCapability("blank_page_detect", "Blank page detection", "detect", "offline", "filter", R"({"action":"drop","threshold":0.98})"));
+        result.capabilities.push_back(MakeCapability("red_green_head", "Red/green head enhancement", "enhance", "offline", "transform", R"({"auto_flag":true,"rois":[],"stroke_width":0,"blur_level":0,"color_thresh":50,"texture_degree":1.2,"specify_color":false,"src_color":[0,0,0],"target_color":[67,67,222]})"));
+        SdkImageEnhanceCapability online = MakeCapability("document_rectify_enhance", "Document rectification enhancement", "enhance", "online", "transform", "{}");
+        online.available = false;
+        online.unavailable_reason = "mock online provider is not configured";
+        online.unavailable_reason_zh_cn = "在线增强服务未配置";
+        result.capabilities.push_back(online);
+        online.type = "remove_handwriting";
+        online.title = "Remove handwriting";
+        online.i18n_key = "image_enhance.remove_handwriting";
+        FillLocalizedCapability(&online);
+        result.capabilities.push_back(online);
+        online.type = "remove_background_texture";
+        online.title = "Remove background texture";
+        online.i18n_key = "image_enhance.remove_background_texture";
+        FillLocalizedCapability(&online);
+        result.capabilities.push_back(online);
+        return result;
+    }
+
+    SdkImageEnhanceStepResult RunStep(const SdkImageEnhanceStepRequest& request) override {
+        if (request.step.type == "document_rectify_enhance" ||
+            request.step.type == "remove_handwriting" ||
+            request.step.type == "remove_background_texture") {
+            SdkImageEnhanceStepResult result;
+            result.code = ToCode(SdkStatusCode::UnsupportedMethod);
+            result.message = "mock online image enhance provider is not configured";
+            return result;
+        }
+        SdkImageEnhanceStepResult result;
+        result.processed = true;
+        int index = 1;
+        for (std::vector<SdkImageEnhancePage>::const_iterator it = request.pages.begin(); it != request.pages.end(); ++it) {
+            SdkImageEnhancePage page = *it;
+            page.output_index = index;
+            page.path = JoinEnhancePath(request.output_dir, request.step.type, index, it->path);
+            page.metadata_json = "{\"mock\":true}";
+            EnsureDirectory(request.output_dir);
+            CopyFile(it->path, page.path);
+            result.pages.push_back(page);
+            ++index;
+        }
+        result.metadata_json = "{\"mock\":true}";
+        return result;
+    }
+
+private:
+    static void FillLocalizedCapability(SdkImageEnhanceCapability* capability) {
+        if (capability == NULL) {
+            return;
+        }
+        if (capability->type == "crop_enhance") {
+            capability->description = "Crops pages by top, bottom, left, and right percentages, or keeps the original canvas and fills the outside area with white.";
+            capability->title_zh_cn = "裁剪增强";
+            capability->description_zh_cn = "按上下左右百分比裁剪页面，支持直接裁剪或裁剪区域外留白。";
+        } else if (capability->type == "normalize_spec") {
+            capability->description = "Standardizes pages to a unified paper size, DPI, background, alignment, and fill rule for consistent export.";
+            capability->title_zh_cn = "统一规格";
+            capability->description_zh_cn = "将页面按统一宽高、DPI 和适配方式处理，便于批量导出规格一致。";
+        } else if (capability->type == "rotate") {
+            capability->description = "Rotates pages manually by any angle, or automatically rotates and deskews pages by text direction.";
+            capability->title_zh_cn = "旋转";
+            capability->description_zh_cn = "支持任意手动角度旋转，也可按文字方向自动转正并纠偏。";
+        } else if (capability->type == "blank_page_detect") {
+            capability->description = "Detects blank pages and can mark or remove them from the output sequence.";
+            capability->title_zh_cn = "空白页检测";
+            capability->description_zh_cn = "检测空白页，可选择标记空白页或从输出序列中移除。";
+        } else if (capability->type == "red_green_head") {
+            capability->description = "Enhances red or green header documents with the same offline algorithm used by the desktop client.";
+            capability->title_zh_cn = "红绿头增强";
+            capability->description_zh_cn = "使用客户端同款离线算法增强红头、绿头文件。";
+        } else if (capability->type == "document_rectify_enhance") {
+            capability->description = "Online service for document perspective correction, cleanup, and visual enhancement.";
+            capability->title_zh_cn = "文档矫正增强";
+            capability->description_zh_cn = "在线服务能力，用于文档透视矫正、清理和视觉增强。";
+        } else if (capability->type == "remove_handwriting") {
+            capability->description = "Online service for removing handwriting traces from document images.";
+            capability->title_zh_cn = "文档去手写";
+            capability->description_zh_cn = "在线服务能力，用于去除文档图片中的手写痕迹。";
+        } else if (capability->type == "remove_background_texture") {
+            capability->description = "Online service for reducing paper texture, watermark-like background, and patterned noise.";
+            capability->title_zh_cn = "文档图片去底纹";
+            capability->description_zh_cn = "在线服务能力，用于减弱纸张底纹、水印类背景和纹理噪声。";
+        }
+        if (!capability->unavailable_reason.empty()) {
+            capability->unavailable_reason_zh_cn = "在线增强服务未配置";
+        }
+    }
+
+    static SdkImageEnhanceCapability MakeCapability(const std::string& type,
+                                                    const std::string& title,
+                                                    const std::string& category,
+                                                    const std::string& runtime,
+                                                    const std::string& page_effect,
+                                                    const std::string& defaults_json) {
+        SdkImageEnhanceCapability capability;
+        capability.type = type;
+        capability.title = title;
+        capability.description = title;
+        capability.i18n_key = "image_enhance." + type;
+        capability.category = category;
+        capability.runtime = runtime;
+        capability.page_effect = page_effect;
+        capability.metadata = page_effect != "transform";
+        capability.requires_capability = runtime == "online" ? "image.enhance.online" : "image.enhance";
+        capability.source_types.push_back("image");
+        capability.source_types.push_back("images");
+        capability.defaults_json = defaults_json;
+        capability.schema_json = "{}";
+        FillLocalizedCapability(&capability);
+        return capability;
+    }
+
+    static std::string ExtensionFromPath(const std::string& path) {
+        const std::string::size_type pos = path.find_last_of('.');
+        if (pos == std::string::npos || pos + 1 >= path.size()) {
+            return "jpg";
+        }
+        return path.substr(pos + 1);
+    }
+
+    static std::string JoinEnhancePath(const std::string& dir, const std::string& step, int index, const std::string& input_path) {
+        std::ostringstream name;
+        name << step << "-" << index << "." << ExtensionFromPath(input_path);
+        if (dir.empty() || dir == ".") {
+            return name.str();
+        }
+        return dir[dir.size() - 1] == '/' ? dir + name.str() : dir + "/" + name.str();
+    }
+
+    static void EnsureDirectory(const std::string&) {}
+};
+
 class MockOcrProvider : public ISdkOcrProvider {
 public:
     std::string ProviderName() const override { return "mock-ocr-provider"; }
@@ -1135,6 +1288,7 @@ ProviderBundle CreateProviderBundle() {
     bundle.auth_provider = std::make_shared<MockAuthProvider>();
     bundle.device_provider = std::make_shared<MockDeviceProvider>();
     bundle.graphic_provider = std::make_shared<MockGraphicProvider>();
+    bundle.image_enhance_provider = std::make_shared<MockImageEnhanceProvider>();
     bundle.ocr_provider = std::make_shared<MockOcrProvider>();
     bundle.ofd_provider = std::make_shared<MockOfdProvider>();
     bundle.recognition_provider = std::make_shared<MockRecognitionProvider>();

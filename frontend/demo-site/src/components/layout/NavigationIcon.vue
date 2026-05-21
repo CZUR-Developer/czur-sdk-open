@@ -5,6 +5,7 @@
     <path v-else-if="navKey === 'device-video'" d="M4 6h9v8H4zM13 8l3-2v8l-3-2" />
     <path v-else-if="navKey === 'capture-acquisition'" d="M6 6h8l1 2h1v6H4V8h1z" />
     <path v-else-if="navKey === 'image-processing'" d="M4 5h12v10H4zM7 11l2-2 2 2 2-3 1 1" />
+    <path v-else-if="navKey === 'image-enhancement'" d="M4 14c4-7 8-7 12 0M5 5h4v4H5zM11 5h4v4h-4zM8 9l4 2" />
     <path v-else-if="navKey === 'ocr-recognition'" d="M5 5h10v10H5zM7 8h6M7 11h4" />
     <path v-else-if="navKey === 'file-conversion'" d="M6 4h6l3 3v9H6zM12 4v3h3" />
     <path v-else-if="navKey === 'sane-scanning'" d="M5 5h10v4H5zM7 13h6M6 9h8v6H6z" />
