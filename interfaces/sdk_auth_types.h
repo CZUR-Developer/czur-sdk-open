@@ -18,6 +18,7 @@ enum class SdkAccountType {
     Svip = 1,
     SvipPlus = 2,
     Custom = 3,
+    Trial = 4,
 };
 
 struct SdkDeviceGrant {
@@ -37,8 +38,11 @@ struct AuthContext {
     bool is_valid = false;
     SdkAccountType account_type = SdkAccountType::Unknown;
     int account_type_code = -1;
+    SdkAccountType licensed_account_type = SdkAccountType::Unknown;
+    int licensed_account_type_code = -1;
     std::string auth_scene;
     std::string license_mode;
+    std::string host_auth_mode;
     std::string entitlement_state;
     std::string machine_code;
     std::vector<SdkDeviceGrant> device_scope;
@@ -143,6 +147,8 @@ inline const char* ToAccountTypeString(SdkAccountType account_type) {
             return "svip_plus";
         case SdkAccountType::Custom:
             return "custom";
+        case SdkAccountType::Trial:
+            return "trial";
         case SdkAccountType::Unknown:
         default:
             return "unknown";
@@ -159,6 +165,8 @@ inline SdkAccountType AccountTypeFromCode(int code) {
             return SdkAccountType::SvipPlus;
         case 3:
             return SdkAccountType::Custom;
+        case 4:
+            return SdkAccountType::Trial;
         default:
             return SdkAccountType::Unknown;
     }
@@ -176,6 +184,9 @@ inline SdkAccountType AccountTypeFromString(const std::string& value) {
     }
     if (value == "custom") {
         return SdkAccountType::Custom;
+    }
+    if (value == "trial") {
+        return SdkAccountType::Trial;
     }
     return SdkAccountType::Unknown;
 }
