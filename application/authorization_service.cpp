@@ -4,12 +4,15 @@
 #include "authorization_service.h"
 
 #include <ctime>
+#include <utility>
 
 namespace editor {
 namespace sdk {
 
-AuthorizationService::AuthorizationService(const ProviderBundle& providers)
-    : providers_(providers) {}
+AuthorizationService::AuthorizationService(const ProviderBundle& providers,
+                                           AuthzBaseUrlSupplier authz_base_url_supplier)
+    : providers_(providers),
+      authz_base_url_supplier_(std::move(authz_base_url_supplier)) {}
 
 AuthorizationService::SessionResult AuthorizationService::CreateSession(const std::string& connection_id,
                                                                         const std::string& token) {
@@ -27,6 +30,7 @@ AuthorizationService::SessionResult AuthorizationService::CreateSession(const st
 
     AuthValidateRequest request;
     request.token = token;
+    request.authz_base_url = AuthzBaseUrl();
     request.now_ts = static_cast<std::int64_t>(std::time(NULL));
     const AuthRefreshResult provider_result = providers_.auth_provider->CreateSession(request);
     result.code = provider_result.code;
@@ -55,6 +59,7 @@ AuthorizationService::SessionResult AuthorizationService::RefreshSession(const s
     if (bound_session.auth_context.license_mode == "online_api_key" && !bound_session.token.empty()) {
         AuthValidateRequest validate_request;
         validate_request.token = bound_session.token;
+        validate_request.authz_base_url = AuthzBaseUrl();
         validate_request.now_ts = static_cast<std::int64_t>(std::time(NULL));
         provider_result = providers_.auth_provider->CreateSession(validate_request);
     } else {
@@ -192,6 +197,7 @@ AuthorizationService::SessionResult AuthorizationService::ConsumeQuota(const std
     QuotaConsumeRequest request;
     request.token = bound_session.token;
     request.session_token = bound_session.session_token;
+    request.authz_base_url = AuthzBaseUrl();
     request.capability = capability;
     request.request_id = request_id;
     request.units = units;
@@ -223,6 +229,10 @@ void AuthorizationService::ClearConnection(const std::string& connection_id) {
 std::size_t AuthorizationService::ActiveSessionCount() const {
     std::lock_guard<std::mutex> lock(sessions_mu_);
     return sessions_.size();
+}
+
+std::string AuthorizationService::AuthzBaseUrl() const {
+    return authz_base_url_supplier_ ? authz_base_url_supplier_() : std::string();
 }
 
 bool AuthorizationService::HasCapability(const AuthContext& auth_context, const std::string& capability) const {

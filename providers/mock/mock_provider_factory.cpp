@@ -664,7 +664,7 @@ public:
         result.capabilities.push_back(MakeCapability("rotate", "Rotate", "normalize", "offline", "transform", R"({"mode":"auto","angle":0,"deskew":true,"max_angle":20,"border_mode":1,"border_val":0,"dl_flag":0})"));
         result.capabilities.push_back(MakeCapability("blank_page_detect", "Blank page detection", "detect", "offline", "filter", R"({"action":"drop","threshold":0.98})"));
         result.capabilities.push_back(MakeCapability("red_green_head", "Red/green head enhancement", "enhance", "offline", "transform", R"({"auto_flag":true,"rois":[],"stroke_width":0,"blur_level":0,"color_thresh":50,"texture_degree":1.2,"specify_color":false,"src_color":[0,0,0],"target_color":[67,67,222]})"));
-        SdkImageEnhanceCapability online = MakeCapability("document_rectify_enhance", "Document rectification enhancement", "enhance", "online", "transform", "{}");
+        SdkImageEnhanceCapability online = MakeCapability("doc_crop_enhance", "Document rectification enhancement", "enhance", "online", "transform", "{}");
         online.available = false;
         online.unavailable_reason = "mock online provider is not configured";
         online.unavailable_reason_zh_cn = "在线增强服务未配置";
@@ -674,18 +674,26 @@ public:
         online.i18n_key = "image_enhance.remove_handwriting";
         FillLocalizedCapability(&online);
         result.capabilities.push_back(online);
-        online.type = "remove_background_texture";
+        online.type = "doc_repair";
         online.title = "Remove background texture";
-        online.i18n_key = "image_enhance.remove_background_texture";
+        online.i18n_key = "image_enhance.doc_repair";
+        FillLocalizedCapability(&online);
+        result.capabilities.push_back(online);
+        online.type = "remove_moire";
+        online.title = "Remove moire";
+        online.i18n_key = "image_enhance.remove_moire";
         FillLocalizedCapability(&online);
         result.capabilities.push_back(online);
         return result;
     }
 
     SdkImageEnhanceStepResult RunStep(const SdkImageEnhanceStepRequest& request) override {
-        if (request.step.type == "document_rectify_enhance" ||
+        if (request.step.type == "doc_crop_enhance" ||
+            request.step.type == "document_rectify_enhance" ||
             request.step.type == "remove_handwriting" ||
-            request.step.type == "remove_background_texture") {
+            request.step.type == "doc_repair" ||
+            request.step.type == "remove_background_texture" ||
+            request.step.type == "remove_moire") {
             SdkImageEnhanceStepResult result;
             result.code = ToCode(SdkStatusCode::UnsupportedMethod);
             result.message = "mock online image enhance provider is not configured";
@@ -733,7 +741,7 @@ private:
             capability->description = "Enhances red or green header documents with the same offline algorithm used by the desktop client.";
             capability->title_zh_cn = "红绿头增强";
             capability->description_zh_cn = "使用客户端同款离线算法增强红头、绿头文件。";
-        } else if (capability->type == "document_rectify_enhance") {
+        } else if (capability->type == "doc_crop_enhance") {
             capability->description = "Online service for document perspective correction, cleanup, and visual enhancement.";
             capability->title_zh_cn = "文档矫正增强";
             capability->description_zh_cn = "在线服务能力，用于文档透视矫正、清理和视觉增强。";
@@ -741,10 +749,14 @@ private:
             capability->description = "Online service for removing handwriting traces from document images.";
             capability->title_zh_cn = "文档去手写";
             capability->description_zh_cn = "在线服务能力，用于去除文档图片中的手写痕迹。";
-        } else if (capability->type == "remove_background_texture") {
+        } else if (capability->type == "doc_repair") {
             capability->description = "Online service for reducing paper texture, watermark-like background, and patterned noise.";
             capability->title_zh_cn = "文档图片去底纹";
             capability->description_zh_cn = "在线服务能力，用于减弱纸张底纹、水印类背景和纹理噪声。";
+        } else if (capability->type == "remove_moire") {
+            capability->description = "Online service for removing moire patterns from photographed screens, printed textures, and similar image noise.";
+            capability->title_zh_cn = "图片去摩尔纹";
+            capability->description_zh_cn = "在线服务能力，用于去除屏幕翻拍、印刷纹理等摩尔纹。";
         }
         if (!capability->unavailable_reason.empty()) {
             capability->unavailable_reason_zh_cn = "在线增强服务未配置";

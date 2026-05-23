@@ -117,6 +117,21 @@ const authFormItems = computed(() => [
     value: authSessionState.token ? maskSecret(authSessionState.token) : t('common.notSet'),
     monospace: true,
   },
+  {
+    label: 'CZUR_SDK_MASTER_SECRET',
+    value: runtimeDiagnosticValue('masterSecretConfigured'),
+    hint: 'must be true before auth.create_session can verify Java-issued keys',
+  },
+  {
+    label: 'CZUR_SDK_AUTHZ_BASE_URL',
+    value: runtimeDiagnosticValue('authzBaseUrlConfigured'),
+    hint: 'true only when overriding the default online authorization gateway',
+  },
+  {
+    label: 'CZUR_SDK_IMAGE_ENHANCE_BASE_URL',
+    value: runtimeDiagnosticValue('imageEnhanceBaseUrlConfigured'),
+    hint: 'true only when overriding the default online enhance gateway',
+  },
   { label: t('labels.sessionKey'), value: authSessionState.sessionToken ? maskSecret(authSessionState.sessionToken) : t('common.notSet'), monospace: true },
   { label: 'Command status', value: t(executionStateLabelKey(authSessionState.commandState)) },
   { label: 'Video status', value: t(executionStateLabelKey(videoLaneState.value)) },
@@ -226,5 +241,13 @@ function maskSecret(value: string): string {
     return value;
   }
   return `${value.slice(0, 8)}...${value.slice(-8)}`;
+}
+
+function runtimeDiagnosticValue(key: 'masterSecretConfigured' | 'authzBaseUrlConfigured' | 'imageEnhanceBaseUrlConfigured'): string {
+  const value = authSessionState.authDiagnostics?.[key];
+  if (typeof value !== 'boolean') {
+    return t('common.notSet');
+  }
+  return value ? 'true' : 'false';
 }
 </script>

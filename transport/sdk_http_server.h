@@ -34,6 +34,7 @@ public:
     };
     using AssetResolver = std::function<AssetResult(const std::string&, const std::string&, const std::string&)>;
     using ImageUploadHandler = std::function<UploadResult(const std::string&, const std::string&, const std::string&, const std::string&)>;
+    using JsonUpdateHandler = std::function<Json(const Json&)>;
 
     SdkHttpServer(const std::string& site_name,
                   const std::string& host,
@@ -45,6 +46,8 @@ public:
 
     void SetHealthSupplier(JsonSupplier supplier);
     void SetStatusSupplier(JsonSupplier supplier);
+    void SetConfigSupplier(JsonSupplier supplier);
+    void SetConfigUpdateHandler(JsonUpdateHandler handler);
     void SetAssetResolver(AssetResolver resolver);
     void SetImageUploadHandler(ImageUploadHandler handler);
     bool Start();
@@ -62,6 +65,8 @@ private:
     bool mount_static_site_;
     JsonSupplier health_supplier_;
     JsonSupplier status_supplier_;
+    JsonSupplier config_supplier_;
+    JsonUpdateHandler config_update_handler_;
     AssetResolver asset_resolver_;
     ImageUploadHandler image_upload_handler_;
     std::atomic<bool> running_;

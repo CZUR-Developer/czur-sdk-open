@@ -30,6 +30,17 @@ interface AuthContextPayload {
   capabilities?: string[];
 }
 
+interface RuntimeAuthDiagnostics {
+  masterSecretConfigured?: boolean;
+  authzBaseUrlConfigured?: boolean;
+  imageEnhanceBaseUrlConfigured?: boolean;
+}
+
+interface RuntimeProcessInfo {
+  pid?: number;
+  executablePath?: string;
+}
+
 interface AuthSessionState {
   token: string;
   sessionToken: string;
@@ -40,6 +51,8 @@ interface AuthSessionState {
   connectionEndpoint: string;
   videoEndpoint: string;
   authContext: AuthContextPayload | null;
+  authDiagnostics: RuntimeAuthDiagnostics | null;
+  runtimeProcess: RuntimeProcessInfo | null;
   lastConnectedAt: string;
   commandCheckedAt: string;
   commandLatencyMs: number;
@@ -61,6 +74,8 @@ const state = reactive<AuthSessionState>({
   connectionEndpoint: buildCommandEndpointLabel(),
   videoEndpoint: buildVideoEndpointLabel(),
   authContext: null,
+  authDiagnostics: null,
+  runtimeProcess: null,
   lastConnectedAt: '',
   commandCheckedAt: '',
   commandLatencyMs: 0,
@@ -116,6 +131,8 @@ export async function initializeAuthSession(): Promise<void> {
       state.contextState = 'blocked';
       return;
     }
+
+    await loadRuntimeInfo(nextClient);
 
     if (!state.token) {
       state.refreshState = 'blocked';
@@ -276,6 +293,23 @@ export async function checkCommandConnectivity(activeClient: CommandWsClient | n
   }
 }
 
+export async function loadRuntimeInfo(activeClient: CommandWsClient | null = client): Promise<void> {
+  if (!activeClient) {
+    state.authDiagnostics = null;
+    state.runtimeProcess = null;
+    return;
+  }
+
+  const response = await sendTrackedCommand(activeClient, 'system.info');
+  if (!isOkResponse(response)) {
+    state.authDiagnostics = null;
+    state.runtimeProcess = null;
+    return;
+  }
+  state.authDiagnostics = asRuntimeAuthDiagnostics(response.data.authDiagnostics);
+  state.runtimeProcess = asRuntimeProcessInfo(response.data.process);
+}
+
 export function saveApiKey(value: string): void {
   state.token = value.trim();
   persistValue(STORAGE_KEYS.token, state.token);
@@ -329,6 +363,8 @@ export function onCommandEvent(listener: (event: CommandEvent<Record<string, unk
 
 function clearRuntimeState(): void {
   clearSession();
+  state.authDiagnostics = null;
+  state.runtimeProcess = null;
   state.commandState = 'idle';
   state.refreshState = 'idle';
   state.contextState = 'idle';
@@ -420,6 +456,20 @@ function asAuthContext(value: unknown): AuthContextPayload | null {
     return null;
   }
   return value as AuthContextPayload;
+}
+
+function asRuntimeAuthDiagnostics(value: unknown): RuntimeAuthDiagnostics | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  return value as RuntimeAuthDiagnostics;
+}
+
+function asRuntimeProcessInfo(value: unknown): RuntimeProcessInfo | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  return value as RuntimeProcessInfo;
 }
 
 function asNumber(value: unknown): number {

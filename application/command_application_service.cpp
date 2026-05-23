@@ -88,6 +88,31 @@ std::string NormalizeLower(std::string value) {
     return value;
 }
 
+bool HasOnlineImageEnhanceApiKey(const AuthorizationService::SessionResult& session_result) {
+    return !session_result.token.empty();
+}
+
+void ApplyOnlineImageEnhanceAvailability(SdkImageEnhanceCapabilityResult* result, bool online_available) {
+    if (result == NULL) {
+        return;
+    }
+    for (std::vector<SdkImageEnhanceCapability>::iterator it = result->capabilities.begin();
+         it != result->capabilities.end();
+         ++it) {
+        if (it->runtime != "online") {
+            continue;
+        }
+        it->available = online_available;
+        if (online_available) {
+            it->unavailable_reason.clear();
+            it->unavailable_reason_zh_cn.clear();
+        } else {
+            it->unavailable_reason = "online enhance api key is not configured";
+            it->unavailable_reason_zh_cn = "在线增强 API Key 未配置";
+        }
+    }
+}
+
 std::string ExtensionFromFilename(const std::string& filename) {
     const std::string::size_type slash_pos = filename.find_last_of("/\\");
     const std::string leaf = slash_pos == std::string::npos ? filename : filename.substr(slash_pos + 1);
@@ -1135,10 +1160,15 @@ std::string OutputPathForIndexedAsset(const std::string& output_dir,
 
 } // namespace
 
-CommandApplicationService::CommandApplicationService(const SdkConfig& config, const ProviderBundle& providers)
+CommandApplicationService::CommandApplicationService(const SdkConfig& config,
+                                                     const ProviderBundle& providers,
+                                                     std::shared_ptr<RuntimeConfigService> runtime_config)
     : config_(config),
+      runtime_config_(runtime_config),
       providers_(providers),
-      authorization_service_(providers_),
+      authorization_service_(providers_, [this]() {
+          return runtime_config_ ? runtime_config_->AuthzBaseUrl() : std::string();
+      }),
       device_facade_(providers_),
       graphic_facade_(providers_),
       ocr_facade_(providers_),
@@ -1457,11 +1487,21 @@ void CommandApplicationService::DispatchSaneScanTaskEvent(const SdkSaneScanTaskE
     }
 
     SdkImageEnhancePipeline sane_pipeline;
+    std::string online_api_key;
+    std::string online_base_url;
     {
         std::lock_guard<std::mutex> lock(sane_tasks_mu_);
         std::map<std::string, SdkImageEnhancePipeline>::const_iterator pipeline_it = sane_pipelines_by_task_.find(task.task_id);
         if (pipeline_it != sane_pipelines_by_task_.end()) {
             sane_pipeline = pipeline_it->second;
+        }
+        std::map<std::string, std::string>::const_iterator api_key_it = sane_online_api_keys_by_task_.find(task.task_id);
+        if (api_key_it != sane_online_api_keys_by_task_.end()) {
+            online_api_key = api_key_it->second;
+        }
+        std::map<std::string, std::string>::const_iterator base_url_it = sane_online_base_urls_by_task_.find(task.task_id);
+        if (base_url_it != sane_online_base_urls_by_task_.end()) {
+            online_base_url = base_url_it->second;
         }
     }
     if (task.status == "completed" && !sane_pipeline.steps.empty() && !task.output_paths.empty()) {
@@ -1514,6 +1554,8 @@ void CommandApplicationService::DispatchSaneScanTaskEvent(const SdkSaneScanTaskE
             step_request.output_dir = JoinLocalPath(task.output_dir.empty() ? GetSdkOpenTaskAssetDir("sane", task.task_id, "enhance")
                                                                             : task.output_dir,
                                                     "enhance-step-" + std::to_string(static_cast<long long>(step_index + 1)));
+            step_request.online_api_key = online_api_key;
+            step_request.online_base_url = online_base_url;
             EnsureDirectoryRecursive(step_request.output_dir);
             const SdkImageEnhanceStepResult step_result = providers_.image_enhance_provider->RunStep(step_request);
             if (!IsOkStatusCode(step_result.code)) {
@@ -2118,6 +2160,8 @@ Json CommandApplicationService::HandleCaptureTake(const std::string& connection_
     start_request.auth_context = session_result.auth_context;
     start_request.profile = ParseCaptureProfile(request.params, device_id);
     start_request.pipeline = ParseImageEnhancePipeline(GetOptionalObjectField(request.params, "pipeline"));
+    start_request.online_api_key = session_result.token;
+    start_request.online_base_url = runtime_config_ ? runtime_config_->OnlineImageEnhanceBaseUrl() : "";
     if (start_request.profile.device_id.empty()) {
         start_request.profile.device_id = device_id;
     }
@@ -2768,10 +2812,11 @@ Json CommandApplicationService::HandleImageEnhanceCapabilities(const std::string
     }
     Json providers = Json::array();
     if (providers_.image_enhance_provider) {
-        const SdkImageEnhanceCapabilityResult result = providers_.image_enhance_provider->ListCapabilities();
+        SdkImageEnhanceCapabilityResult result = providers_.image_enhance_provider->ListCapabilities();
         if (!IsOkStatusCode(result.code)) {
             return BuildWsResponse(request.request_id, result.code, result.message);
         }
+        ApplyOnlineImageEnhanceAvailability(&result, HasOnlineImageEnhanceApiKey(session_result));
         providers.push_back(BuildImageEnhanceCapabilityProviderJson(result));
     }
     return BuildWsResponse(request.request_id,
@@ -2790,6 +2835,9 @@ Json CommandApplicationService::HandleImageEnhance(const std::string& connection
     SdkImageEnhanceTaskRequest enhance_request;
     enhance_request.connection_id = connection_id;
     enhance_request.output_dir = GetOptionalStringField(request.params, "output_dir");
+    enhance_request.online_api_key = session_result.token;
+    enhance_request.online_base_url = runtime_config_ ? runtime_config_->OnlineImageEnhanceBaseUrl() : "";
+    enhance_request.authz_base_url = runtime_config_ ? runtime_config_->AuthzBaseUrl() : "";
     Json source_json = GetOptionalObjectField(request.params, "source");
     if (source_json.empty()) {
         source_json = request.params;
@@ -2815,12 +2863,6 @@ Json CommandApplicationService::HandleImageEnhance(const std::string& connection
     }
     if (enhance_request.input_paths.empty()) {
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "image.enhance source is empty");
-    }
-
-    const AuthorizationService::SessionResult quota_result =
-        ConsumeQuota(connection_id, request.method, request.request_id, static_cast<int>(enhance_request.input_paths.size()));
-    if (!IsOkStatusCode(quota_result.code)) {
-        return BuildWsResponse(request.request_id, quota_result.code, quota_result.message);
     }
 
     enhance_request.pipeline = ParseImageEnhancePipeline(GetOptionalObjectField(request.params, "pipeline"));
@@ -3572,6 +3614,8 @@ Json CommandApplicationService::HandleSaneScan(const std::string& connection_id,
         sane_tasks_[result.task_id] = result.task;
         if (!scan_pipeline.steps.empty()) {
             sane_pipelines_by_task_[result.task_id] = scan_pipeline;
+            sane_online_api_keys_by_task_[result.task_id] = session_result.token;
+            sane_online_base_urls_by_task_[result.task_id] = runtime_config_ ? runtime_config_->OnlineImageEnhanceBaseUrl() : "";
         }
     }
     return BuildWsResponse(request.request_id,

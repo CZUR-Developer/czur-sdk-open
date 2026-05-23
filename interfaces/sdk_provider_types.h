@@ -794,6 +794,8 @@ struct SdkImageEnhanceStepRequest {
     SdkImageEnhanceStep step;
     std::vector<SdkImageEnhancePage> pages;
     std::string output_dir;
+    std::string online_api_key;
+    std::string online_base_url;
 };
 
 struct SdkImageEnhanceStepResult {
@@ -845,6 +847,9 @@ struct SdkImageEnhanceTaskRequest {
     std::vector<std::string> input_paths;
     std::string output_dir;
     SdkImageEnhancePipeline pipeline;
+    std::string online_api_key;
+    std::string online_base_url;
+    std::string authz_base_url;
 };
 
 struct SdkImageEnhanceTaskResult {

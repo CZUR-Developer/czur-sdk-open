@@ -10,6 +10,7 @@
 
 #include "../application/admin_application_service.h"
 #include "../application/command_application_service.h"
+#include "../application/runtime_config_service.h"
 #include "../transport/sdk_http_server.h"
 #include "../transport/sdk_ws_command_server.h"
 #include "../transport/sdk_ws_video_server.h"
@@ -33,6 +34,7 @@ private:
 
     SdkConfig config_;
     ProviderBundle providers_;
+    std::shared_ptr<RuntimeConfigService> runtime_config_service_;
     std::unique_ptr<CommandApplicationService> command_application_service_;
     AdminApplicationService admin_application_service_;
     SdkHttpServer admin_http_server_;

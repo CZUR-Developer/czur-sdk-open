@@ -6,6 +6,7 @@
 #include <atomic>
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <string>
@@ -20,6 +21,7 @@
 #include "ocr_facade.h"
 #include "ofd_facade.h"
 #include "recognition_facade.h"
+#include "runtime_config_service.h"
 #include "sane_facade.h"
 #include "sdk_config.h"
 #include "sdk_json_utils.h"
@@ -55,7 +57,9 @@ public:
         SdkCaptureAsset asset;
     };
 
-    explicit CommandApplicationService(const SdkConfig& config, const ProviderBundle& providers);
+    explicit CommandApplicationService(const SdkConfig& config,
+                                       const ProviderBundle& providers,
+                                       std::shared_ptr<RuntimeConfigService> runtime_config = std::shared_ptr<RuntimeConfigService>());
 
     void SetStatusSupplier(StatusSupplier supplier);
     void SetVideoFrameSink(VideoFrameSink sink);
@@ -158,6 +162,7 @@ private:
                                         const std::string& asset_id) const;
 
     SdkConfig config_;
+    std::shared_ptr<RuntimeConfigService> runtime_config_;
     mutable std::mutex command_event_sink_mu_;
     CommandEventSink command_event_sink_;
     ProviderBundle providers_;
@@ -182,6 +187,8 @@ private:
     mutable std::mutex sane_tasks_mu_;
     std::map<std::string, SdkSaneScanTask> sane_tasks_;
     std::map<std::string, SdkImageEnhancePipeline> sane_pipelines_by_task_;
+    std::map<std::string, std::string> sane_online_api_keys_by_task_;
+    std::map<std::string, std::string> sane_online_base_urls_by_task_;
     mutable std::mutex opened_devices_mu_;
     std::map<std::string, std::set<std::string> > opened_devices_by_connection_;
 };

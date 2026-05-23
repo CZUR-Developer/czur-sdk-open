@@ -8,6 +8,9 @@
 namespace editor {
 namespace sdk {
 
+AdminApplicationService::AdminApplicationService(std::shared_ptr<RuntimeConfigService> runtime_config)
+    : runtime_config_(runtime_config) {}
+
 void AdminApplicationService::SetStatusSupplier(StatusSupplier supplier) {
     status_supplier_ = supplier;
 }
@@ -22,6 +25,14 @@ Json AdminApplicationService::BuildHealthJson() const {
 
 Json AdminApplicationService::BuildStatusJson() const {
     return status_supplier_ ? status_supplier_() : Json::object();
+}
+
+Json AdminApplicationService::BuildConfigJson() const {
+    return runtime_config_ ? runtime_config_->BuildConfigJson() : Json::object();
+}
+
+Json AdminApplicationService::UpdateConfigJson(const Json& request) const {
+    return runtime_config_ ? runtime_config_->UpdateConfigJson(request) : Json::object();
 }
 
 } // namespace sdk

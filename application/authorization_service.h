@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <string>
@@ -16,6 +17,8 @@ namespace sdk {
 
 class AuthorizationService {
 public:
+    using AuthzBaseUrlSupplier = std::function<std::string()>;
+
     struct SessionResult {
         int code = ToCode(SdkStatusCode::Ok);
         std::string message = "ok";
@@ -26,7 +29,8 @@ public:
         AuthContext auth_context;
     };
 
-    explicit AuthorizationService(const ProviderBundle& providers);
+    explicit AuthorizationService(const ProviderBundle& providers,
+                                  AuthzBaseUrlSupplier authz_base_url_supplier = AuthzBaseUrlSupplier());
 
     SessionResult CreateSession(const std::string& connection_id, const std::string& token);
     SessionResult RefreshSession(const std::string& connection_id);
@@ -45,8 +49,10 @@ public:
 
 private:
     bool HasCapability(const AuthContext& auth_context, const std::string& capability) const;
+    std::string AuthzBaseUrl() const;
 
     ProviderBundle providers_;
+    AuthzBaseUrlSupplier authz_base_url_supplier_;
     mutable std::mutex sessions_mu_;
     std::map<std::string, SessionResult> sessions_;
 };

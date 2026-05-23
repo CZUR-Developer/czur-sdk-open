@@ -122,6 +122,55 @@ bool CopyFile(const std::string& input_path, const std::string& output_path) {
     return static_cast<bool>(out);
 }
 
+std::string NormalizeOnlineEnhanceCapability(const std::string& type) {
+    if (type == "document_rectify_enhance") {
+        return "doc_crop_enhance";
+    }
+    if (type == "remove_background_texture") {
+        return "doc_repair";
+    }
+    return type;
+}
+
+bool IsOnlineEnhanceCapability(const std::string& type) {
+    const std::string normalized = NormalizeOnlineEnhanceCapability(type);
+    return normalized == "doc_crop_enhance" ||
+           normalized == "remove_handwriting" ||
+           normalized == "doc_repair" ||
+           normalized == "remove_moire";
+}
+
+QuotaConsumeResult ConfirmOnlineEnhanceQuota(const ProviderBundle& providers,
+                                             const SdkImageEnhanceTaskRequest& request,
+                                             const std::string& task_id,
+                                             const std::map<std::string, int>& usage_by_capability) {
+    QuotaConsumeResult result;
+    if (usage_by_capability.empty()) {
+        return result;
+    }
+    if (!providers.auth_provider) {
+        result.code = ToCode(SdkStatusCode::ProviderNotReady);
+        result.message = "auth provider is not available";
+        return result;
+    }
+    for (std::map<std::string, int>::const_iterator it = usage_by_capability.begin();
+         it != usage_by_capability.end();
+         ++it) {
+        QuotaConsumeRequest quota_request;
+        quota_request.token = request.online_api_key;
+        quota_request.authz_base_url = request.authz_base_url;
+        quota_request.capability = it->first;
+        quota_request.request_id = "image.enhance:" + task_id + ":" + it->first;
+        quota_request.units = it->second > 0 ? it->second : 1;
+        const QuotaConsumeResult quota_result = providers.auth_provider->ConsumeQuota(quota_request);
+        if (!IsOkStatusCode(quota_result.code)) {
+            return quota_result;
+        }
+        result = quota_result;
+    }
+    return result;
+}
+
 std::string PageOutputPath(const std::string& output_dir, int index, const std::string& format) {
     std::ostringstream name;
     name << "enhanced-page-" << std::setw(3) << std::setfill('0') << index << "." << ExtensionForFormat(format);
@@ -393,6 +442,7 @@ SdkImageEnhanceTaskResult ImageEnhanceTaskService::CancelTask(const std::string&
 
 void ImageEnhanceTaskService::RunTask(const std::string& task_id, SdkImageEnhanceTaskRequest request) {
     std::vector<SdkImageEnhancePage> pages;
+    std::map<std::string, int> online_usage_by_capability;
     SdkImageEnhanceTaskSnapshot event_task;
     {
         std::lock_guard<std::mutex> lock(mu_);
@@ -446,6 +496,8 @@ void ImageEnhanceTaskService::RunTask(const std::string& task_id, SdkImageEnhanc
         step_request.step = step;
         step_request.pages = pages;
         step_request.output_dir = JoinLocalPath(request.output_dir, "step-" + std::to_string(i + 1));
+        step_request.online_api_key = request.online_api_key;
+        step_request.online_base_url = request.online_base_url;
         EnsureDirectoryRecursive(step_request.output_dir);
         const SdkImageEnhanceStepResult step_result = providers_.image_enhance_provider->RunStep(step_request);
 
@@ -454,6 +506,9 @@ void ImageEnhanceTaskService::RunTask(const std::string& task_id, SdkImageEnhanc
         if (should_fail && skip_on_error) {
             should_fail = false;
         }
+        const bool successful_online_step = IsOkStatusCode(step_result.code) && IsOnlineEnhanceCapability(step.type);
+        const std::string online_capability = NormalizeOnlineEnhanceCapability(step.type);
+        const int online_usage_amount = static_cast<int>(step_result.pages.empty() ? pages.size() : step_result.pages.size());
         bool failed = false;
         {
             std::lock_guard<std::mutex> lock(mu_);
@@ -484,6 +539,9 @@ void ImageEnhanceTaskService::RunTask(const std::string& task_id, SdkImageEnhanc
                     pages = step_result.pages;
                     task.pages = pages;
                     task.output_page_count = static_cast<int>(pages.size());
+                    if (successful_online_step) {
+                        online_usage_by_capability[online_capability] += online_usage_amount > 0 ? online_usage_amount : 1;
+                    }
                 }
                 task.progress = 10 + (step_count == 0 ? 70 : (70 * (i + 1) / step_count));
                 event_task = task;
@@ -619,6 +677,19 @@ void ImageEnhanceTaskService::RunTask(const std::string& task_id, SdkImageEnhanc
             final_task.assets.push_back(asset);
         }
         AttachAssetUrls(task_id, &final_task.assets);
+
+        const QuotaConsumeResult quota_result =
+            ConfirmOnlineEnhanceQuota(providers_, request, task_id, online_usage_by_capability);
+        if (!IsOkStatusCode(quota_result.code)) {
+            final_task.status = "failed";
+            final_task.phase = "failed";
+            final_task.progress = 100;
+            final_task.code = quota_result.code;
+            final_task.message = quota_result.message;
+            final_task.error = quota_result.message.empty() ? "online image enhance quota confirm failed" : quota_result.message;
+            final_task.assets.clear();
+        }
+
         std::lock_guard<std::mutex> lock(mu_);
         tasks_[task_id] = final_task;
     }

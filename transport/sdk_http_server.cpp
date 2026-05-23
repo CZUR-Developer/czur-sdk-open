@@ -83,6 +83,14 @@ void SdkHttpServer::SetStatusSupplier(JsonSupplier supplier) {
     status_supplier_ = supplier;
 }
 
+void SdkHttpServer::SetConfigSupplier(JsonSupplier supplier) {
+    config_supplier_ = supplier;
+}
+
+void SdkHttpServer::SetConfigUpdateHandler(JsonUpdateHandler handler) {
+    config_update_handler_ = handler;
+}
+
 void SdkHttpServer::SetAssetResolver(AssetResolver resolver) {
     asset_resolver_ = resolver;
 }
@@ -120,6 +128,47 @@ bool SdkHttpServer::ConfigureRoutes() {
         res.status = ToHttpStatus(SdkHttpStatus::Ok);
         res.set_header("Cache-Control", "no-store");
         res.set_content(DumpJson(body), kJsonContentType);
+    });
+
+    server_->Get("/api/config", [this](const httplib::Request& req, httplib::Response& res) {
+        SetCorsHeaders(&res);
+        if (!IsAuthorized(req.get_header_value("Authorization"))) {
+            res.status = ToHttpStatus(SdkHttpStatus::Unauthorized);
+            res.set_content(DumpJson(BuildErrorBody(SdkStatusCode::AuthRequired, "unauthorized")), kJsonContentType);
+            return;
+        }
+        if (!config_supplier_) {
+            res.status = 404;
+            res.set_content(DumpJson(BuildErrorBody(SdkStatusCode::InvalidMethod, "config api unavailable")), kJsonContentType);
+            return;
+        }
+        res.status = ToHttpStatus(SdkHttpStatus::Ok);
+        res.set_header("Cache-Control", "no-store");
+        res.set_content(DumpJson(config_supplier_()), kJsonContentType);
+    });
+
+    server_->Post("/api/config", [this](const httplib::Request& req, httplib::Response& res) {
+        SetCorsHeaders(&res);
+        if (!IsAuthorized(req.get_header_value("Authorization"))) {
+            res.status = ToHttpStatus(SdkHttpStatus::Unauthorized);
+            res.set_content(DumpJson(BuildErrorBody(SdkStatusCode::AuthRequired, "unauthorized")), kJsonContentType);
+            return;
+        }
+        if (!config_update_handler_) {
+            res.status = 404;
+            res.set_content(DumpJson(BuildErrorBody(SdkStatusCode::InvalidMethod, "config api unavailable")), kJsonContentType);
+            return;
+        }
+        Json request_json;
+        std::string parse_error;
+        if (!TryParseJson(req.body, &request_json, &parse_error) || !request_json.is_object()) {
+            res.status = 400;
+            res.set_content(DumpJson(BuildErrorBody(SdkStatusCode::InvalidParams, "invalid json")), kJsonContentType);
+            return;
+        }
+        res.status = ToHttpStatus(SdkHttpStatus::Ok);
+        res.set_header("Cache-Control", "no-store");
+        res.set_content(DumpJson(config_update_handler_(request_json)), kJsonContentType);
     });
 
     server_->Post(R"(/api/uploads/(images|files))", [this](const httplib::Request& req, httplib::Response& res) {
@@ -203,6 +252,11 @@ bool SdkHttpServer::ConfigureRoutes() {
     });
 
     server_->Options(R"(/api/uploads/.*)", [](const httplib::Request&, httplib::Response& res) {
+        SetCorsHeaders(&res);
+        res.status = 204;
+    });
+
+    server_->Options("/api/config", [](const httplib::Request&, httplib::Response& res) {
         SetCorsHeaders(&res);
         res.status = 204;
     });

@@ -53,6 +53,7 @@ struct AuthContext {
 
 struct AuthValidateRequest {
     std::string token;
+    std::string authz_base_url;
     std::int64_t now_ts = 0;
 };
 
@@ -117,6 +118,7 @@ struct OfflineActivateResult {
 struct QuotaConsumeRequest {
     std::string token;
     std::string session_token;
+    std::string authz_base_url;
     std::string capability;
     std::string request_id;
     int units = 1;
