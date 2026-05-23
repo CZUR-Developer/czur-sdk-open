@@ -251,6 +251,8 @@ void CaptureTaskService::RunTask(const std::string& task_id, CaptureTaskStartReq
                 step_request.step = step;
                 step_request.pages = pages;
                 step_request.output_dir = CaptureEnhanceStepDir(task_id, step_index);
+                step_request.online_api_key = request.online_api_key;
+                step_request.online_base_url = request.online_base_url;
                 EnsureDirectoryRecursive(step_request.output_dir);
                 const SdkImageEnhanceStepResult step_result = providers_.image_enhance_provider->RunStep(step_request);
                 if (!IsOkStatusCode(step_result.code)) {

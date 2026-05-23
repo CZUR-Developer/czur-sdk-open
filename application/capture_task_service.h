@@ -28,6 +28,8 @@ struct CaptureTaskStartRequest {
     AuthContext auth_context;
     SdkCaptureProfile profile;
     SdkImageEnhancePipeline pipeline;
+    std::string online_api_key;
+    std::string online_base_url;
 };
 
 struct CaptureTaskSnapshot {

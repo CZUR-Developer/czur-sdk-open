@@ -3,7 +3,17 @@
 
 #include "sdk_app.h"
 
+#include <cstdlib>
 #include <utility>
+#if defined(_WIN32)
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#include <unistd.h>
+#include <vector>
+#else
+#include <unistd.h>
+#endif
 
 #include "sdk_logger.h"
 
@@ -25,12 +35,51 @@ std::string BuildAssetBaseUrl(const SdkConfig& config) {
     return "http://" + host + ":" + std::to_string(config.asset_http_port);
 }
 
+bool IsEnvConfigured(const char* name) {
+    const char* value = std::getenv(name);
+    return value != nullptr && value[0] != '\0';
+}
+
+int CurrentProcessId() {
+#if defined(_WIN32)
+    return static_cast<int>(GetCurrentProcessId());
+#else
+    return static_cast<int>(getpid());
+#endif
+}
+
+std::string CurrentExecutablePath() {
+#if defined(_WIN32)
+    char buffer[MAX_PATH] = {0};
+    const DWORD length = GetModuleFileNameA(NULL, buffer, MAX_PATH);
+    return length == 0 ? std::string() : std::string(buffer, length);
+#elif defined(__APPLE__)
+    uint32_t size = 0;
+    _NSGetExecutablePath(NULL, &size);
+    if (size == 0) {
+        return "";
+    }
+    std::vector<char> buffer(size + 1, '\0');
+    if (_NSGetExecutablePath(buffer.data(), &size) != 0) {
+        return "";
+    }
+    return std::string(buffer.data());
+#else
+    char buffer[4096] = {0};
+    const ssize_t length = readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
+    return length <= 0 ? std::string() : std::string(buffer, static_cast<std::size_t>(length));
+#endif
+}
+
 } // namespace
 
 SdkApp::SdkApp(const SdkConfig& config, ProviderBundle providers)
     : config_(config),
       providers_(std::move(providers)),
-      command_application_service_(new CommandApplicationService(config_, providers_)),
+      runtime_config_service_(new RuntimeConfigService(config_.online_image_enhance_base_url,
+                                                       config_.authz_base_url)),
+      command_application_service_(new CommandApplicationService(config_, providers_, runtime_config_service_)),
+      admin_application_service_(runtime_config_service_),
       admin_http_server_(
           "admin-site", config_.bind_host, config_.admin_http_port, config_.web_root + "/admin", config_.auth_token),
       demo_http_server_(
@@ -45,6 +94,10 @@ SdkApp::SdkApp(const SdkConfig& config, ProviderBundle providers)
     if (kSdkOpenHttpServerEnabled) {
         admin_http_server_.SetHealthSupplier([this]() { return admin_application_service_.BuildHealthJson(); });
         admin_http_server_.SetStatusSupplier([this]() { return admin_application_service_.BuildStatusJson(); });
+        admin_http_server_.SetConfigSupplier([this]() { return admin_application_service_.BuildConfigJson(); });
+        admin_http_server_.SetConfigUpdateHandler([this](const Json& request) {
+            return admin_application_service_.UpdateConfigJson(request);
+        });
         demo_http_server_.SetHealthSupplier([this]() { return admin_application_service_.BuildHealthJson(); });
         demo_http_server_.SetStatusSupplier([this]() { return admin_application_service_.BuildStatusJson(); });
     }
@@ -222,6 +275,11 @@ Json SdkApp::BuildStatusJson() const {
         {"running", running_.load()},
         {"uptimeSec", UptimeSeconds()},
         {"bindHost", config_.bind_host},
+        {"process",
+         {
+             {"pid", CurrentProcessId()},
+             {"executablePath", CurrentExecutablePath()},
+         }},
         {"http",
          {
              {"enabled", kSdkOpenHttpServerEnabled},
@@ -248,6 +306,12 @@ Json SdkApp::BuildStatusJson() const {
              {"ocr", providers_.ocr_provider ? providers_.ocr_provider->ProviderName() : ""},
              {"ofd", providers_.ofd_provider ? providers_.ofd_provider->ProviderName() : ""},
              {"auth", providers_.auth_provider ? providers_.auth_provider->ProviderName() : ""},
+         }},
+        {"authDiagnostics",
+         {
+             {"masterSecretConfigured", IsEnvConfigured("CZUR_SDK_MASTER_SECRET")},
+             {"authzBaseUrlConfigured", IsEnvConfigured("CZUR_SDK_AUTHZ_BASE_URL")},
+             {"imageEnhanceBaseUrlConfigured", IsEnvConfigured("CZUR_SDK_IMAGE_ENHANCE_BASE_URL")},
          }},
         {"ws",
          {
