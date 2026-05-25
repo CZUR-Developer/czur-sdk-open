@@ -25,7 +25,6 @@ export const navigationItems: NavigationItem[] = [
   { key: 'ocr-recognition', labelKey: 'nav.ocrRecognition', to: '/ocr-recognition' },
   { key: 'file-conversion', labelKey: 'nav.fileConversion', to: '/file-conversion' },
   { key: 'sane-scanning', labelKey: 'nav.saneScanning', to: '/sane-scanning' },
-  { key: 'events-results', labelKey: 'nav.eventsResults', to: '/events-results' },
 ];
 
 export const shellStatusItems: ShellStatusItem[] = [
@@ -725,33 +724,6 @@ export const saneEvents: TimelineItem[] = [
     detail: 'planned placeholder retains output contract preview only',
     meta: '18:36:22',
     tone: 'info',
-  },
-];
-
-export const resultCenterMetrics: MetricCardItem[] = [
-  {
-    id: 'requests',
-    value: '184',
-    labelKey: 'common.recentRequests',
-    detail: 'Session-local request cache retained by the drawer and center page',
-    trend: '14 failed',
-    tone: 'primary',
-  },
-  {
-    id: 'events',
-    value: '612',
-    labelKey: 'common.recentEvents',
-    detail: 'Realtime events aggregated across device, stream, capture, OCR, and SANE lanes',
-    trend: '18 filtered',
-    tone: 'success',
-  },
-  {
-    id: 'errors',
-    value: '14',
-    labelKey: 'common.recentErrors',
-    detail: 'Distinct errors worth carrying into QA summary export',
-    trend: '3 blocker-class',
-    tone: 'warning',
   },
 ];
 

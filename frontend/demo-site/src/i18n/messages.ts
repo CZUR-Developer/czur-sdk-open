@@ -33,8 +33,6 @@ export const messages = {
       timeline: 'Timeline',
       response: 'Response',
       request: 'Request',
-      exportSummary: 'Export summary',
-      clearSession: 'Clear session cache',
       primaryFlow: 'Primary flow',
       rawJson: 'Raw JSON',
       mockMode: 'Mock mode',
@@ -101,7 +99,6 @@ export const messages = {
       ocrRecognition: 'OCR & Recognition',
       fileConversion: 'File Conversion',
       saneScanning: 'SANE Scanning',
-      eventsResults: 'Events & Results',
     },
     header: {
       command: 'Command WS',
@@ -566,10 +563,6 @@ export const messages = {
         requestJson: 'SANE request',
         responseJson: 'SANE response',
       },
-      eventsResults: {
-        title: 'Events & Results',
-        subtitle: 'Collect requests, events, and errors across the current session and export a compact QA summary.',
-      },
     },
     sections: {
       endpoints: 'Service endpoints',
@@ -594,9 +587,6 @@ export const messages = {
       fileTemplates: 'Conversion templates',
       fileWorkspace: 'File workspace',
       saneOptions: 'Scanner options',
-      requestHistory: 'Request history',
-      eventCenter: 'Session event stream',
-      errorCenter: 'Error watchlist',
     },
     labels: {
       endpoint: 'Endpoint',
@@ -672,8 +662,6 @@ export const messages = {
       timeline: '时间线',
       response: '响应',
       request: '请求',
-      exportSummary: '导出摘要',
-      clearSession: '清空会话缓存',
       primaryFlow: '主链路',
       rawJson: '原始 JSON',
       mockMode: 'Mock 模式',
@@ -740,7 +728,6 @@ export const messages = {
       ocrRecognition: 'OCR 与识别',
       fileConversion: '文件转换',
       saneScanning: 'SANE 扫描',
-      eventsResults: '事件与结果中心',
     },
     header: {
       command: '指令通道',
@@ -1205,10 +1192,6 @@ export const messages = {
         requestJson: 'SANE 请求',
         responseJson: 'SANE 响应',
       },
-      eventsResults: {
-        title: '事件与结果中心',
-        subtitle: '集中查看当前会话内的请求、事件和错误，并导出紧凑的 QA 摘要。',
-      },
     },
     sections: {
       endpoints: '服务端点',
@@ -1233,9 +1216,6 @@ export const messages = {
       fileTemplates: '转换模板',
       fileWorkspace: '文件工作区',
       saneOptions: '扫描仪选项',
-      requestHistory: '请求历史',
-      eventCenter: '会话事件流',
-      errorCenter: '错误观察区',
     },
     labels: {
       endpoint: '端点',

@@ -3,7 +3,6 @@ import { createRouter, createWebHistory } from 'vue-router';
 import CaptureAcquisitionPage from '../pages/CaptureAcquisitionPage.vue';
 import ConnectionAuthPage from '../pages/ConnectionAuthPage.vue';
 import DeviceVideoPage from '../pages/DeviceVideoPage.vue';
-import EventsResultsPage from '../pages/EventsResultsPage.vue';
 import FileConversionPage from '../pages/FileConversionPage.vue';
 import ImageEnhancementPage from '../pages/ImageEnhancementPage.vue';
 import ImageProcessingPage from '../pages/ImageProcessingPage.vue';
@@ -106,16 +105,6 @@ export const router = createRouter({
         navKey: 'sane-scanning',
         titleKey: 'pages.saneScanning.title',
         subtitleKey: 'pages.saneScanning.subtitle',
-      },
-    },
-    {
-      path: '/events-results',
-      name: 'events-results',
-      component: EventsResultsPage,
-      meta: {
-        navKey: 'events-results',
-        titleKey: 'pages.eventsResults.title',
-        subtitleKey: 'pages.eventsResults.subtitle',
       },
     },
   ],

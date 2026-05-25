@@ -3,6 +3,7 @@
 
 #include "sdk_http_server.h"
 
+#include <cstdlib>
 #include <httplib.h>
 #include <sys/stat.h>
 
@@ -46,6 +47,18 @@ int HttpStatusForSdkCode(int code) {
     return 500;
 }
 
+std::size_t ParseSizeParam(const std::string& value, std::size_t default_value, std::size_t max_value) {
+    if (value.empty()) {
+        return default_value;
+    }
+    const long parsed = std::strtol(value.c_str(), NULL, 10);
+    if (parsed <= 0) {
+        return default_value;
+    }
+    const std::size_t result = static_cast<std::size_t>(parsed);
+    return result > max_value ? max_value : result;
+}
+
 void SetCorsHeaders(httplib::Response* res) {
     if (res == NULL) {
         return;
@@ -83,12 +96,36 @@ void SdkHttpServer::SetStatusSupplier(JsonSupplier supplier) {
     status_supplier_ = supplier;
 }
 
+void SdkHttpServer::SetSystemSupplier(JsonSupplier supplier) {
+    system_supplier_ = supplier;
+}
+
+void SdkHttpServer::SetAuthSupplier(JsonSupplier supplier) {
+    auth_supplier_ = supplier;
+}
+
+void SdkHttpServer::SetLogsSupplier(JsonSupplier supplier) {
+    logs_supplier_ = supplier;
+}
+
+void SdkHttpServer::SetLogReadHandler(LogReadHandler handler) {
+    log_read_handler_ = handler;
+}
+
+void SdkHttpServer::SetRecordsSupplier(JsonSupplier supplier) {
+    records_supplier_ = supplier;
+}
+
 void SdkHttpServer::SetConfigSupplier(JsonSupplier supplier) {
     config_supplier_ = supplier;
 }
 
 void SdkHttpServer::SetConfigUpdateHandler(JsonUpdateHandler handler) {
     config_update_handler_ = handler;
+}
+
+void SdkHttpServer::SetOfflineActivationHandler(OfflineActivationHandler handler) {
+    offline_activation_handler_ = handler;
 }
 
 void SdkHttpServer::SetAssetResolver(AssetResolver resolver) {
@@ -119,6 +156,7 @@ bool SdkHttpServer::ConfigureRoutes() {
     });
 
     server_->Get("/api/status", [this](const httplib::Request& req, httplib::Response& res) {
+        SetCorsHeaders(&res);
         if (!IsAuthorized(req.get_header_value("Authorization"))) {
             res.status = ToHttpStatus(SdkHttpStatus::Unauthorized);
             res.set_content(DumpJson(BuildErrorBody(SdkStatusCode::AuthRequired, "unauthorized")), kJsonContentType);
@@ -128,6 +166,100 @@ bool SdkHttpServer::ConfigureRoutes() {
         res.status = ToHttpStatus(SdkHttpStatus::Ok);
         res.set_header("Cache-Control", "no-store");
         res.set_content(DumpJson(body), kJsonContentType);
+    });
+
+    server_->Get("/api/system", [this](const httplib::Request& req, httplib::Response& res) {
+        SetCorsHeaders(&res);
+        if (!IsAuthorized(req.get_header_value("Authorization"))) {
+            res.status = ToHttpStatus(SdkHttpStatus::Unauthorized);
+            res.set_content(DumpJson(BuildErrorBody(SdkStatusCode::AuthRequired, "unauthorized")), kJsonContentType);
+            return;
+        }
+        res.status = ToHttpStatus(SdkHttpStatus::Ok);
+        res.set_header("Cache-Control", "no-store");
+        res.set_content(DumpJson(system_supplier_ ? system_supplier_() : Json::object()), kJsonContentType);
+    });
+
+    server_->Get("/api/auth", [this](const httplib::Request& req, httplib::Response& res) {
+        SetCorsHeaders(&res);
+        if (!IsAuthorized(req.get_header_value("Authorization"))) {
+            res.status = ToHttpStatus(SdkHttpStatus::Unauthorized);
+            res.set_content(DumpJson(BuildErrorBody(SdkStatusCode::AuthRequired, "unauthorized")), kJsonContentType);
+            return;
+        }
+        res.status = ToHttpStatus(SdkHttpStatus::Ok);
+        res.set_header("Cache-Control", "no-store");
+        res.set_content(DumpJson(auth_supplier_ ? auth_supplier_() : Json::object()), kJsonContentType);
+    });
+
+    server_->Post(R"(/api/auth/sessions/([^/]+)/offline-activation)", [this](const httplib::Request& req, httplib::Response& res) {
+        SetCorsHeaders(&res);
+        if (!IsAuthorized(req.get_header_value("Authorization"))) {
+            res.status = ToHttpStatus(SdkHttpStatus::Unauthorized);
+            res.set_content(DumpJson(BuildErrorBody(SdkStatusCode::AuthRequired, "unauthorized")), kJsonContentType);
+            return;
+        }
+        if (!offline_activation_handler_) {
+            res.status = 404;
+            res.set_content(DumpJson(BuildErrorBody(SdkStatusCode::InvalidMethod, "offline activation api unavailable")), kJsonContentType);
+            return;
+        }
+        Json request_json;
+        std::string parse_error;
+        if (!TryParseJson(req.body, &request_json, &parse_error) || !request_json.is_object()) {
+            res.status = 400;
+            res.set_content(DumpJson(BuildErrorBody(SdkStatusCode::InvalidParams, "invalid json")), kJsonContentType);
+            return;
+        }
+        const Json body = offline_activation_handler_(req.matches[1], request_json);
+        const int code = body.value("code", 0);
+        res.status = code == ToCode(SdkStatusCode::InvalidParams) ? 400 : HttpStatusForSdkCode(code);
+        res.set_header("Cache-Control", "no-store");
+        res.set_content(DumpJson(body), kJsonContentType);
+    });
+
+    server_->Get("/api/logs", [this](const httplib::Request& req, httplib::Response& res) {
+        SetCorsHeaders(&res);
+        if (!IsAuthorized(req.get_header_value("Authorization"))) {
+            res.status = ToHttpStatus(SdkHttpStatus::Unauthorized);
+            res.set_content(DumpJson(BuildErrorBody(SdkStatusCode::AuthRequired, "unauthorized")), kJsonContentType);
+            return;
+        }
+        res.status = ToHttpStatus(SdkHttpStatus::Ok);
+        res.set_header("Cache-Control", "no-store");
+        res.set_content(DumpJson(logs_supplier_ ? logs_supplier_() : Json::object()), kJsonContentType);
+    });
+
+    server_->Get(R"(/api/logs/([^/]+))", [this](const httplib::Request& req, httplib::Response& res) {
+        SetCorsHeaders(&res);
+        if (!IsAuthorized(req.get_header_value("Authorization"))) {
+            res.status = ToHttpStatus(SdkHttpStatus::Unauthorized);
+            res.set_content(DumpJson(BuildErrorBody(SdkStatusCode::AuthRequired, "unauthorized")), kJsonContentType);
+            return;
+        }
+        if (!log_read_handler_) {
+            res.status = 404;
+            res.set_content(DumpJson(BuildErrorBody(SdkStatusCode::InvalidMethod, "log api unavailable")), kJsonContentType);
+            return;
+        }
+        const std::size_t tail_bytes = ParseSizeParam(req.get_param_value("tailBytes"), 262144, 1048576);
+        const Json body = log_read_handler_(req.matches[1], tail_bytes);
+        const int code = body.value("code", 0);
+        res.status = IsOkStatusCode(code) ? ToHttpStatus(SdkHttpStatus::Ok) : 404;
+        res.set_header("Cache-Control", "no-store");
+        res.set_content(DumpJson(body), kJsonContentType);
+    });
+
+    server_->Get("/api/records", [this](const httplib::Request& req, httplib::Response& res) {
+        SetCorsHeaders(&res);
+        if (!IsAuthorized(req.get_header_value("Authorization"))) {
+            res.status = ToHttpStatus(SdkHttpStatus::Unauthorized);
+            res.set_content(DumpJson(BuildErrorBody(SdkStatusCode::AuthRequired, "unauthorized")), kJsonContentType);
+            return;
+        }
+        res.status = ToHttpStatus(SdkHttpStatus::Ok);
+        res.set_header("Cache-Control", "no-store");
+        res.set_content(DumpJson(records_supplier_ ? records_supplier_() : Json::object()), kJsonContentType);
     });
 
     server_->Get("/api/config", [this](const httplib::Request& req, httplib::Response& res) {
@@ -257,6 +389,11 @@ bool SdkHttpServer::ConfigureRoutes() {
     });
 
     server_->Options("/api/config", [](const httplib::Request&, httplib::Response& res) {
+        SetCorsHeaders(&res);
+        res.status = 204;
+    });
+
+    server_->Options(R"(/api/(system|auth|logs|records).*)", [](const httplib::Request&, httplib::Response& res) {
         SetCorsHeaders(&res);
         res.status = 204;
     });

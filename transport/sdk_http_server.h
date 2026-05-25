@@ -35,6 +35,8 @@ public:
     using AssetResolver = std::function<AssetResult(const std::string&, const std::string&, const std::string&)>;
     using ImageUploadHandler = std::function<UploadResult(const std::string&, const std::string&, const std::string&, const std::string&)>;
     using JsonUpdateHandler = std::function<Json(const Json&)>;
+    using OfflineActivationHandler = std::function<Json(const std::string&, const Json&)>;
+    using LogReadHandler = std::function<Json(const std::string&, std::size_t)>;
 
     SdkHttpServer(const std::string& site_name,
                   const std::string& host,
@@ -46,8 +48,14 @@ public:
 
     void SetHealthSupplier(JsonSupplier supplier);
     void SetStatusSupplier(JsonSupplier supplier);
+    void SetSystemSupplier(JsonSupplier supplier);
+    void SetAuthSupplier(JsonSupplier supplier);
+    void SetLogsSupplier(JsonSupplier supplier);
+    void SetLogReadHandler(LogReadHandler handler);
+    void SetRecordsSupplier(JsonSupplier supplier);
     void SetConfigSupplier(JsonSupplier supplier);
     void SetConfigUpdateHandler(JsonUpdateHandler handler);
+    void SetOfflineActivationHandler(OfflineActivationHandler handler);
     void SetAssetResolver(AssetResolver resolver);
     void SetImageUploadHandler(ImageUploadHandler handler);
     bool Start();
@@ -65,8 +73,14 @@ private:
     bool mount_static_site_;
     JsonSupplier health_supplier_;
     JsonSupplier status_supplier_;
+    JsonSupplier system_supplier_;
+    JsonSupplier auth_supplier_;
+    JsonSupplier logs_supplier_;
+    LogReadHandler log_read_handler_;
+    JsonSupplier records_supplier_;
     JsonSupplier config_supplier_;
     JsonUpdateHandler config_update_handler_;
+    OfflineActivationHandler offline_activation_handler_;
     AssetResolver asset_resolver_;
     ImageUploadHandler image_upload_handler_;
     std::atomic<bool> running_;

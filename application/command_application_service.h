@@ -79,6 +79,8 @@ public:
                                   const std::string& content);
     std::size_t ActiveSessionCount() const;
     std::size_t ActiveStreamCount() const;
+    Json BuildAdminAuthJson() const;
+    Json ActivateOfflineForAdmin(const std::string& connection_id, const Json& request);
 
 private:
     struct Request {
@@ -146,6 +148,7 @@ private:
                                                      const std::string& request_id,
                                                      int units = 1);
     Json BuildSessionJson(const AuthorizationService::SessionResult& session_result) const;
+    Json BuildAdminSessionJson(const AuthorizationService::SessionResult& session_result) const;
     Json BuildAuthContextJson(const AuthContext& auth_context) const;
     Json BuildDeviceJson(const SdkDeviceDescriptor& device) const;
     const MethodDescriptor* FindMethod(const std::string& method) const;

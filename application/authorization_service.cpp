@@ -17,6 +17,7 @@ AuthorizationService::AuthorizationService(const ProviderBundle& providers,
 AuthorizationService::SessionResult AuthorizationService::CreateSession(const std::string& connection_id,
                                                                         const std::string& token) {
     SessionResult result;
+    const std::int64_t now_ts = static_cast<std::int64_t>(std::time(NULL));
     if (!providers_.auth_provider) {
         result.code = ToCode(SdkStatusCode::ProviderNotReady);
         result.message = "provider not ready";
@@ -31,7 +32,7 @@ AuthorizationService::SessionResult AuthorizationService::CreateSession(const st
     AuthValidateRequest request;
     request.token = token;
     request.authz_base_url = AuthzBaseUrl();
-    request.now_ts = static_cast<std::int64_t>(std::time(NULL));
+    request.now_ts = now_ts;
     const AuthRefreshResult provider_result = providers_.auth_provider->CreateSession(request);
     result.code = provider_result.code;
     result.message = provider_result.message;
@@ -39,6 +40,8 @@ AuthorizationService::SessionResult AuthorizationService::CreateSession(const st
     result.session_token = provider_result.session_token;
     result.connection_id = connection_id;
     result.expires_in = provider_result.expires_in;
+    result.created_at = now_ts;
+    result.last_seen_at = now_ts;
     result.auth_context = provider_result.auth_context;
 
     if (IsOkStatusCode(result.code)) {
@@ -56,16 +59,17 @@ AuthorizationService::SessionResult AuthorizationService::RefreshSession(const s
 
     SessionResult result;
     AuthRefreshResult provider_result;
+    const std::int64_t now_ts = static_cast<std::int64_t>(std::time(NULL));
     if (bound_session.auth_context.license_mode == "online_api_key" && !bound_session.token.empty()) {
         AuthValidateRequest validate_request;
         validate_request.token = bound_session.token;
         validate_request.authz_base_url = AuthzBaseUrl();
-        validate_request.now_ts = static_cast<std::int64_t>(std::time(NULL));
+        validate_request.now_ts = now_ts;
         provider_result = providers_.auth_provider->CreateSession(validate_request);
     } else {
         AuthRefreshRequest request;
         request.session_token = bound_session.session_token;
-        request.now_ts = static_cast<std::int64_t>(std::time(NULL));
+        request.now_ts = now_ts;
         provider_result = providers_.auth_provider->RefreshSession(request);
     }
     result.code = provider_result.code;
@@ -74,6 +78,8 @@ AuthorizationService::SessionResult AuthorizationService::RefreshSession(const s
     result.session_token = provider_result.session_token;
     result.connection_id = connection_id;
     result.expires_in = provider_result.expires_in;
+    result.created_at = bound_session.created_at;
+    result.last_seen_at = now_ts;
     result.auth_context = provider_result.auth_context;
 
     if (IsOkStatusCode(result.code)) {
@@ -172,6 +178,8 @@ AuthorizationService::SessionResult AuthorizationService::ActivateOffline(const 
     result.session_token = provider_result.session_token;
     result.connection_id = connection_id;
     result.expires_in = provider_result.expires_in;
+    result.created_at = bound_session.created_at;
+    result.last_seen_at = request.now_ts;
     result.auth_context = provider_result.auth_context;
     if (IsOkStatusCode(result.code)) {
         std::lock_guard<std::mutex> lock(sessions_mu_);
@@ -208,11 +216,13 @@ AuthorizationService::SessionResult AuthorizationService::ConsumeQuota(const std
     result.code = provider_result.code;
     result.message = provider_result.message;
     result.auth_context = provider_result.auth_context;
+    result.last_seen_at = request.now_ts;
     if (IsOkStatusCode(result.code)) {
         std::lock_guard<std::mutex> lock(sessions_mu_);
         std::map<std::string, SessionResult>::iterator it = sessions_.find(connection_id);
         if (it != sessions_.end()) {
             it->second.auth_context = provider_result.auth_context;
+            it->second.last_seen_at = request.now_ts;
             result = it->second;
             result.code = provider_result.code;
             result.message = provider_result.message;
@@ -229,6 +239,21 @@ void AuthorizationService::ClearConnection(const std::string& connection_id) {
 std::size_t AuthorizationService::ActiveSessionCount() const {
     std::lock_guard<std::mutex> lock(sessions_mu_);
     return sessions_.size();
+}
+
+std::vector<AuthorizationService::SessionResult> AuthorizationService::SnapshotSessions() const {
+    std::vector<SessionResult> sessions;
+    std::lock_guard<std::mutex> lock(sessions_mu_);
+    for (std::map<std::string, SessionResult>::const_iterator it = sessions_.begin();
+         it != sessions_.end();
+         ++it) {
+        SessionResult snapshot = it->second;
+        if (snapshot.connection_id.empty()) {
+            snapshot.connection_id = it->first;
+        }
+        sessions.push_back(snapshot);
+    }
+    return sessions;
 }
 
 std::string AuthorizationService::AuthzBaseUrl() const {
