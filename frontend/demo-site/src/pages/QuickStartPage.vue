@@ -6,8 +6,8 @@
         :key="metric.id"
         :label="t(metric.labelKey)"
         :value="metric.value"
-        :detail="metric.detail"
-        :trend="metric.trend"
+        :detail="metric.detailKey ? t(metric.detailKey) : metric.detail"
+        :trend="metric.trendKey ? t(metric.trendKey) : metric.trend"
         :tone="metric.tone"
       />
     </div>
@@ -22,8 +22,8 @@
           v-for="endpoint in quickStartEndpoints"
           :key="endpoint.id"
           :eyebrow="endpoint.protocol"
-          :title="endpoint.title"
-          :description="endpoint.note"
+          :title="endpoint.titleKey ? t(endpoint.titleKey) : endpoint.title"
+          :description="endpoint.noteKey ? t(endpoint.noteKey) : endpoint.note"
           :meta="endpoint.url"
           :badge-label="t(executionStateLabelKey(endpoint.state))"
           :badge-tone="executionStateTone(endpoint.state)"
@@ -44,7 +44,7 @@
             :key="check.id"
             :eyebrow="check.method"
             :title="check.latency"
-            :description="check.note"
+            :description="check.noteKey ? t(check.noteKey) : check.note"
             :badge-label="t(executionStateLabelKey(check.state))"
             :badge-tone="executionStateTone(check.state)"
           >

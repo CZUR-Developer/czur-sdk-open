@@ -69,7 +69,7 @@ const authActions = computed(() => [
   {
     id: 'validate',
     eyebrow: 'system.ping',
-    title: 'Command connect',
+    title: t('pages.connectionAuth.commandConnectTitle'),
     description: commandLaneDescription.value,
     meta: commandLaneMeta.value,
     tone: 'primary',
@@ -78,22 +78,22 @@ const authActions = computed(() => [
   {
     id: 'refresh',
     eyebrow: 'auth.refresh_session',
-    title: 'Session token issue',
+    title: t('pages.connectionAuth.sessionTokenIssueTitle'),
     description: authSessionState.sessionToken
-      ? `session_token cached locally, ttl=${authSessionState.sessionExpiresIn}s`
-      : 'The runtime returns session_token from auth.create_session, and auth.refresh_session can rotate it later.',
-    meta: authSessionState.sessionToken ? maskSecret(authSessionState.sessionToken) : 'session_token not available',
+      ? t('pages.connectionAuth.sessionTokenCached', { ttl: authSessionState.sessionExpiresIn })
+      : t('pages.connectionAuth.sessionTokenIssueDescription'),
+    meta: authSessionState.sessionToken ? maskSecret(authSessionState.sessionToken) : t('pages.connectionAuth.sessionTokenUnavailable'),
     tone: 'info',
     state: authSessionState.refreshState,
   },
   {
     id: 'context',
-    eyebrow: 'Context',
-    title: 'Context snapshot',
+    eyebrow: t('pages.connectionAuth.contextEyebrow'),
+    title: t('pages.connectionAuth.contextSnapshotTitle'),
     description: authSessionState.authContext
-      ? 'The runtime resolved account scope, device grants, and capabilities from the bound session token.'
-      : 'Context is fetched after session creation and fills the granted capability surface.',
-    meta: authSessionState.authContext?.auth_scene || 'awaiting auth context',
+      ? t('pages.connectionAuth.contextResolvedDescription')
+      : t('pages.connectionAuth.contextPendingDescription'),
+    meta: authSessionState.authContext?.auth_scene || t('pages.connectionAuth.contextAwaitingMeta'),
     tone: 'success',
     state: authSessionState.contextState,
   },
@@ -101,13 +101,13 @@ const authActions = computed(() => [
 
 const authFormItems = computed(() => [
   {
-    label: 'Command endpoint',
+    label: t('pages.connectionAuth.commandEndpoint'),
     value: authSessionState.connectionEndpoint,
     hint: commandLaneHint.value,
     monospace: true,
   },
   {
-    label: 'Video endpoint',
+    label: t('pages.connectionAuth.videoEndpoint'),
     value: authSessionState.videoEndpoint,
     hint: videoLaneHint.value,
     monospace: true,
@@ -118,35 +118,35 @@ const authFormItems = computed(() => [
     monospace: true,
   },
   {
-    label: 'CZUR_SDK_MASTER_SECRET',
+    label: 'MASTER_SECRET',
     value: runtimeDiagnosticValue('masterSecretConfigured'),
-    hint: 'must be true before auth.create_session can verify Java-issued keys',
+    hint: t('pages.connectionAuth.masterSecretHint'),
   },
   {
-    label: 'CZUR_SDK_AUTHZ_BASE_URL',
+    label: 'AUTHZ_BASE_URL',
     value: runtimeDiagnosticValue('authzBaseUrlConfigured'),
-    hint: 'true only when overriding the default online authorization gateway',
+    hint: t('pages.connectionAuth.authzBaseUrlHint'),
   },
   {
-    label: 'CZUR_SDK_IMAGE_ENHANCE_BASE_URL',
+    label: 'IMAGE_ENHANCE_BASE_URL',
     value: runtimeDiagnosticValue('imageEnhanceBaseUrlConfigured'),
-    hint: 'true only when overriding the default online enhance gateway',
+    hint: t('pages.connectionAuth.imageEnhanceBaseUrlHint'),
   },
   { label: t('labels.sessionKey'), value: authSessionState.sessionToken ? maskSecret(authSessionState.sessionToken) : t('common.notSet'), monospace: true },
-  { label: 'Command status', value: t(executionStateLabelKey(authSessionState.commandState)) },
-  { label: 'Video status', value: t(executionStateLabelKey(videoLaneState.value)) },
+  { label: t('pages.connectionAuth.commandStatus'), value: t(executionStateLabelKey(authSessionState.commandState)) },
+  { label: t('pages.connectionAuth.videoStatus'), value: t(executionStateLabelKey(videoLaneState.value)) },
 ]);
 
 const authContextItems = computed(() => {
   const authContext = authSessionState.authContext;
   if (!authContext) {
     return [
-      { label: 'is_valid', value: 'false' },
+      { label: 'is_valid', value: t('common.false') },
       { label: t('labels.accountType'), value: t('common.notSet') },
       { label: t('labels.licenseMode'), value: t('common.notSet') },
       { label: t('labels.deviceScope'), value: t('common.notSet') },
       { label: t('labels.expiresAt'), value: t('common.notSet') },
-      { label: t('labels.capabilities'), value: t('common.notSet') },
+      { label: t('labels.capabilities'), value: t('common.notSet'), fullWidth: true },
     ];
   }
 
@@ -158,7 +158,7 @@ const authContextItems = computed(() => {
     : t('common.notSet');
 
   return [
-    { label: 'is_valid', value: String(Boolean(authContext.is_valid)) },
+    { label: 'is_valid', value: authContext.is_valid ? t('common.true') : t('common.false') },
     { label: t('labels.accountType'), value: authContext.account_type ?? t('common.notSet') },
     { label: t('labels.licenseMode'), value: authContext.license_mode ?? t('common.notSet') },
     { label: t('labels.deviceScope'), value: deviceScope || t('common.notSet') },
@@ -167,7 +167,7 @@ const authContextItems = computed(() => {
       value: typeof authContext.expires_at === 'number' && authContext.expires_at > 0 ? String(authContext.expires_at) : '0',
       monospace: true,
     },
-    { label: t('labels.capabilities'), value: capabilities || t('common.notSet') },
+    { label: t('labels.capabilities'), value: capabilities || t('common.notSet'), fullWidth: true },
   ];
 });
 
@@ -179,35 +179,41 @@ const authFailureItems = computed(() =>
 
 const commandLaneDescription = computed(() => {
   if (authSessionState.commandState === 'success') {
-    return 'The command lane is reachable and system.ping returned pong=true.';
+    return t('pages.connectionAuth.commandLaneReachable');
   }
   if (authSessionState.commandState === 'running') {
-    return 'Checking the anonymous command lane with system.ping.';
+    return t('pages.connectionAuth.commandLaneChecking');
   }
   if (authSessionState.commandState === 'error') {
-    return authSessionState.commandErrorMessage || 'The command lane did not pass system.ping.';
+    return authSessionState.commandErrorMessage || t('pages.connectionAuth.commandLaneFailed');
   }
-  return 'The command lane uses anonymous WebSocket connect, then system.ping verifies reachability.';
+  return t('pages.connectionAuth.commandLaneIdle');
 });
 
 const commandLaneMeta = computed(() => {
   if (authSessionState.commandCheckedAt) {
-    return `checked at ${authSessionState.commandCheckedAt} · ${authSessionState.commandLatencyMs}ms`;
+    return t('pages.connectionAuth.checkedAtMeta', {
+      time: authSessionState.commandCheckedAt,
+      latency: authSessionState.commandLatencyMs,
+    });
   }
   if (authSessionState.lastConnectedAt) {
-    return `connected at ${authSessionState.lastConnectedAt}`;
+    return t('pages.connectionAuth.connectedAtMeta', { time: authSessionState.lastConnectedAt });
   }
-  return 'waiting for command-channel check';
+  return t('pages.connectionAuth.waitingCommandCheck');
 });
 
 const commandLaneHint = computed(() => {
   if (authSessionState.commandState === 'error') {
-    return authSessionState.commandErrorMessage || 'system.ping failed';
+    return authSessionState.commandErrorMessage || t('pages.connectionAuth.systemPingFailed');
   }
   if (authSessionState.commandCheckedAt) {
-    return `system.ping · ${authSessionState.commandLatencyMs}ms · ${authSessionState.commandCheckedAt}`;
+    return t('pages.connectionAuth.systemPingHint', {
+      latency: authSessionState.commandLatencyMs,
+      time: authSessionState.commandCheckedAt,
+    });
   }
-  return 'anonymous ws + system.ping';
+  return t('pages.connectionAuth.commandEndpointHint');
 });
 
 const videoLaneState = computed<ExecutionState>(() => {
@@ -222,15 +228,15 @@ const videoLaneState = computed<ExecutionState>(() => {
 
 const videoLaneHint = computed(() => {
   if (!authSessionState.sessionToken) {
-    return 'session_token required before video stream binding';
+    return t('pages.connectionAuth.videoSessionRequired');
   }
   if (!deviceVideoState.streamId) {
-    return 'waiting for video.start to create stream_id';
+    return t('pages.connectionAuth.videoWaitingStream');
   }
   if (deviceVideoState.videoState === 'success') {
-    return `subscribed stream_id=${deviceVideoState.streamId}`;
+    return t('pages.connectionAuth.videoSubscribedStream', { streamId: deviceVideoState.streamId });
   }
-  return `stream_id=${deviceVideoState.streamId}`;
+  return t('pages.connectionAuth.videoStreamId', { streamId: deviceVideoState.streamId });
 });
 
 function maskSecret(value: string): string {
@@ -248,6 +254,6 @@ function runtimeDiagnosticValue(key: 'masterSecretConfigured' | 'authzBaseUrlCon
   if (typeof value !== 'boolean') {
     return t('common.notSet');
   }
-  return value ? 'true' : 'false';
+  return value ? t('common.true') : t('common.false');
 }
 </script>

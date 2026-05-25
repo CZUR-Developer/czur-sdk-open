@@ -25,7 +25,6 @@ export const navigationItems: NavigationItem[] = [
   { key: 'ocr-recognition', labelKey: 'nav.ocrRecognition', to: '/ocr-recognition' },
   { key: 'file-conversion', labelKey: 'nav.fileConversion', to: '/file-conversion' },
   { key: 'sane-scanning', labelKey: 'nav.saneScanning', to: '/sane-scanning' },
-  { key: 'protocol-debugger', labelKey: 'nav.protocolDebugger', to: '/protocol-debugger' },
   { key: 'events-results', labelKey: 'nav.eventsResults', to: '/events-results' },
 ];
 
@@ -143,7 +142,9 @@ export const quickStartMetrics: MetricCardItem[] = [
     value: '34',
     labelKey: 'common.primaryFlow',
     detail: 'Connected lanes exposed by the mock demo runtime',
+    detailKey: 'pages.quickStart.metricRoutesDetail',
     trend: '+6 planned',
+    trendKey: 'pages.quickStart.metricRoutesTrend',
     tone: 'primary',
   },
   {
@@ -151,7 +152,9 @@ export const quickStartMetrics: MetricCardItem[] = [
     value: '9 / 10',
     labelKey: 'common.mockMode',
     detail: 'Capability domains with GA or beta walkthroughs ready',
+    detailKey: 'pages.quickStart.metricCoverageDetail',
     trend: '1 planned-only lane',
+    trendKey: 'pages.quickStart.metricCoverageTrend',
     tone: 'success',
   },
   {
@@ -159,7 +162,9 @@ export const quickStartMetrics: MetricCardItem[] = [
     value: '3.8k',
     labelKey: 'common.recentRequests',
     detail: 'Synthetic request samples loaded into the global drawer',
+    detailKey: 'pages.quickStart.metricRecentTraceDetail',
     trend: 'last 24h snapshot',
+    trendKey: 'pages.quickStart.metricRecentTraceTrend',
     tone: 'warning',
   },
 ];
@@ -168,33 +173,41 @@ export const quickStartEndpoints: EndpointCardItem[] = [
   {
     id: 'admin-http',
     title: 'Admin HTTP',
+    titleKey: 'pages.quickStart.adminHttpTitle',
     url: 'http://127.0.0.1:17080',
     protocol: 'HTTP',
     note: 'Health endpoint and runtime console',
+    noteKey: 'pages.quickStart.adminHttpNote',
     state: 'success',
   },
   {
     id: 'demo-http',
     title: 'Demo HTTP',
+    titleKey: 'pages.quickStart.demoHttpTitle',
     url: 'http://127.0.0.1:17081',
     protocol: 'HTTP',
     note: 'Demo surface with mock capability flows',
+    noteKey: 'pages.quickStart.demoHttpNote',
     state: 'success',
   },
   {
     id: 'command-ws',
     title: 'Command WS',
+    titleKey: 'pages.quickStart.commandWsTitle',
     url: 'ws://127.0.0.1:17090',
     protocol: 'WS',
     note: 'Main JSON-RPC command lane',
+    noteKey: 'pages.quickStart.commandWsNote',
     state: 'success',
   },
   {
     id: 'video-ws',
     title: 'Video WS',
+    titleKey: 'pages.quickStart.videoWsTitle',
     url: 'ws://127.0.0.1:17091',
     protocol: 'WS',
     note: 'Preview stream and frame metadata lane',
+    noteKey: 'pages.quickStart.videoWsNote',
     state: 'running',
   },
 ];
@@ -205,6 +218,7 @@ export const quickStartChecks: QuickCheckItem[] = [
     method: 'system.ping',
     latency: '14ms',
     note: 'Base heartbeat returned pong=true',
+    noteKey: 'pages.quickStart.pingCheckNote',
     state: 'success',
     payload: `{"method":"system.ping","result":{"pong":true,"ts":"2026-04-07T18:17:14Z"}}`,
   },
@@ -213,6 +227,7 @@ export const quickStartChecks: QuickCheckItem[] = [
     method: 'system.info',
     latency: '27ms',
     note: 'Runtime build and provider posture resolved',
+    noteKey: 'pages.quickStart.infoCheckNote',
     state: 'success',
     payload: `{"method":"system.info","result":{"version":"0.1.0","provider_mode":"hybrid-runtime","platform":"linux"}}`,
   },
@@ -221,6 +236,7 @@ export const quickStartChecks: QuickCheckItem[] = [
     method: 'system.capabilities',
     latency: '22ms',
     note: 'Capability matrix loaded for 9 operational domains',
+    noteKey: 'pages.quickStart.capabilitiesCheckNote',
     state: 'success',
     payload: `{"method":"system.capabilities","result":{"ga":24,"beta":8,"planned":4}}`,
   },
@@ -709,108 +725,6 @@ export const saneEvents: TimelineItem[] = [
     detail: 'planned placeholder retains output contract preview only',
     meta: '18:36:22',
     tone: 'info',
-  },
-];
-
-export const protocolTemplateCards: InfoCardItem[] = [
-  {
-    id: 'tpl-ping',
-    eyebrow: 'system.ping',
-    title: 'Transport sanity',
-    description: 'smallest request envelope used for anonymous command-channel verification',
-    tone: 'success',
-  },
-  {
-    id: 'tpl-device',
-    eyebrow: 'device.list',
-    title: 'Device inventory',
-    description: 'loads mock table model and device scope validation',
-    tone: 'primary',
-  },
-  {
-    id: 'tpl-capture',
-    eyebrow: 'capture.take',
-    title: 'Capture walkthrough',
-    description: 'full payload with file output parameters and scan heuristics',
-    tone: 'warning',
-  },
-  {
-    id: 'tpl-convert',
-    eyebrow: 'file.convert',
-    title: 'Conversion contract',
-    description: 'maps source bundle to PDF target in one request envelope',
-    tone: 'info',
-  },
-];
-
-export const protocolRequestSnippet: JsonSnippet = {
-  id: 'protocol-request',
-  title: 'capture.take request',
-  caption: 'Editable payload surface kept in mock mode for v1.',
-  payload: `{
-  "request_id": "req-cap-064",
-  "method": "capture.take",
-  "params": {
-    "device_id": "dev-01",
-    "output_mode": "file",
-    "target_path": "/tmp/sdk-demo/capture-042.jpg",
-    "format": "jpeg",
-    "dpi": 300,
-    "auto_crop": true,
-    "auto_deskew": true,
-    "detect_barcode": true
-  },
-  "client": {
-    "name": "sdk-demo-site",
-    "version": "2.0.0"
-  }
-}`,
-};
-
-export const protocolResponseSnippet: JsonSnippet = {
-  id: 'protocol-response',
-  title: 'capture.take response',
-  caption: 'Friendly panels and raw JSON remain visible at the same time.',
-  payload: `{
-  "request_id": "req-cap-064",
-  "code": 1902,
-  "message": "PROVIDER_CALL_FAILED",
-  "trace_id": "trc-demo-20260407-1832",
-  "data": {
-    "retry_after_ms": 300,
-    "active_lane": "preview"
-  },
-  "ts": "2026-04-07T18:32:17Z"
-}`,
-};
-
-export const protocolHistory: RequestHistoryItem[] = [
-  {
-    id: 'proto-h-1',
-    method: 'system.ping',
-    requestId: 'req-system-001',
-    code: '0',
-    traceId: 'trc-demo-20260407-1801',
-    duration: '14ms',
-    state: 'success',
-  },
-  {
-    id: 'proto-h-2',
-    method: 'device.list',
-    requestId: 'req-device-022',
-    code: '0',
-    traceId: 'trc-demo-20260407-1824',
-    duration: '33ms',
-    state: 'success',
-  },
-  {
-    id: 'proto-h-3',
-    method: 'capture.take',
-    requestId: 'req-cap-064',
-    code: '1902',
-    traceId: 'trc-demo-20260407-1832',
-    duration: '142ms',
-    state: 'error',
   },
 ];
 
