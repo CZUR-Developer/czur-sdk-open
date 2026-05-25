@@ -4,6 +4,7 @@ import AuthPage from '../pages/AuthPage.vue';
 import ConfigPage from '../pages/ConfigPage.vue';
 import DashboardOverviewPage from '../pages/DashboardOverviewPage.vue';
 import LogPage from '../pages/LogPage.vue';
+import RecordsPage from '../pages/RecordsPage.vue';
 import SystemInfoConfigPage from '../pages/SystemInfoConfigPage.vue';
 import WebSocketServicesPage from '../pages/WebSocketServicesPage.vue';
 
@@ -62,6 +63,16 @@ export const router = createRouter({
         navKey: 'log',
         titleKey: 'pages.log.title',
         subtitleKey: 'pages.log.subtitle',
+      },
+    },
+    {
+      path: '/records',
+      name: 'records',
+      component: RecordsPage,
+      meta: {
+        navKey: 'records',
+        titleKey: 'pages.records.title',
+        subtitleKey: 'pages.records.subtitle',
       },
     },
     {

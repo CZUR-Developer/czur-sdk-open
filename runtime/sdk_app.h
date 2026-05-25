@@ -10,6 +10,7 @@
 
 #include "../application/admin_application_service.h"
 #include "../application/command_application_service.h"
+#include "../application/runtime_record_service.h"
 #include "../application/runtime_config_service.h"
 #include "../transport/sdk_http_server.h"
 #include "../transport/sdk_ws_command_server.h"
@@ -30,11 +31,18 @@ public:
 
 private:
     Json BuildStatusJson() const;
+    Json BuildSystemJson() const;
+    Json BuildAuthJson() const;
+    Json ActivateOfflineSessionJson(const std::string& connection_id, const Json& request);
+    Json BuildLogsJson() const;
+    Json BuildLogReadJson(const std::string& log_id, std::size_t tail_bytes) const;
+    Json BuildRecordsJson() const;
     uint64_t UptimeSeconds() const;
 
     SdkConfig config_;
     ProviderBundle providers_;
     std::shared_ptr<RuntimeConfigService> runtime_config_service_;
+    std::shared_ptr<RuntimeRecordService> runtime_record_service_;
     std::unique_ptr<CommandApplicationService> command_application_service_;
     AdminApplicationService admin_application_service_;
     SdkHttpServer admin_http_server_;

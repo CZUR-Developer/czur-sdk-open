@@ -5,6 +5,7 @@ export type NavKey =
   | 'system'
   | 'auth'
   | 'log'
+  | 'records'
   | 'config'
   | 'support'
   | 'documention';

@@ -168,6 +168,26 @@ bool IsSupportedUploadExtension(const std::string& extension) {
     return IsSupportedImageExtension(value) || value == "pdf" || value == "ofd";
 }
 
+std::string MaskSecret(const std::string& value) {
+    if (value.empty()) {
+        return "";
+    }
+    if (value.size() <= 12) {
+        return value.substr(0, 3) + "***";
+    }
+    return value.substr(0, 6) + "..." + value.substr(value.size() - 4);
+}
+
+std::string ApiKeyTypeFromToken(const std::string& token) {
+    if (token.find("sk-sq-v1-") == 0) {
+        return "online_api_key";
+    }
+    if (token.find("sk-offline-") == 0 || token.find("offline") != std::string::npos) {
+        return "offline_api_key";
+    }
+    return token.empty() ? "none" : "token";
+}
+
 std::string ContentTypeForImageExtension(const std::string& extension) {
     const std::string value = NormalizeLower(extension);
     if (value == "png") {
@@ -1733,6 +1753,47 @@ Json CommandApplicationService::BuildCapabilitiesJson() const {
                     {"linux_only", true},
                     {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}}}}},
     };
+}
+
+Json CommandApplicationService::BuildAdminAuthJson() const {
+    Json sessions = Json::array();
+    const std::vector<AuthorizationService::SessionResult> snapshots = authorization_service_.SnapshotSessions();
+    for (std::vector<AuthorizationService::SessionResult>::const_iterator it = snapshots.begin();
+         it != snapshots.end();
+         ++it) {
+        sessions.push_back(BuildAdminSessionJson(*it));
+    }
+
+    return Json{
+        {"providers",
+         Json{{"device", providers_.device_provider ? providers_.device_provider->ProviderName() : ""},
+              {"graphic", providers_.graphic_provider ? providers_.graphic_provider->ProviderName() : ""},
+              {"imageEnhance", providers_.image_enhance_provider ? providers_.image_enhance_provider->ProviderName() : ""},
+              {"ocr", providers_.ocr_provider ? providers_.ocr_provider->ProviderName() : ""},
+              {"ofd", providers_.ofd_provider ? providers_.ofd_provider->ProviderName() : ""},
+              {"auth", providers_.auth_provider ? providers_.auth_provider->ProviderName() : ""},
+              {"recognition", providers_.recognition_provider ? providers_.recognition_provider->ProviderName() : ""},
+              {"sane", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}}},
+        {"activeSessionCount", sessions.size()},
+        {"sessions", sessions},
+        {"capabilityCatalog", BuildCapabilitiesJson()},
+    };
+}
+
+Json CommandApplicationService::ActivateOfflineForAdmin(const std::string& connection_id, const Json& request) {
+    const std::string auth_code = GetOptionalStringField(request, "auth_code");
+    if (auth_code.empty()) {
+        return BuildErrorBody(SdkStatusCode::InvalidParams, "auth_code required", Json{{"connectionId", connection_id}});
+    }
+
+    const AuthorizationService::SessionResult session_result =
+        authorization_service_.ActivateOffline(connection_id, auth_code);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildErrorBody(session_result.code, session_result.message, Json{{"connectionId", connection_id}});
+    }
+    return Json{{"code", ToCode(SdkStatusCode::Ok)},
+                {"message", "ok"},
+                {"session", BuildAdminSessionJson(session_result)}};
 }
 
 VideoSessionService::ValidationResult CommandApplicationService::ValidateVideoStream(const std::string& session_token,
@@ -4058,6 +4119,54 @@ Json CommandApplicationService::BuildSessionJson(const AuthorizationService::Ses
         {"session_token", session_result.session_token},
         {"expires_in", session_result.expires_in},
         {"auth_context", BuildAuthContextJson(session_result.auth_context)},
+    };
+}
+
+Json CommandApplicationService::BuildAdminSessionJson(const AuthorizationService::SessionResult& session_result) const {
+    const AuthContext& context = session_result.auth_context;
+    Json capabilities = Json::array();
+    for (std::vector<std::string>::const_iterator cap_it = context.capabilities.begin();
+         cap_it != context.capabilities.end();
+         ++cap_it) {
+        capabilities.push_back(*cap_it);
+    }
+    Json quotas = Json::array();
+    for (std::vector<AuthQuotaBucket>::const_iterator quota_it = context.quota_buckets.begin();
+         quota_it != context.quota_buckets.end();
+         ++quota_it) {
+        quotas.push_back(Json{{"bucket", quota_it->bucket},
+                              {"limit", quota_it->limit},
+                              {"remaining", quota_it->remaining},
+                              {"enforcement", quota_it->enforcement}});
+    }
+
+    const bool offline_mode = context.license_mode == "offline_api_key" || context.host_auth_mode == "offline";
+    const bool activated = context.entitlement_state == "offline_unlocked" ||
+                           context.entitlement_state == "active" ||
+                           context.entitlement_state == "valid";
+    return Json{
+        {"connectionId", session_result.connection_id},
+        {"apiKeyType", context.license_mode.empty() ? ApiKeyTypeFromToken(session_result.token) : context.license_mode},
+        {"maskedToken", MaskSecret(session_result.token)},
+        {"maskedSessionToken", MaskSecret(session_result.session_token)},
+        {"licenseMode", context.license_mode},
+        {"hostAuthMode", context.host_auth_mode},
+        {"accountType", ToAccountTypeString(context.account_type)},
+        {"accountTypeCode", context.account_type_code},
+        {"licensedAccountType", ToAccountTypeString(context.licensed_account_type)},
+        {"licensedAccountTypeCode", context.licensed_account_type_code},
+        {"entitlementState", context.entitlement_state},
+        {"machineCode", context.machine_code},
+        {"offlineActivationRequired", offline_mode && !activated},
+        {"activationPayload", offline_mode && !activated ? context.machine_code : ""},
+        {"createdAt", session_result.created_at},
+        {"lastSeenAt", session_result.last_seen_at},
+        {"expiresAt", context.expires_at},
+        {"expiresIn", session_result.expires_in},
+        {"capabilities", capabilities},
+        {"capabilityCount", capabilities.size()},
+        {"deviceScopeCount", context.device_scope.size()},
+        {"quotaBuckets", quotas},
     };
 }
 

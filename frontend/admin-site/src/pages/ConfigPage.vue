@@ -59,30 +59,8 @@ import { onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 import SectionPanel from '../components/blocks/SectionPanel.vue';
-
-interface EndpointConfig {
-  baseUrl: string;
-  effectiveBaseUrl: string;
-  source: string;
-}
-
-interface RuntimeConfig {
-  onlineImageEnhance: EndpointConfig;
-  authz: EndpointConfig;
-}
-
-interface ConfigResponse {
-  online_image_enhance?: {
-    base_url?: string;
-    effective_base_url?: string;
-    source?: string;
-  };
-  authz?: {
-    base_url?: string;
-    effective_base_url?: string;
-    source?: string;
-  };
-}
+import type { RuntimeConfig } from '../services/admin-api';
+import { fetchConfig, saveRuntimeConfig } from '../services/admin-api';
 
 const { t } = useI18n();
 
@@ -93,31 +71,10 @@ const saving = ref(false);
 const errorMessage = ref('');
 const savedMessage = ref('');
 
-function normalizeEndpointConfig(payload: { base_url?: string; effective_base_url?: string; source?: string } | undefined): EndpointConfig {
-  return {
-    baseUrl: payload?.base_url ?? '',
-    effectiveBaseUrl: payload?.effective_base_url ?? '',
-    source: payload?.source ?? 'default',
-  };
-}
-
-function normalizeConfig(payload: ConfigResponse): RuntimeConfig {
-  return {
-    onlineImageEnhance: normalizeEndpointConfig(payload.online_image_enhance),
-    authz: normalizeEndpointConfig(payload.authz),
-  };
-}
-
 async function loadConfig(): Promise<void> {
   errorMessage.value = '';
   savedMessage.value = '';
-  const response = await fetch('/api/config', {
-    headers: { Accept: 'application/json' },
-  });
-  if (!response.ok) {
-    throw new Error(`GET /api/config ${response.status}`);
-  }
-  const nextConfig = normalizeConfig((await response.json()) as ConfigResponse);
+  const nextConfig = await fetchConfig();
   config.value = nextConfig;
   onlineEnhanceBaseUrl.value = nextConfig.onlineImageEnhance.baseUrl;
   authzBaseUrl.value = nextConfig.authz.baseUrl;
@@ -128,25 +85,10 @@ async function saveConfig(): Promise<void> {
   errorMessage.value = '';
   savedMessage.value = '';
   try {
-    const response = await fetch('/api/config', {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        online_image_enhance: {
-          base_url: onlineEnhanceBaseUrl.value,
-        },
-        authz: {
-          base_url: authzBaseUrl.value,
-        },
-      }),
+    const nextConfig = await saveRuntimeConfig({
+      onlineImageEnhanceBaseUrl: onlineEnhanceBaseUrl.value,
+      authzBaseUrl: authzBaseUrl.value,
     });
-    if (!response.ok) {
-      throw new Error(`POST /api/config ${response.status}`);
-    }
-    const nextConfig = normalizeConfig((await response.json()) as ConfigResponse);
     config.value = nextConfig;
     onlineEnhanceBaseUrl.value = nextConfig.onlineImageEnhance.baseUrl;
     authzBaseUrl.value = nextConfig.authz.baseUrl;

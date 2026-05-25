@@ -8,6 +8,7 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include "sdk_auth_types.h"
 #include "sdk_provider_bundle.h"
@@ -26,6 +27,8 @@ public:
         std::string session_token;
         std::string connection_id;
         int expires_in = 0;
+        std::int64_t created_at = 0;
+        std::int64_t last_seen_at = 0;
         AuthContext auth_context;
     };
 
@@ -46,6 +49,7 @@ public:
     SessionResult DestroySession(const std::string& connection_id);
     void ClearConnection(const std::string& connection_id);
     std::size_t ActiveSessionCount() const;
+    std::vector<SessionResult> SnapshotSessions() const;
 
 private:
     bool HasCapability(const AuthContext& auth_context, const std::string& capability) const;
