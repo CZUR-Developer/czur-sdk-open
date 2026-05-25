@@ -8,7 +8,6 @@ import FileConversionPage from '../pages/FileConversionPage.vue';
 import ImageEnhancementPage from '../pages/ImageEnhancementPage.vue';
 import ImageProcessingPage from '../pages/ImageProcessingPage.vue';
 import OcrRecognitionPage from '../pages/OcrRecognitionPage.vue';
-import ProtocolDebuggerPage from '../pages/ProtocolDebuggerPage.vue';
 import QuickStartPage from '../pages/QuickStartPage.vue';
 import SaneScanningPage from '../pages/SaneScanningPage.vue';
 
@@ -107,16 +106,6 @@ export const router = createRouter({
         navKey: 'sane-scanning',
         titleKey: 'pages.saneScanning.title',
         subtitleKey: 'pages.saneScanning.subtitle',
-      },
-    },
-    {
-      path: '/protocol-debugger',
-      name: 'protocol-debugger',
-      component: ProtocolDebuggerPage,
-      meta: {
-        navKey: 'protocol-debugger',
-        titleKey: 'pages.protocolDebugger.title',
-        subtitleKey: 'pages.protocolDebugger.subtitle',
       },
     },
     {

@@ -9,7 +9,6 @@
     <path v-else-if="navKey === 'ocr-recognition'" d="M5 5h10v10H5zM7 8h6M7 11h4" />
     <path v-else-if="navKey === 'file-conversion'" d="M6 4h6l3 3v9H6zM12 4v3h3" />
     <path v-else-if="navKey === 'sane-scanning'" d="M5 5h10v4H5zM7 13h6M6 9h8v6H6z" />
-    <path v-else-if="navKey === 'protocol-debugger'" d="M6 5 3 10l3 5M14 5l3 5-3 5M9 15l2-10" />
     <path v-else d="M5 5h10v3H5zM5 9h10v6H5zM8 12h4" />
   </svg>
 </template>

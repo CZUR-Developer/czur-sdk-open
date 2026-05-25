@@ -164,8 +164,8 @@
     </div>
 
     <JsonPanel
-      title="device/video runtime state"
-      caption="Current live state assembled from device inventory, video stream, and canvas rendering counters."
+      :title="t('pages.deviceVideo.runtimeStateTitle')"
+      :caption="t('pages.deviceVideo.runtimeStateCaption')"
       :payload="liveDeviceVideoJson"
     />
   </div>
@@ -211,29 +211,29 @@ const deviceMetrics = computed(() => [
     labelKey: 'sections.deviceInventory',
     detail:
       deviceInventoryState.listState === 'running'
-        ? 'Refreshing the latest device inventory from runtime.'
-        : 'Devices currently reachable from demo runtime',
+        ? t('pages.deviceVideo.metricInventoryRefreshing')
+        : t('pages.deviceVideo.metricInventoryReachable'),
     trend: deviceInventoryState.lastLoadedAt
-      ? `updated at ${deviceInventoryState.lastLoadedAt}`
+      ? t('pages.deviceVideo.updatedAt', { time: deviceInventoryState.lastLoadedAt })
       : deviceInventoryState.listState === 'error'
-        ? 'inventory load failed'
-        : 'awaiting first inventory request',
+        ? t('pages.deviceVideo.inventoryLoadFailed')
+        : t('pages.deviceVideo.awaitingFirstInventoryRequest'),
     tone: deviceInventoryState.listState === 'error' ? 'warning' : 'success',
   },
   {
     id: 'frame-rate',
     value: String(deviceVideoState.renderedFrameCount),
     labelKey: 'labels.resolution',
-    detail: 'Rendered frames committed to the canvas',
-    trend: `${deviceVideoState.receivedFrameCount} received`,
+    detail: t('pages.deviceVideo.metricRenderedFramesDetail'),
+    trend: t('pages.deviceVideo.receivedFramesTrend', { count: deviceVideoState.receivedFrameCount }),
     tone: 'primary',
   },
   {
     id: 'event-lag',
     value: String(deviceVideoState.droppedFrameCount),
     labelKey: 'common.timeline',
-    detail: 'Frames dropped before canvas draw',
-    trend: `${deviceVideoState.decodeFailedCount} decode failed`,
+    detail: t('pages.deviceVideo.metricDroppedFramesDetail'),
+    trend: t('pages.deviceVideo.decodeFailedTrend', { count: deviceVideoState.decodeFailedCount }),
     tone: deviceVideoState.decodeFailedCount > 0 ? 'warning' : 'success',
   },
 ]);
@@ -255,7 +255,7 @@ const deviceControlStatusCards = computed<InfoCardItem[]>(() => [
   {
     id: 'device-list',
     eyebrow: 'device.list',
-    title: 'Device inventory',
+    title: t('pages.deviceVideo.deviceInventoryCardTitle'),
     description: deviceListDescription.value,
     meta: deviceListMeta.value,
     tone: stateTone(deviceInventoryState.listState),
@@ -265,7 +265,7 @@ const deviceControlStatusCards = computed<InfoCardItem[]>(() => [
   {
     id: 'device-get',
     eyebrow: 'device.get',
-    title: 'Device detail',
+    title: t('pages.deviceVideo.deviceDetailCardTitle'),
     description: deviceGetDescription.value,
     meta: deviceGetMeta.value,
     tone: stateTone(deviceVideoState.detailState),
@@ -275,7 +275,7 @@ const deviceControlStatusCards = computed<InfoCardItem[]>(() => [
   {
     id: 'device-open',
     eyebrow: 'device.open',
-    title: 'Open device',
+    title: t('pages.deviceVideo.openDeviceCardTitle'),
     description: deviceOpenDescription.value,
     meta: deviceOpenMeta.value,
     tone: stateTone(deviceVideoState.openState),
@@ -285,7 +285,7 @@ const deviceControlStatusCards = computed<InfoCardItem[]>(() => [
   {
     id: 'device-close',
     eyebrow: 'device.close',
-    title: 'Close device',
+    title: t('pages.deviceVideo.closeDeviceCardTitle'),
     description: deviceCloseDescription.value,
     meta: deviceCloseMeta.value,
     tone: stateTone(deviceVideoState.closeState),
@@ -295,7 +295,7 @@ const deviceControlStatusCards = computed<InfoCardItem[]>(() => [
   {
     id: 'video-start',
     eyebrow: 'video.start',
-    title: 'Start video',
+    title: t('pages.deviceVideo.startVideoCardTitle'),
     description: videoStartDescription.value,
     meta: videoStartMeta.value,
     tone: stateTone(deviceVideoState.startState),
@@ -305,7 +305,7 @@ const deviceControlStatusCards = computed<InfoCardItem[]>(() => [
   {
     id: 'video-stop',
     eyebrow: 'video.stop',
-    title: 'Stop video',
+    title: t('pages.deviceVideo.stopVideoCardTitle'),
     description: videoStopDescription.value,
     meta: videoStopMeta.value,
     tone: stateTone(deviceVideoState.stopState),
@@ -316,97 +316,101 @@ const deviceControlStatusCards = computed<InfoCardItem[]>(() => [
 
 const deviceListDescription = computed(() => {
   if (deviceInventoryState.listState === 'running') {
-    return 'Refreshing the device inventory from runtime.';
+    return t('pages.deviceVideo.deviceListRefreshing');
   }
   if (deviceInventoryState.listState === 'error') {
-    return deviceInventoryState.errorMessage || 'device.list failed.';
+    return deviceInventoryState.errorMessage || t('pages.deviceVideo.deviceListFailed');
   }
   if (deviceInventoryState.listState === 'success') {
-    return `device.list resolved ${deviceInventoryState.count} device(s).`;
+    return t('pages.deviceVideo.deviceListResolved', { count: deviceInventoryState.count });
   }
-  return authSessionState.sessionToken ? 'Ready to request device.list.' : 'Create an auth session before requesting device.list.';
+  return authSessionState.sessionToken ? t('pages.deviceVideo.deviceListReady') : t('pages.deviceVideo.deviceListNeedsAuth');
 });
 
 const deviceListMeta = computed(() =>
-  deviceInventoryState.lastLoadedAt ? `updated at ${deviceInventoryState.lastLoadedAt}` : 'awaiting inventory refresh',
+  deviceInventoryState.lastLoadedAt
+    ? t('pages.deviceVideo.updatedAt', { time: deviceInventoryState.lastLoadedAt })
+    : t('pages.deviceVideo.awaitingInventoryRefresh'),
 );
 
 const deviceGetDescription = computed(() => {
   if (deviceVideoState.detailState === 'running') {
-    return `Loading detail for ${deviceVideoState.selectedDeviceId}.`;
+    return t('pages.deviceVideo.deviceGetLoading', { deviceId: deviceVideoState.selectedDeviceId });
   }
   if (deviceVideoState.detailState === 'error') {
-    return deviceVideoState.errorMessage || 'device.get failed.';
+    return deviceVideoState.errorMessage || t('pages.deviceVideo.deviceGetFailed');
   }
   if (deviceVideoState.detailState === 'success') {
-    return `Loaded ${deviceVideoState.resolutions.length} preview resolution(s).`;
+    return t('pages.deviceVideo.deviceGetLoaded', { count: deviceVideoState.resolutions.length });
   }
-  return deviceVideoState.selectedDeviceId ? 'Ready to load device detail.' : 'Select a device before requesting device.get.';
+  return deviceVideoState.selectedDeviceId ? t('pages.deviceVideo.deviceGetReady') : t('pages.deviceVideo.deviceGetNeedsSelection');
 });
 
-const deviceGetMeta = computed(() => deviceVideoState.selectedDeviceId || 'no device selected');
+const deviceGetMeta = computed(() => deviceVideoState.selectedDeviceId || t('pages.deviceVideo.noDeviceSelected'));
 
 const deviceOpenDescription = computed(() => {
   if (deviceVideoState.openState === 'running') {
-    return `Opening ${deviceVideoState.selectedDeviceId} for preview.`;
+    return t('pages.deviceVideo.deviceOpenRunning', { deviceId: deviceVideoState.selectedDeviceId });
   }
   if (deviceVideoState.openState === 'error') {
-    return deviceVideoState.errorMessage || 'device.open failed.';
+    return deviceVideoState.errorMessage || t('pages.deviceVideo.deviceOpenFailed');
   }
   if (deviceVideoState.opened) {
-    return 'Device handle is open and ready for video.start.';
+    return t('pages.deviceVideo.deviceOpenReadyForVideo');
   }
-  return deviceVideoState.selectedResolutionKey ? 'Ready to open the selected resolution.' : 'Select a preview resolution before device.open.';
+  return deviceVideoState.selectedResolutionKey ? t('pages.deviceVideo.deviceOpenReady') : t('pages.deviceVideo.deviceOpenNeedsResolution');
 });
 
-const deviceOpenMeta = computed(() => deviceVideoState.selectedResolutionKey || 'no resolution selected');
+const deviceOpenMeta = computed(() => deviceVideoState.selectedResolutionKey || t('pages.deviceVideo.noResolutionSelected'));
 
 const deviceCloseDescription = computed(() => {
   if (deviceVideoState.closeState === 'running') {
-    return `Closing ${deviceVideoState.selectedDeviceId} and draining preview resources.`;
+    return t('pages.deviceVideo.deviceCloseRunning', { deviceId: deviceVideoState.selectedDeviceId });
   }
   if (deviceVideoState.closeState === 'error') {
-    return deviceVideoState.errorMessage || 'device.close failed.';
+    return deviceVideoState.errorMessage || t('pages.deviceVideo.deviceCloseFailed');
   }
   if (deviceVideoState.closeState === 'success') {
-    return 'Device handle released and preview resources are idle.';
+    return t('pages.deviceVideo.deviceCloseSuccess');
   }
-  return deviceVideoState.opened || deviceVideoState.streamId ? 'Ready to close the opened device.' : 'No opened device to close.';
+  return deviceVideoState.opened || deviceVideoState.streamId ? t('pages.deviceVideo.deviceCloseReady') : t('pages.deviceVideo.deviceCloseNoDevice');
 });
 
 const deviceCloseMeta = computed(() =>
-  deviceVideoState.streamId ? `will stop ${deviceVideoState.streamId}` : deviceVideoState.opened ? 'opened' : 'standby',
+  deviceVideoState.streamId
+    ? t('pages.deviceVideo.willStopStream', { streamId: deviceVideoState.streamId })
+    : deviceVideoState.opened ? t('pages.deviceVideo.opened') : t('pages.deviceVideo.standby'),
 );
 
 const videoStartDescription = computed(() => {
   if (deviceVideoState.startState === 'running') {
-    return 'Creating stream session and connecting the video lane.';
+    return t('pages.deviceVideo.videoStartRunning');
   }
   if (deviceVideoState.startState === 'error') {
-    return deviceVideoState.errorMessage || 'video.start failed.';
+    return deviceVideoState.errorMessage || t('pages.deviceVideo.videoStartFailed');
   }
   if (deviceVideoState.streamId) {
-    return 'Video stream is active and bound to the current command session.';
+    return t('pages.deviceVideo.videoStartActive');
   }
-  return deviceVideoState.opened ? 'Ready to start video.' : 'Open the device before video.start.';
+  return deviceVideoState.opened ? t('pages.deviceVideo.videoStartReady') : t('pages.deviceVideo.videoStartNeedsOpen');
 });
 
-const videoStartMeta = computed(() => deviceVideoState.streamId || 'no active stream');
+const videoStartMeta = computed(() => deviceVideoState.streamId || t('pages.deviceVideo.noActiveStream'));
 
 const videoStopDescription = computed(() => {
   if (deviceVideoState.stopState === 'running') {
-    return `Stopping ${deviceVideoState.streamId}.`;
+    return t('pages.deviceVideo.videoStopRunning', { streamId: deviceVideoState.streamId });
   }
   if (deviceVideoState.stopState === 'error') {
-    return deviceVideoState.errorMessage || 'video.stop failed.';
+    return deviceVideoState.errorMessage || t('pages.deviceVideo.videoStopFailed');
   }
   if (deviceVideoState.stopState === 'success') {
-    return 'Video stream stopped and preview lane drained.';
+    return t('pages.deviceVideo.videoStopSuccess');
   }
-  return deviceVideoState.streamId ? 'Ready to stop the active stream.' : 'No active stream to stop.';
+  return deviceVideoState.streamId ? t('pages.deviceVideo.videoStopReady') : t('pages.deviceVideo.videoStopNoStream');
 });
 
-const videoStopMeta = computed(() => deviceVideoState.streamId || 'standby');
+const videoStopMeta = computed(() => deviceVideoState.streamId || t('pages.deviceVideo.standby'));
 
 const currentResolutionLabel = computed(() => {
   const meta = deviceVideoState.frameMeta;
@@ -419,14 +423,14 @@ const currentResolutionLabel = computed(() => {
 
 const liveVideoPreviewMetrics = computed(() => [
   { label: 'stream_id', value: deviceVideoState.streamId || '-', monospace: true },
-  { label: 'rendered', value: String(deviceVideoState.renderedFrameCount) },
-  { label: 'received', value: String(deviceVideoState.receivedFrameCount) },
-  { label: 'dropped', value: String(deviceVideoState.droppedFrameCount) },
-  { label: 'decode failed', value: String(deviceVideoState.decodeFailedCount) },
-  { label: 'last seq', value: String(deviceVideoState.lastRenderedSeq || '-') },
-  { label: 'last bytes', value: String(deviceVideoState.lastFrameBytes || '-') },
-  { label: 'last frame', value: deviceVideoState.lastFrameAt || '-' },
-  { label: 'resolution', value: currentResolutionLabel.value },
+  { label: t('pages.deviceVideo.metricRendered'), value: String(deviceVideoState.renderedFrameCount) },
+  { label: t('pages.deviceVideo.metricReceived'), value: String(deviceVideoState.receivedFrameCount) },
+  { label: t('pages.deviceVideo.metricDropped'), value: String(deviceVideoState.droppedFrameCount) },
+  { label: t('pages.deviceVideo.metricDecodeFailed'), value: String(deviceVideoState.decodeFailedCount) },
+  { label: t('pages.deviceVideo.metricLastSeq'), value: String(deviceVideoState.lastRenderedSeq || '-') },
+  { label: t('pages.deviceVideo.metricLastBytes'), value: String(deviceVideoState.lastFrameBytes || '-') },
+  { label: t('pages.deviceVideo.metricLastFrame'), value: deviceVideoState.lastFrameAt || '-' },
+  { label: t('labels.resolution'), value: currentResolutionLabel.value },
 ]);
 
 const deviceVideoRuntimeEvents = computed(() =>
@@ -466,14 +470,14 @@ const liveDeviceVideoJson = computed(() =>
   ),
 );
 
-const previewTitle = computed(() => deviceVideoState.selectedDeviceId || 'No device selected');
+const previewTitle = computed(() => deviceVideoState.selectedDeviceId || t('pages.deviceVideo.noDeviceSelected'));
 const previewDescription = computed(() =>
   deviceVideoState.streamId
-    ? 'Video WS is receiving stream.frame_meta events and JPEG binary frames.'
-    : 'Select a device, load resolutions, open it, then start video to render frames here.',
+    ? t('pages.deviceVideo.previewReceiving')
+    : t('pages.deviceVideo.previewIdleDescription'),
 );
 const videoBadgeLabel = computed(() =>
-  deviceVideoState.videoState === 'success' ? 'video.connected' : deviceVideoState.videoState,
+  deviceVideoState.videoState === 'success' ? t('pages.deviceVideo.videoConnected') : t(executionStateLabelKey(deviceVideoState.videoState)),
 );
 
 const deviceInventoryEmptyTitle = computed(() => {

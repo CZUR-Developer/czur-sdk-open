@@ -10,7 +10,6 @@ export type DemoNavKey =
   | 'ocr-recognition'
   | 'file-conversion'
   | 'sane-scanning'
-  | 'protocol-debugger'
   | 'events-results';
 
 export type Tone = 'primary' | 'success' | 'warning' | 'danger' | 'neutral' | 'info';
@@ -36,16 +35,20 @@ export interface MetricCardItem {
   value: string;
   labelKey: string;
   detail: string;
+  detailKey?: string;
   trend?: string;
+  trendKey?: string;
   tone: Tone;
 }
 
 export interface EndpointCardItem {
   id: string;
   title: string;
+  titleKey?: string;
   url: string;
   protocol: string;
   note: string;
+  noteKey?: string;
   state: ExecutionState;
 }
 
@@ -54,6 +57,7 @@ export interface QuickCheckItem {
   method: string;
   latency: string;
   note: string;
+  noteKey?: string;
   state: ExecutionState;
   payload: string;
 }
@@ -84,6 +88,7 @@ export interface KeyValueItem {
   hint?: string;
   monospace?: boolean;
   tone?: Tone;
+  fullWidth?: boolean;
 }
 
 export interface TableColumn {
