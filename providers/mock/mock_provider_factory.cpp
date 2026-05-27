@@ -48,6 +48,12 @@ std::string ExtensionForOcrFormat(const std::string& format) {
     return format.empty() ? "docx" : format;
 }
 
+void CopyFile(const std::string& input_path, const std::string& output_path) {
+    std::ifstream in(input_path.c_str(), std::ios::binary);
+    std::ofstream out(output_path.c_str(), std::ios::binary);
+    out << in.rdbuf();
+}
+
 class MockAuthProvider : public ISdkAuthProvider {
 public:
     std::string ProviderName() const override { return "mock-auth-provider"; }
