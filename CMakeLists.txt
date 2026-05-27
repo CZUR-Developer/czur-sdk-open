@@ -147,6 +147,15 @@ else()
     target_link_libraries(sdk_open_app PRIVATE sdk_mock_providers)
 endif()
 
+if(UNIX AND NOT APPLE)
+    set_target_properties(sdk_open_app PROPERTIES
+        BUILD_WITH_INSTALL_RPATH TRUE
+        BUILD_RPATH "$ORIGIN"
+        INSTALL_RPATH "$ORIGIN"
+        INSTALL_RPATH_USE_LINK_PATH FALSE
+    )
+endif()
+
 if(BUILD_SDK_PRIVATE)
     add_custom_command(TARGET sdk_open_app POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:sdk_open_app>/configs"

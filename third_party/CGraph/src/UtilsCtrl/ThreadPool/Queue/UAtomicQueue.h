@@ -162,7 +162,7 @@ public:
             CGRAPH_UNIQUE_LOCK lk(mutex_);
             ready_flag_ = true;
         }
-        queue_ = {};
+        queue_ = std::queue<std::unique_ptr<T>>();
     }
 
     CGRAPH_NO_ALLOWED_COPY(UAtomicQueue)
