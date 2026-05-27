@@ -6,6 +6,7 @@
 #include <utility>
 #include <unistd.h>
 #include <cstdlib>
+#include <csignal>
 
 #ifdef SDK_USE_PRIVATE_PROVIDER
 #include "private_provider_factory.h"
@@ -33,6 +34,25 @@ std::string GetExecutableDir() {
     return exe_path.substr(0, pos);
 }
 
+bool BlockShutdownSignals(sigset_t* signal_set) {
+    if (signal_set == nullptr) {
+        return false;
+    }
+    ::sigemptyset(signal_set);
+    ::sigaddset(signal_set, SIGINT);
+    ::sigaddset(signal_set, SIGTERM);
+    return ::pthread_sigmask(SIG_BLOCK, signal_set, nullptr) == 0;
+}
+
+int WaitForShutdownSignal(const sigset_t& signal_set) {
+    int signal_number = 0;
+    const int result = ::sigwait(&signal_set, &signal_number);
+    if (result != 0) {
+        return 0;
+    }
+    return signal_number;
+}
+
 } // namespace
 
 void ApplyEnvPortOverride(const char* env_key, int& target_port) {
@@ -55,6 +75,12 @@ void ApplyEnvStringOverride(const char* env_key, std::string& target_value) {
 }
 
 int main(int argc, char* argv[]) {
+    sigset_t shutdown_signals;
+    if (!BlockShutdownSignals(&shutdown_signals)) {
+        std::cerr << "failed to initialize shutdown signal handling" << std::endl;
+        return 1;
+    }
+
     std::string config_path;
     if (argc > 1 && argv[1] != nullptr) {
         config_path = argv[1];
@@ -84,9 +110,9 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    SDK_OPEN_LOG_INFO("[sdk_open_app] running. press Enter to exit...");
-    std::string line;
-    std::getline(std::cin, line);
+    SDK_OPEN_LOG_INFO("[sdk_open_app] running. waiting for SIGINT/SIGTERM...");
+    const int signal_number = WaitForShutdownSignal(shutdown_signals);
+    SDK_OPEN_LOG_INFO("[sdk_open_app] shutdown requested, signal={}", signal_number);
     app.Stop();
     return 0;
 }
