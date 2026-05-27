@@ -693,7 +693,6 @@ Json SdkApp::BuildLogsJson() const {
     logs.push_back(LogDescriptor("sdk_private_auth_manager",
                                  "SDK Private Auth Manager",
                                  LogPathForId("sdk_private_auth_manager")));
-    logs.push_back(LogDescriptor("czcv_sdk", "CZCV SDK", LogPathForId("czcv_sdk")));
     return Json{{"logDir", GetSdkOpenLogDir()}, {"logs", logs}};
 }
 
