@@ -2,28 +2,28 @@
 
 [English document](./README.md)
 
+## 官方资源
+
+- 官方站点：<https://open.czur.com>
+- 文档中心：<https://open.czur.com/docs/>
+
 ## 项目简介
 
-`src/sdk_open` 是 CZUR 本地 SDK 的开源运行时实现。它提供统一的本地 HTTP + WebSocket 服务入口、稳定的公共 provider 接口、可运行的 mock provider 组合，以及一套可被内部入口复用的四层架构实现。
+`sdk_open` 项目是 CZUR Open SDK 的本地运行时，也是 CZUR 开放平台在 SDK 侧的接入入口。它把设备接入、视频预览、拍照采集、图像处理与增强、OCR、条码识别、文件转换以及在线/离线授权统一成本地 HTTP + WebSocket API，帮助业务系统把纸质资料、实体文档和图像资产接入自己的业务流程。
 
-该目录的目标不是暴露私有能力库，而是提供一个可以独立构建、独立运行、独立开源的 SDK runtime。
+该运行时通过公共 DTO、provider interface、可运行的 mock provider 组合、本地 admin/demo 站点，以及一套可复用的四层架构来稳定第三方集成边界。它可以作为开放 SDK 可执行程序独立构建和运行；私有能力库类型不会对外暴露。
 
 ## 运行时入口
 
-当前最终保留两个可执行入口：
+开放 SDK 的可执行入口为：
 
 - `sdk_open_app`
-  - 位于 `src/sdk_open/runtime/sdk_open_main.cpp`
   - 只装配 `sdk_open` 公共层和 mock providers
   - 作为开源项目的独立可执行入口
-- `sdk_app`
-  - 位于 `src/app/process/sdk/sdk_main.cpp`
-  - 复用同一套 `sdk_open` 核心实现
-  - 按主仓构建开关装配 mock providers 或 private providers
 
 ## 四层架构
 
-`src/sdk_open` 按以下四层组织：
+`sdk_open` 项目按以下四层组织：
 
 - `transport/`
   - HTTP 站点托管
@@ -123,12 +123,6 @@
 
 `image.enhance_workflow_*` 方法用于把用户自定义的增强 pipeline 保存到 SDK 工作目录。Demo 会在图像增强页保存工作流，并在拍照采集或 SANE 扫描流程中选择复用。
 
-### SANE Linux-only 说明
-
-`sane.*` 是 Linux 专属扫描仪能力域，用于第三方 SANE 扫描仪的发现、插拔监听、打开会话、配置读取/设置、配置记录和扫描任务。SDK 不沿用旧客户端的 publicd/子进程管理链路，私有 provider 在进程内直接管理 SANE runtime 和会话。非 Linux 平台保留方法可见性，但 `sane.status` 会返回 `available=false`，其他 `sane.*` 方法返回 SANE 不可用错误。
-
-`sane.list` 默认只返回 SANE backend 已识别且可打开的设备，USB/finder 发现结果仅用于触发热插拔刷新和诊断。需要查看 finder 原始发现结果时，可传 `include_detected=true`，响应会额外返回 `detected_devices/detected_count`；Demo 默认不把这些诊断设备展示为可扫描设备，避免同一台扫描仪出现两行。SANE 只支持 Linux runtime。`sane.scan` 未指定输出目录时，会写入 SDK 自己的任务资产目录（可通过 `SDK_OPEN_WORK_DIR` 调整根目录），不再使用旧客户端工作目录。SDK 不对 SANE 暴露模拟的预览模式或分页模式；单页/连续取纸完全跟随设备参数：`source` 类似 Flatbed 时扫描一页，`source` 类似 ADF/Feeder/Duplex 时持续拉取页面直到设备返回无纸。`sane.scan` 是异步任务提交接口，立即返回 `accepted/task_id/task`；通过 `sane.scan_get`、`sane.scan_cancel` 和 `sane.scan_changed` 事件查看任务状态、当前页、转换阶段、完成、失败或取消。
-
 ## 协议模型
 
 ### Command WS
@@ -225,7 +219,7 @@ cmake -S . -B build -DBUILD_SDK_OPEN=ON -DBUILD_SDK_WEB=OFF -DCMAKE_BUILD_TYPE=D
 ### 2. 构建
 
 ```bash
-cmake --build build --target sdk_open_app sdk_app -j4
+cmake --build build --target sdk_open_app -j4
 ```
 
 ### 3. 运行开源入口
@@ -236,7 +230,7 @@ cmake --build build --target sdk_open_app sdk_app -j4
 
 ## 环境变量
 
-`sdk_open_app` / `sdk_app` 支持以下端口和鉴权覆盖：
+`sdk_open_app` 支持以下端口和鉴权覆盖：
 
 - `SDK_ADMIN_HTTP_PORT`
 - `SDK_DEMO_HTTP_PORT`

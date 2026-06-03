@@ -7,6 +7,8 @@
 #include <unistd.h>
 #include <cstdlib>
 #include <csignal>
+#include <cerrno>
+#include <cstring>
 
 #ifdef SDK_USE_PRIVATE_PROVIDER
 #include "private_provider_factory.h"
@@ -16,6 +18,7 @@
 #include "sdk_app.h"
 #include "sdk_config.h"
 #include "sdk_logger.h"
+#include "sdk_runtime_paths.h"
 
 namespace {
 
@@ -74,6 +77,18 @@ void ApplyEnvStringOverride(const char* env_key, std::string& target_value) {
     target_value = val;
 }
 
+void ApplyDefaultSaneConfigDir() {
+    const char* sane_config_dir = std::getenv("CZUR_SANE_CONFIG_DIR");
+    if (sane_config_dir != nullptr && sane_config_dir[0] != '\0') {
+        return;
+    }
+    const std::string default_dir = editor::sdk::JoinPath(
+        editor::sdk::JoinPath(editor::sdk::GetSdkOpenWorkDir(), "sane"), "config");
+    if (::setenv("CZUR_SANE_CONFIG_DIR", default_dir.c_str(), 0) != 0) {
+        SDK_OPEN_LOG_WARN("[sdk_open_app] failed to set default CZUR_SANE_CONFIG_DIR: {}", std::strerror(errno));
+    }
+}
+
 int main(int argc, char* argv[]) {
     sigset_t shutdown_signals;
     if (!BlockShutdownSignals(&shutdown_signals)) {
@@ -98,6 +113,7 @@ int main(int argc, char* argv[]) {
     ApplyEnvStringOverride("SDK_AUTH_TOKEN", config.auth_token);
 
 #ifdef SDK_USE_PRIVATE_PROVIDER
+    ApplyDefaultSaneConfigDir();
     editor::sdk::ProviderBundle providers = editor::sdk::private_impl::CreateProviderBundle();
     SDK_OPEN_LOG_INFO("[sdk_open_app] provider mode: private");
 #else
