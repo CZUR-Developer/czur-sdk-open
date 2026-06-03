@@ -2,28 +2,28 @@
 
 [中文文档](./README_ZH.md)
 
+## Official Resources
+
+- Official site: <https://open.czur.com>
+- Documentation center: <https://open.czur.com/docs/>
+
 ## Overview
 
-`src/sdk_open` is the open-source runtime for the CZUR local SDK. It provides unified local HTTP + WebSocket endpoints, stable public provider interfaces, a runnable mock-provider bundle, and a four-layer runtime structure that can also be reused by the internal product entrypoint.
+The `sdk_open` project is the local runtime for CZUR Open SDK and the SDK-side integration entry for CZUR Open Platform. It turns device access, video preview, image capture, image processing and enhancement, OCR, barcode recognition, file conversion, and online/offline licensing into unified local HTTP + WebSocket APIs so business systems can bring paper, physical documents, and image assets into their own workflows.
 
-This directory is designed to be independently buildable and runnable. It does not expose private capability-library types.
+The runtime keeps third-party integration boundaries stable through public DTOs, provider interfaces, a runnable mock-provider bundle, local admin/demo sites, and a reusable four-layer architecture. It can be built and run independently as the open SDK executable. Private capability-library types are not exposed.
 
-## Executables
+## Executable
 
-Two executables are intentionally retained:
+The open SDK executable is:
 
 - `sdk_open_app`
-  - implemented by `src/sdk_open/runtime/sdk_open_main.cpp`
   - links only the public `sdk_open` runtime and mock providers
   - serves as the standalone open-source executable
-- `sdk_app`
-  - implemented by `src/app/process/sdk/sdk_main.cpp`
-  - reuses the same `sdk_open` core runtime
-  - wires mock or private providers through main-repo build switches
 
 ## Four-Layer Architecture
 
-`src/sdk_open` is organized into these four layers:
+The `sdk_open` project is organized into these four layers:
 
 - `transport/`
   - HTTP site hosting
@@ -124,12 +124,6 @@ The current runtime exposes:
 
 `image.enhance_workflow_*` methods store reusable user-defined enhancement pipelines in the SDK work directory. The Demo uses these methods to save workflows from the Image Enhancement page and reuse the selected workflow from Capture or SANE scan flows.
 
-### SANE Linux-only Notes
-
-`sane.*` is a Linux-only scanner capability domain for third-party SANE scanner discovery, hotplug watching, sessions, option reads/writes, option profiles, and scan tasks. The SDK does not reuse the legacy publicd/subprocess management path; the private provider manages the SANE runtime and sessions in-process. Non-Linux runtimes keep the methods visible, but `sane.status` reports `available=false` and other `sane.*` methods return a SANE unavailable error.
-
-`sane.list` returns only devices recognized by a SANE backend and openable by default. USB/finder detections are used to trigger hotplug refreshes and diagnostics only. Pass `include_detected=true` to also receive `detected_devices/detected_count`; the Demo keeps these diagnostic rows out of the scan device list so one scanner is not displayed twice. SANE support is Linux-only. When `sane.scan` is called without an output directory, files are written under the SDK task asset directory, whose root can be overridden with `SDK_OPEN_WORK_DIR`; the legacy client work directory is not used. The SDK does not expose a synthetic preview/page mode for SANE. Page behavior follows device options: Flatbed-like `source` values scan one page, while ADF/Feeder/Duplex-like `source` values keep pulling pages until the device reports no documents. `sane.scan` submits an async task and returns `accepted/task_id/task`; use `sane.scan_get`, `sane.scan_cancel`, and the `sane.scan_changed` event for task status, page progress, conversion, completion, failure, or cancellation.
-
 ## Protocol Model
 
 ### Command WS
@@ -226,7 +220,7 @@ cmake -S . -B build -DBUILD_SDK_OPEN=ON -DBUILD_SDK_WEB=OFF -DCMAKE_BUILD_TYPE=D
 ### 2. Build
 
 ```bash
-cmake --build build --target sdk_open_app sdk_app -j4
+cmake --build build --target sdk_open_app -j4
 ```
 
 ### 3. Run the open executable
@@ -237,7 +231,7 @@ cmake --build build --target sdk_open_app sdk_app -j4
 
 ## Environment Variables
 
-`sdk_open_app` and `sdk_app` support these overrides:
+`sdk_open_app` supports these overrides:
 
 - `SDK_ADMIN_HTTP_PORT`
 - `SDK_DEMO_HTTP_PORT`
