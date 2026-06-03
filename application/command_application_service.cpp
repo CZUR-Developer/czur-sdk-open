@@ -456,7 +456,14 @@ SdkRect4P ParseRect4P(const Json& obj) {
 }
 
 bool IsSupportedVideoPixelFormat(const std::string& pixel_format) {
-    return pixel_format.empty() || pixel_format == "bgr24";
+    return pixel_format.empty() || pixel_format == "mjpeg" || pixel_format == "jpeg" || pixel_format == "bgr24";
+}
+
+std::string NormalizeVideoPixelFormat(const std::string& pixel_format) {
+    if (pixel_format == "bgr24") {
+        return "bgr24";
+    }
+    return "mjpeg";
 }
 
 SdkCaptureProfile ParseCaptureProfile(const Json& params, const std::string& device_id) {
@@ -2121,7 +2128,7 @@ Json CommandApplicationService::HandleDeviceOpen(const std::string& connection_i
     open_request.fps = GetOptionalIntField(request.params, "fps", 0);
     open_request.pixel_format = GetOptionalStringField(request.params, "pixel_format");
     if (open_request.pixel_format.empty()) {
-        open_request.pixel_format = "bgr24";
+        open_request.pixel_format = "mjpeg";
     }
     if (open_request.device_id.empty()) {
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "device_id required");
@@ -2129,6 +2136,7 @@ Json CommandApplicationService::HandleDeviceOpen(const std::string& connection_i
     if (!IsSupportedVideoPixelFormat(open_request.pixel_format)) {
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "unsupported pixel_format");
     }
+    open_request.pixel_format = NormalizeVideoPixelFormat(open_request.pixel_format);
     const SdkDeviceOpenResult result = device_facade_.OpenDevice(session_result.auth_context, open_request);
     if (!IsOkStatusCode(result.code)) {
         return BuildWsResponse(request.request_id, result.code, result.message);
@@ -2268,7 +2276,7 @@ Json CommandApplicationService::HandleVideoStart(const std::string& connection_i
     start_request.fps = GetOptionalIntField(request.params, "fps", 0);
     start_request.pixel_format = GetOptionalStringField(request.params, "pixel_format");
     if (start_request.pixel_format.empty()) {
-        start_request.pixel_format = "bgr24";
+        start_request.pixel_format = "mjpeg";
     }
     if (start_request.device_id.empty()) {
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "device_id required");
@@ -2276,6 +2284,7 @@ Json CommandApplicationService::HandleVideoStart(const std::string& connection_i
     if (!IsSupportedVideoPixelFormat(start_request.pixel_format)) {
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "unsupported pixel_format");
     }
+    start_request.pixel_format = NormalizeVideoPixelFormat(start_request.pixel_format);
     const Json profile_json = GetOptionalObjectField(request.params, "profile");
     if (!profile_json.empty()) {
         const SdkCaptureProfile profile = ParseCaptureProfile(request.params, start_request.device_id);
@@ -2376,11 +2385,12 @@ Json CommandApplicationService::HandleVideoSetFormat(const std::string& connecti
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "device_id required");
     }
     if (format_request.pixel_format.empty()) {
-        format_request.pixel_format = "bgr24";
+        format_request.pixel_format = "mjpeg";
     }
     if (!IsSupportedVideoPixelFormat(format_request.pixel_format)) {
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "unsupported pixel_format");
     }
+    format_request.pixel_format = NormalizeVideoPixelFormat(format_request.pixel_format);
 
     const SdkVideoFormatResult format_result = device_facade_.SetVideoFormat(session_result.auth_context, format_request);
     if (!IsOkStatusCode(format_result.code)) {
