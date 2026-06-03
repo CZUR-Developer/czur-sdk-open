@@ -7,6 +7,10 @@
 - 官方站点：<https://open.czur.com>
 - 文档中心：<https://open.czur.com/docs/>
 
+## 平台支持
+
+SDK Open runtime 目标支持多平台。现阶段已实现 Linux 版本，后续会陆续支持 Windows 和 macOS。
+
 ## 项目简介
 
 `sdk_open` 项目是 CZUR Open SDK 的本地运行时，也是 CZUR 开放平台在 SDK 侧的接入入口。它把设备接入、视频预览、拍照采集、图像处理与增强、OCR、条码识别、文件转换以及在线/离线授权统一成本地 HTTP + WebSocket API，帮助业务系统把纸质资料、实体文档和图像资产接入自己的业务流程。

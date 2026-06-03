@@ -7,6 +7,10 @@
 - Official site: <https://open.czur.com>
 - Documentation center: <https://open.czur.com/docs/>
 
+## Platform Support
+
+The SDK Open runtime targets multi-platform support. The Linux version is implemented at this stage, and Windows and macOS support will be added gradually.
+
 ## Overview
 
 The `sdk_open` project is the local runtime for CZUR Open SDK and the SDK-side integration entry for CZUR Open Platform. It turns device access, video preview, image capture, image processing and enhancement, OCR, barcode recognition, file conversion, and online/offline licensing into unified local HTTP + WebSocket APIs so business systems can bring paper, physical documents, and image assets into their own workflows.
