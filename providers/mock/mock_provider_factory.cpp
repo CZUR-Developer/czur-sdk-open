@@ -402,8 +402,10 @@ public:
                     frame.timestamp_ms = NowMs();
                     frame.width = resolution.width;
                     frame.height = resolution.height;
-                    frame.pixel_format = "bgr24";
-                    frame.payload = MakeBgrFrame(resolution.width, resolution.height, frame.frame_seq);
+                    frame.pixel_format = request.pixel_format == "bgr24" ? "bgr24" : "mjpeg";
+                    frame.payload = frame.pixel_format == "bgr24"
+                                        ? MakeBgrFrame(resolution.width, resolution.height, frame.frame_seq)
+                                        : TinyJpeg();
                     if (callback) {
                         callback(frame);
                     }
@@ -414,7 +416,7 @@ public:
             streams_[request.device_id] = state;
         }
         result.accepted = true;
-        result.pixel_format = "bgr24";
+        result.pixel_format = request.pixel_format == "bgr24" ? "bgr24" : "mjpeg";
         result.width = resolution.width;
         result.height = resolution.height;
         result.fps = resolution.fps;

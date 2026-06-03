@@ -662,7 +662,7 @@ const captureResolutionOptions = computed<DeviceResolution[]>(() => {
   const lockedResolution = deviceVideoState.resolutions.find((resolution) => resolution.width === 1536 && resolution.height === 1152);
   return lockedResolution
     ? [lockedResolution]
-    : [{ width: 1536, height: 1152, real_width: 1536, real_height: 1152, fps: 15, pixel_format: 'bgr24', is_default: false }];
+    : [{ width: 1536, height: 1152, real_width: 1536, real_height: 1152, fps: 15, pixel_format: 'mjpeg', is_default: false }];
 });
 
 const selectedResolution = computed(() =>

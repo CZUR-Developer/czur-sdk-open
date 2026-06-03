@@ -73,12 +73,14 @@ interface PendingVideoFrame {
   meta: FrameMeta | null;
   width: number;
   height: number;
+  pixelFormat: string;
   buffer: ArrayBuffer;
 }
 
 interface RenderedVideoFrame {
   width: number;
   height: number;
+  pixelFormat: string;
   buffer: ArrayBuffer;
 }
 
@@ -368,7 +370,7 @@ function buildVideoParams(resolution: DeviceResolution): Record<string, unknown>
     width: resolution.width,
     height: resolution.height,
     fps: resolution.fps,
-    pixel_format: resolution.pixel_format || 'bgr24',
+    pixel_format: 'mjpeg',
   };
 }
 
@@ -456,11 +458,16 @@ function enqueueVideoFrame(buffer: ArrayBuffer): void {
     return;
   }
 
-  const pixelFormat = meta?.pixel_format || 'bgr24';
+  const pixelFormat = normalizeVideoPixelFormat(meta?.pixel_format);
   const width = typeof meta?.width === 'number' && Number.isFinite(meta.width) ? meta.width : 0;
   const height = typeof meta?.height === 'number' && Number.isFinite(meta.height) ? meta.height : 0;
   const expectedBytes = width > 0 && height > 0 ? width * height * 3 : 0;
-  if (pixelFormat !== 'bgr24' || expectedBytes <= 0 || buffer.byteLength < expectedBytes) {
+  if (pixelFormat === 'bgr24' && (expectedBytes <= 0 || buffer.byteLength < expectedBytes)) {
+    state.decodeFailedCount += 1;
+    state.droppedFrameCount += 1;
+    return;
+  }
+  if (pixelFormat !== 'bgr24' && !isJpegVideoPixelFormat(pixelFormat)) {
     state.decodeFailedCount += 1;
     state.droppedFrameCount += 1;
     return;
@@ -472,6 +479,7 @@ function enqueueVideoFrame(buffer: ArrayBuffer): void {
     meta,
     width,
     height,
+    pixelFormat,
     buffer: buffer.slice(0),
   };
   processPendingFrame();
@@ -488,36 +496,43 @@ function processPendingFrame(): void {
   const generation = streamGeneration;
 
   requestAnimationFrame(() => {
-    try {
-      if (generation !== streamGeneration || frame.streamId !== state.streamId || frame.frameSeq <= state.lastRenderedSeq) {
-        state.droppedFrameCount += 1;
-        return;
-      }
-      if (pendingFrame && pendingFrame.frameSeq > frame.frameSeq) {
-        state.droppedFrameCount += 1;
-        return;
-      }
-      if (!drawBgrFrame(frame.buffer, frame.width, frame.height, frame.meta)) {
-        state.decodeFailedCount += 1;
-        state.droppedFrameCount += 1;
-        return;
-      }
-      lastRenderedFrame = {
-        width: frame.width,
-        height: frame.height,
-        buffer: frame.buffer.slice(0),
-      };
-      state.frameMeta = frame.meta;
-      state.renderedFrameCount += 1;
-      state.lastRenderedSeq = frame.frameSeq;
-      state.lastFrameAt = nowTimeLabel();
-    } catch {
-      state.decodeFailedCount += 1;
+    if (generation !== streamGeneration || frame.streamId !== state.streamId || frame.frameSeq <= state.lastRenderedSeq) {
       state.droppedFrameCount += 1;
-    } finally {
       decodingFrame = false;
       processPendingFrame();
+      return;
     }
+    if (pendingFrame && pendingFrame.frameSeq > frame.frameSeq) {
+      state.droppedFrameCount += 1;
+      decodingFrame = false;
+      processPendingFrame();
+      return;
+    }
+    void drawVideoFrame(frame, frame.meta)
+      .then((rendered) => {
+        if (!rendered) {
+          state.decodeFailedCount += 1;
+          state.droppedFrameCount += 1;
+          return;
+        }
+        if (generation !== streamGeneration || frame.streamId !== state.streamId || frame.frameSeq <= state.lastRenderedSeq) {
+          state.droppedFrameCount += 1;
+          return;
+        }
+        lastRenderedFrame = rendered;
+        state.frameMeta = frame.meta;
+        state.renderedFrameCount += 1;
+        state.lastRenderedSeq = frame.frameSeq;
+        state.lastFrameAt = nowTimeLabel();
+      })
+      .catch(() => {
+        state.decodeFailedCount += 1;
+        state.droppedFrameCount += 1;
+      })
+      .finally(() => {
+        decodingFrame = false;
+        processPendingFrame();
+      });
   });
 }
 
@@ -562,7 +577,7 @@ function ensureCaptureResolution(): DeviceResolution {
     real_width: 1536,
     real_height: 1152,
     fps: 15,
-    pixel_format: 'bgr24',
+    pixel_format: 'mjpeg',
     is_default: false,
   };
   state.resolutions = [fallback, ...state.resolutions];
@@ -581,7 +596,7 @@ function asResolutions(value: unknown): DeviceResolution[] {
       real_width: asNumber(item.real_width),
       real_height: asNumber(item.real_height),
       fps: asNumber(item.fps) || 15,
-      pixel_format: asString(item.pixel_format) || 'bgr24',
+      pixel_format: normalizeVideoPixelFormat(asString(item.pixel_format)),
       is_default: Boolean(item.is_default),
     }))
     .filter((resolution) => resolution.width > 0 && resolution.height > 0);
@@ -603,6 +618,35 @@ function asString(value: unknown): string {
 
 function asNumber(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function normalizeVideoPixelFormat(value: unknown): string {
+  if (value === 'bgr24') {
+    return 'bgr24';
+  }
+  if (value === 'jpeg' || value === 'mjpeg') {
+    return value;
+  }
+  return 'mjpeg';
+}
+
+function isJpegVideoPixelFormat(pixelFormat: string): boolean {
+  return pixelFormat === 'mjpeg' || pixelFormat === 'jpeg';
+}
+
+async function drawVideoFrame(frame: PendingVideoFrame | RenderedVideoFrame, meta: FrameMeta | null): Promise<RenderedVideoFrame | null> {
+  if (frame.pixelFormat === 'bgr24') {
+    if (!drawBgrFrame(frame.buffer, frame.width, frame.height, meta)) {
+      return null;
+    }
+    return {
+      width: frame.width,
+      height: frame.height,
+      pixelFormat: frame.pixelFormat,
+      buffer: frame.buffer.slice(0),
+    };
+  }
+  return drawJpegFrame(frame.buffer, meta);
 }
 
 function drawBgrFrame(buffer: ArrayBuffer, width: number, height: number, meta: FrameMeta | null): boolean {
@@ -631,6 +675,76 @@ function drawBgrFrame(buffer: ArrayBuffer, width: number, height: number, meta: 
   videoContext.putImageData(imageData, 0, 0);
   drawDetectedRects(meta, width, height);
   return true;
+}
+
+async function drawJpegFrame(buffer: ArrayBuffer, meta: FrameMeta | null): Promise<RenderedVideoFrame | null> {
+  if (!videoCanvas || !videoContext || buffer.byteLength === 0) {
+    return null;
+  }
+
+  const blob = new Blob([buffer], { type: 'image/jpeg' });
+  if ('createImageBitmap' in window) {
+    const bitmap = await createImageBitmap(blob);
+    const drawn = drawDecodedImage(bitmap, bitmap.width, bitmap.height, meta);
+    bitmap.close();
+    if (!drawn) {
+      return null;
+    }
+    return {
+      width: drawn.width,
+      height: drawn.height,
+      pixelFormat: 'mjpeg',
+      buffer: buffer.slice(0),
+    };
+  }
+
+  const image = await loadJpegImage(blob);
+  const drawn = drawDecodedImage(image, image.naturalWidth, image.naturalHeight, meta);
+  if (!drawn) {
+    return null;
+  }
+  return {
+    width: drawn.width,
+    height: drawn.height,
+    pixelFormat: 'mjpeg',
+    buffer: buffer.slice(0),
+  };
+}
+
+function drawDecodedImage(
+  image: CanvasImageSource,
+  naturalWidth: number,
+  naturalHeight: number,
+  meta: FrameMeta | null,
+): { width: number; height: number } | null {
+  if (!videoCanvas || !videoContext || naturalWidth <= 0 || naturalHeight <= 0) {
+    return null;
+  }
+  const width = typeof meta?.width === 'number' && meta.width > 0 ? meta.width : naturalWidth;
+  const height = typeof meta?.height === 'number' && meta.height > 0 ? meta.height : naturalHeight;
+  if (videoCanvas.width !== width || videoCanvas.height !== height) {
+    videoCanvas.width = width;
+    videoCanvas.height = height;
+  }
+  videoContext.drawImage(image, 0, 0, width, height);
+  drawDetectedRects(meta, width, height);
+  return { width, height };
+}
+
+function loadJpegImage(blob: Blob): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const url = URL.createObjectURL(blob);
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('jpeg decode failed'));
+    };
+    image.src = url;
+  });
 }
 
 function drawDetectedRects(meta: FrameMeta | null, width: number, height: number): void {
@@ -682,7 +796,7 @@ function clearDetectedRectsPreview(): void {
     };
   }
   if (lastRenderedFrame) {
-    drawBgrFrame(lastRenderedFrame.buffer, lastRenderedFrame.width, lastRenderedFrame.height, null);
+    void drawVideoFrame(lastRenderedFrame, null);
   }
 }
 

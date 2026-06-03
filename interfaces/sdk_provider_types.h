@@ -19,7 +19,7 @@ struct SdkVideoResolution {
     int real_width = 0;
     int real_height = 0;
     int fps = 0;
-    std::string pixel_format = "bgr24";
+    std::string pixel_format = "mjpeg";
     bool is_default = false;
 };
 
@@ -41,7 +41,7 @@ struct SdkDeviceOpenRequest {
     int width = 0;
     int height = 0;
     int fps = 0;
-    std::string pixel_format = "bgr24";
+    std::string pixel_format = "mjpeg";
 };
 
 struct SdkDeviceOpenResult {
@@ -107,7 +107,7 @@ struct SdkVideoStartRequest {
     int width = 0;
     int height = 0;
     int fps = 0;
-    std::string pixel_format = "bgr24";
+    std::string pixel_format = "mjpeg";
     std::string page_processing;
     bool single_page_realtime_detect_rects = false;
     bool single_page_multi_target_paging = false;
@@ -117,7 +117,7 @@ struct SdkVideoStartResult {
     int code = ToCode(SdkStatusCode::Ok);
     std::string message = "ok";
     bool accepted = false;
-    std::string pixel_format = "bgr24";
+    std::string pixel_format = "mjpeg";
     int width = 1280;
     int height = 720;
     int fps = 15;
@@ -130,7 +130,7 @@ struct SdkVideoFrame {
     int64_t timestamp_ms = 0;
     int width = 0;
     int height = 0;
-    std::string pixel_format = "bgr24";
+    std::string pixel_format = "mjpeg";
     std::vector<uint8_t> payload;
     std::vector<SdkRect4P> detected_rects;
     int detected_rects_source_width = 0;

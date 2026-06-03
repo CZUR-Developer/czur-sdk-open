@@ -21,7 +21,7 @@ public:
         std::string connection_id;
         std::string session_token;
         std::string device_id;
-        std::string pixel_format = "bgr24";
+        std::string pixel_format = "mjpeg";
         int width = 1280;
         int height = 720;
         int fps = 15;
