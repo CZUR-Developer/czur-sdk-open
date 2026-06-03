@@ -2,6 +2,12 @@
 
 [English document](./README.md)
 
+## 项目简介
+
+`sdk_open` 项目是 CZUR Open SDK 的本地运行时，也是 CZUR 开放平台在 SDK 侧的接入入口。它把设备接入、视频预览、拍照采集、图像处理与增强、OCR、条码识别、文件转换以及在线/离线授权统一成本地 HTTP + WebSocket API，帮助业务系统把纸质资料、实体文档和图像资产接入自己的业务流程。
+
+该运行时通过公共 DTO、provider interface、可运行的 mock provider 组合、本地 admin/demo 站点，以及一套可复用的四层架构来稳定第三方集成边界。它可以作为开放 SDK 可执行程序独立构建和运行；私有能力库类型不会对外暴露。
+
 ## 官方资源
 
 - 官方站点：<https://open.czur.com>
@@ -11,11 +17,9 @@
 
 SDK Open runtime 目标支持多平台。现阶段已实现 Linux 版本，后续会陆续支持 Windows 和 macOS。
 
-## 项目简介
+## Release 包
 
-`sdk_open` 项目是 CZUR Open SDK 的本地运行时，也是 CZUR 开放平台在 SDK 侧的接入入口。它把设备接入、视频预览、拍照采集、图像处理与增强、OCR、条码识别、文件转换以及在线/离线授权统一成本地 HTTP + WebSocket API，帮助业务系统把纸质资料、实体文档和图像资产接入自己的业务流程。
-
-该运行时通过公共 DTO、provider interface、可运行的 mock provider 组合、本地 admin/demo 站点，以及一套可复用的四层架构来稳定第三方集成边界。它可以作为开放 SDK 可执行程序独立构建和运行；私有能力库类型不会对外暴露。
+SDK Open Release 包包含 CZUR 提供的默认 Provider 能力。开发者可以通过 CZUR 开放平台申请 API Key，并在本地 runtime 中使用该 Key 体验和使用已授权的 SDK 能力。
 
 ## 运行时入口
 

@@ -2,6 +2,12 @@
 
 [中文文档](./README_ZH.md)
 
+## Overview
+
+The `sdk_open` project is the local runtime for CZUR Open SDK and the SDK-side integration entry for CZUR Open Platform. It turns device access, video preview, image capture, image processing and enhancement, OCR, barcode recognition, file conversion, and online/offline licensing into unified local HTTP + WebSocket APIs so business systems can bring paper, physical documents, and image assets into their own workflows.
+
+The runtime keeps third-party integration boundaries stable through public DTOs, provider interfaces, a runnable mock-provider bundle, local admin/demo sites, and a reusable four-layer architecture. It can be built and run independently as the open SDK executable. Private capability-library types are not exposed.
+
 ## Official Resources
 
 - Official site: <https://open.czur.com>
@@ -11,11 +17,9 @@
 
 The SDK Open runtime targets multi-platform support. The Linux version is implemented at this stage, and Windows and macOS support will be added gradually.
 
-## Overview
+## Release Package
 
-The `sdk_open` project is the local runtime for CZUR Open SDK and the SDK-side integration entry for CZUR Open Platform. It turns device access, video preview, image capture, image processing and enhancement, OCR, barcode recognition, file conversion, and online/offline licensing into unified local HTTP + WebSocket APIs so business systems can bring paper, physical documents, and image assets into their own workflows.
-
-The runtime keeps third-party integration boundaries stable through public DTOs, provider interfaces, a runnable mock-provider bundle, local admin/demo sites, and a reusable four-layer architecture. It can be built and run independently as the open SDK executable. Private capability-library types are not exposed.
+The SDK Open release package includes CZUR-provided default Provider capabilities. Developers can apply for an API Key on the CZUR Open Platform, then use it with the local runtime to experience and use the authorized SDK capabilities.
 
 ## Executable
 
