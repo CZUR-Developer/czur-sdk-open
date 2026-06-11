@@ -138,6 +138,7 @@ struct ProcessedOutput {
     std::string final_path;
     int width = 0;
     int height = 0;
+    int dpi = 0;
     uint64_t size = 0;
 };
 
@@ -207,6 +208,7 @@ public:
         laser_path_ = result.laser_path;
         original_width_ = result.width;
         original_height_ = result.height;
+        original_dpi_ = result.dpi;
         detected_rects_ = result.detected_rects;
         detected_rects_source_width_ = result.detected_rects_source_width;
         detected_rects_source_height_ = result.detected_rects_source_height;
@@ -230,6 +232,7 @@ public:
         page_request.page_processing = request_.profile.page_processing;
         page_request.width = original_width_;
         page_request.height = original_height_;
+        page_request.dpi = original_dpi_;
         page_request.single_page_realtime_detect_rects = request_.profile.single_page_realtime_detect_rects;
         page_request.single_page = request_.profile.single_page;
         page_request.curved_book = request_.profile.curved_book;
@@ -252,6 +255,7 @@ public:
             output.page_path = original_path_;
             output.width = original_width_;
             output.height = original_height_;
+            output.dpi = original_dpi_;
             output.size = FileSize(original_path_);
             page_outputs_.push_back(output);
             AddWarning("page_process fallback: " + result.message);
@@ -277,6 +281,7 @@ public:
             output.content_type = "image/jpeg";
             output.width = original_width_;
             output.height = original_height_;
+            output.dpi = original_dpi_;
             output.size = FileSize(output.path);
             AddPageOutputFromProvider(output, true);
         }
@@ -423,6 +428,7 @@ private:
         output.page_path = provider_output.path;
         output.width = provider_output.width;
         output.height = provider_output.height;
+        output.dpi = provider_output.dpi > 0 ? provider_output.dpi : original_dpi_;
         output.size = provider_output.size > 0 ? provider_output.size : FileSize(provider_output.path);
         output.page_asset_id = single ? "asset-page-processed" : ("asset-page-processed-" + output.output_id);
         output.page_asset_kind = single ? "page_processed" : ("page_processed_" + output.output_id);
@@ -466,6 +472,7 @@ private:
         color_request.input_path = output.page_path;
         color_request.output_path = JoinPath(output_dir_, single ? "color_processed.jpg" : ("color_processed_" + output.output_id + ".jpg"));
         color_request.color_mode = request_.profile.color_mode;
+        color_request.dpi = output.dpi;
         const SdkColorModeResult result = graphic_facade_.ApplyColorMode(color_request);
         if (!IsOkStatusCode(result.code) || result.unsupported || !result.processed) {
             output.color_path = output.page_path;
@@ -601,6 +608,7 @@ private:
     std::string laser_path_;
     int original_width_ = 0;
     int original_height_ = 0;
+    int original_dpi_ = 0;
     std::vector<SdkRect4P> detected_rects_;
     int detected_rects_source_width_ = 0;
     int detected_rects_source_height_ = 0;

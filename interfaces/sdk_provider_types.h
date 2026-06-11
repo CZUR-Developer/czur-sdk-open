@@ -92,6 +92,7 @@ struct SdkCaptureResult {
     std::string laser_path;
     int width = 0;
     int height = 0;
+    int dpi = 0;
     uint64_t size = 0;
     std::vector<SdkRect4P> detected_rects;
     int detected_rects_source_width = 0;
@@ -210,6 +211,7 @@ struct SdkImageProcessRequest {
     std::string page_processing = "keep_original";
     std::string color_mode = "no_optimize";
     std::string output_format;
+    int dpi = 0;
     SdkSinglePageOptions single_page;
     SdkCurvedBookOptions curved_book;
     SdkRect4P selected_area_rect;
@@ -292,6 +294,7 @@ struct SdkPageProcessRequest {
     std::string page_processing;
     int width = 0;
     int height = 0;
+    int dpi = 0;
     bool single_page_realtime_detect_rects = false;
     SdkSinglePageOptions single_page;
     SdkCurvedBookOptions curved_book;
@@ -312,6 +315,7 @@ struct SdkPageOutput {
     std::string content_type = "image/jpeg";
     int width = 0;
     int height = 0;
+    int dpi = 0;
     uint64_t size = 0;
 };
 
@@ -328,6 +332,7 @@ struct SdkColorModeRequest {
     std::string input_path;
     std::string output_path;
     std::string color_mode;
+    int dpi = 0;
 };
 
 struct SdkColorModeResult {

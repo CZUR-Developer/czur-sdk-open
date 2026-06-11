@@ -1891,6 +1891,8 @@ CommandApplicationService::ImageUploadResult CommandApplicationService::UploadIm
     const std::string extension_from_name = NormalizeLower(ExtensionFromFilename(filename));
     const bool has_supported_typed_content =
         normalized_type.find("image/") == 0 ||
+        normalized_type == "application/tif" ||
+        normalized_type == "application/tiff" ||
         normalized_type.find("pdf") != std::string::npos ||
         normalized_type.find("ofd") != std::string::npos;
     const bool is_supported_content_type =
@@ -2500,6 +2502,7 @@ Json CommandApplicationService::HandleImageProcess(const std::string& connection
     } else if (process_request.output_format.empty()) {
         process_request.output_format = "jpg";
     }
+    process_request.dpi = GetOptionalIntField(request.params, "dpi", process_request.dpi);
     process_request.scan_device_type = GetOptionalIntField(request.params, "scan_device_type", process_request.scan_device_type);
 
     const Json single_page_json = GetOptionalObjectField(request.params, "single_page");
