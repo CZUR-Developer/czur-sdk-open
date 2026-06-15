@@ -13,6 +13,8 @@ enum class SdkStatusCode : int {
     InvalidParams = 1002,
     UnsupportedMethod = 1003,
     RateLimited = 1004,
+    UploadFileEmpty = 1005,
+    UploadFileTooLarge = 1006,
     AuthRequired = 1100,
     TokenInvalid = 1101,
     TokenExpired = 1102,

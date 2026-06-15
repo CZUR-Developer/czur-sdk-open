@@ -158,6 +158,35 @@ bool IsSupportedImageExtension(const std::string& extension) {
            value == "tif" || value == "tiff" || value == "webp";
 }
 
+bool IsSupportedImageMimeType(const std::string& content_type) {
+    const std::string value = NormalizeLower(content_type);
+    return value.find("image/") == 0 ||
+           value == "application/bmp" ||
+           value == "application/x-bmp" ||
+           value == "application/tif" ||
+           value == "application/tiff";
+}
+
+std::string ResolveImageAssetExtension(const std::string& content_type, const std::string& filename) {
+    std::string extension = NormalizeLower(ExtensionFromFilename(filename));
+    if (extension == "jpeg") {
+        extension = "jpg";
+    } else if (extension == "tif") {
+        extension = "tiff";
+    }
+    if (!extension.empty()) {
+        return extension;
+    }
+    extension = NormalizeLower(ImageExtensionForContentType(content_type, filename));
+    if (extension == "jpeg") {
+        return "jpg";
+    }
+    if (extension == "tif") {
+        return "tiff";
+    }
+    return extension;
+}
+
 bool IsSupportedUploadExtension(const std::string& extension) {
     std::string value = NormalizeLower(extension);
     if (value == "jpeg") {
@@ -1882,27 +1911,29 @@ CommandApplicationService::ImageUploadResult CommandApplicationService::UploadIm
         return result;
     }
     const std::size_t max_upload_bytes = 50U * 1024U * 1024U;
-    if (content.empty() || content.size() > max_upload_bytes) {
-        result.code = ToCode(SdkStatusCode::InvalidParams);
-        result.message = "uploaded file is empty or too large";
+    if (content.empty()) {
+        result.code = ToCode(SdkStatusCode::UploadFileEmpty);
+        result.message = "uploaded file is empty";
+        return result;
+    }
+    if (content.size() > max_upload_bytes) {
+        result.code = ToCode(SdkStatusCode::UploadFileTooLarge);
+        result.message = "uploaded file exceeds 50MB limit";
         return result;
     }
     const std::string normalized_type = NormalizeLower(content_type);
     const std::string extension_from_name = NormalizeLower(ExtensionFromFilename(filename));
     const bool has_supported_typed_content =
-        normalized_type.find("image/") == 0 ||
+        IsSupportedImageMimeType(normalized_type) ||
         normalized_type.find("pdf") != std::string::npos ||
         normalized_type.find("ofd") != std::string::npos;
-    const bool is_supported_content_type =
-        normalized_type.empty() ||
-        has_supported_typed_content ||
-        normalized_type == "application/octet-stream";
-    if (!is_supported_content_type) {
-        result.code = ToCode(SdkStatusCode::InvalidParams);
-        result.message = "uploaded file must be an image, PDF, OFD, or TIFF";
-        return result;
-    }
-    if (extension_from_name.empty() ? !has_supported_typed_content : !IsSupportedUploadExtension(extension_from_name)) {
+    const bool has_reliable_mime = !normalized_type.empty() && normalized_type != "application/octet-stream";
+    const bool has_supported_extension =
+        !extension_from_name.empty() && IsSupportedUploadExtension(extension_from_name);
+    const bool allow_by_extension = has_supported_extension;
+    const bool allow_by_mime_without_extension =
+        extension_from_name.empty() && (!has_reliable_mime || has_supported_typed_content);
+    if (!allow_by_extension && !allow_by_mime_without_extension) {
         result.code = ToCode(SdkStatusCode::InvalidParams);
         result.message = "uploaded file must be an image, PDF, OFD, or TIFF";
         return result;
@@ -1957,6 +1988,56 @@ void CommandApplicationService::RegisterImageAsset(const std::string& connection
     std::lock_guard<std::mutex> lock(image_assets_mu_);
     image_asset_connection_by_task_[task_id] = connection_id;
     image_assets_by_task_[task_id][asset.asset_id] = asset;
+}
+
+bool CommandApplicationService::ResolveImageInputAsset(const std::string& connection_id,
+                                                       const std::string& input_upload_id,
+                                                       const std::string& request_id,
+                                                       const char* method_name,
+                                                       std::string* input_path,
+                                                       std::string* source_extension,
+                                                       Json* error_response) const {
+    if (input_path == NULL || source_extension == NULL || error_response == NULL) {
+        return false;
+    }
+    const AssetAccessResult input_asset = ResolveImageAsset(connection_id, input_upload_id, "asset-original");
+    if (!IsOkStatusCode(input_asset.code)) {
+        *error_response = BuildWsResponse(request_id, input_asset.code, input_asset.message);
+        return false;
+    }
+    const std::string resolved_extension =
+        ResolveImageAssetExtension(input_asset.asset.content_type, input_asset.asset.path);
+    const bool has_extension = !ExtensionFromFilename(input_asset.asset.path).empty();
+    const bool has_supported_mime = IsSupportedImageMimeType(input_asset.asset.content_type);
+    if ((!has_extension && !has_supported_mime) ||
+        resolved_extension.empty() ||
+        !IsSupportedImageExtension(resolved_extension)) {
+        *error_response =
+            BuildWsResponse(request_id, SdkStatusCode::InvalidParams, std::string(method_name) + " only supports image inputs");
+        return false;
+    }
+    *input_path = input_asset.asset.path;
+    *source_extension = resolved_extension;
+    return true;
+}
+
+bool CommandApplicationService::ResolveImageInputPath(const std::string& connection_id,
+                                                      const std::string& input_upload_id,
+                                                      const std::string& request_id,
+                                                      const char* method_name,
+                                                      std::string* input_path,
+                                                      Json* error_response) const {
+    if (input_path == NULL || error_response == NULL) {
+        return false;
+    }
+    std::string source_extension;
+    return ResolveImageInputAsset(connection_id,
+                                  input_upload_id,
+                                  request_id,
+                                  method_name,
+                                  input_path,
+                                  &source_extension,
+                                  error_response);
 }
 
 CommandApplicationService::AssetAccessResult CommandApplicationService::ResolveImageAsset(const std::string& connection_id,
@@ -2500,6 +2581,7 @@ Json CommandApplicationService::HandleImageProcess(const std::string& connection
     } else if (process_request.output_format.empty()) {
         process_request.output_format = "jpg";
     }
+    process_request.dpi = GetOptionalIntField(request.params, "dpi", process_request.dpi);
     process_request.scan_device_type = GetOptionalIntField(request.params, "scan_device_type", process_request.scan_device_type);
 
     const Json single_page_json = GetOptionalObjectField(request.params, "single_page");
@@ -2521,11 +2603,17 @@ Json CommandApplicationService::HandleImageProcess(const std::string& connection
 
     std::string image_task_id = process_request.input_upload_id;
     if (!process_request.input_upload_id.empty()) {
-        AssetAccessResult input_asset = ResolveImageAsset(connection_id, process_request.input_upload_id, "asset-original");
-        if (!IsOkStatusCode(input_asset.code)) {
-            return BuildWsResponse(request.request_id, input_asset.code, input_asset.message);
+        std::string ignored_source_extension;
+        Json error_response;
+        if (!ResolveImageInputAsset(connection_id,
+                                    process_request.input_upload_id,
+                                    request.request_id,
+                                    "image.process",
+                                    &process_request.input_path,
+                                    &ignored_source_extension,
+                                    &error_response)) {
+            return error_response;
         }
-        process_request.input_path = input_asset.asset.path;
     }
     if (process_request.input_path.empty()) {
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "input_path or input_upload_id required");
@@ -2645,12 +2733,16 @@ Json CommandApplicationService::HandleImageProcessPage(const std::string& connec
     std::string image_task_id = input_upload_id;
     std::string source_extension;
     if (!input_upload_id.empty()) {
-        AssetAccessResult input_asset = ResolveImageAsset(connection_id, input_upload_id, "asset-original");
-        if (!IsOkStatusCode(input_asset.code)) {
-            return BuildWsResponse(request.request_id, input_asset.code, input_asset.message);
+        Json error_response;
+        if (!ResolveImageInputAsset(connection_id,
+                                    input_upload_id,
+                                    request.request_id,
+                                    "image.process_page",
+                                    &page_request.input_path,
+                                    &source_extension,
+                                    &error_response)) {
+            return error_response;
         }
-        page_request.input_path = input_asset.asset.path;
-        source_extension = ImageExtensionForContentType(input_asset.asset.content_type, input_asset.asset.path);
     }
     if (page_request.input_path.empty()) {
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "input_path or input_upload_id required");
@@ -2793,12 +2885,16 @@ Json CommandApplicationService::HandleImageApplyColorMode(const std::string& con
     std::string image_task_id = input_upload_id;
     std::string source_extension;
     if (!input_upload_id.empty()) {
-        AssetAccessResult input_asset = ResolveImageAsset(connection_id, input_upload_id, "asset-original");
-        if (!IsOkStatusCode(input_asset.code)) {
-            return BuildWsResponse(request.request_id, input_asset.code, input_asset.message);
+        Json error_response;
+        if (!ResolveImageInputAsset(connection_id,
+                                    input_upload_id,
+                                    request.request_id,
+                                    "image.apply_color_mode",
+                                    &color_request.input_path,
+                                    &source_extension,
+                                    &error_response)) {
+            return error_response;
         }
-        color_request.input_path = input_asset.asset.path;
-        source_extension = ImageExtensionForContentType(input_asset.asset.content_type, input_asset.asset.path);
     }
     if (color_request.input_path.empty()) {
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "input_path or input_upload_id required");
@@ -2926,11 +3022,12 @@ Json CommandApplicationService::HandleImageEnhance(const std::string& connection
     }
 
     for (std::vector<std::string>::const_iterator it = upload_ids.begin(); it != upload_ids.end(); ++it) {
-        AssetAccessResult input_asset = ResolveImageAsset(connection_id, *it, "asset-original");
-        if (!IsOkStatusCode(input_asset.code)) {
-            return BuildWsResponse(request.request_id, input_asset.code, input_asset.message);
+        Json error_response;
+        std::string input_path;
+        if (!ResolveImageInputPath(connection_id, *it, request.request_id, "image.enhance", &input_path, &error_response)) {
+            return error_response;
         }
-        enhance_request.input_paths.push_back(input_asset.asset.path);
+        enhance_request.input_paths.push_back(input_path);
     }
     if (enhance_request.input_paths.empty()) {
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "image.enhance source is empty");
@@ -3288,11 +3385,15 @@ Json CommandApplicationService::HandleOcrExtractText(const std::string& connecti
     extract_request.input_upload_id = GetOptionalStringField(request.params, "input_upload_id");
     extract_request.input_path = GetOptionalStringField(request.params, "input_path");
     if (!extract_request.input_upload_id.empty()) {
-        AssetAccessResult input_asset = ResolveImageAsset(connection_id, extract_request.input_upload_id, "asset-original");
-        if (!IsOkStatusCode(input_asset.code)) {
-            return BuildWsResponse(request.request_id, input_asset.code, input_asset.message);
+        Json error_response;
+        if (!ResolveImageInputPath(connection_id,
+                                   extract_request.input_upload_id,
+                                   request.request_id,
+                                   "ocr.extract_text",
+                                   &extract_request.input_path,
+                                   &error_response)) {
+            return error_response;
         }
-        extract_request.input_path = input_asset.asset.path;
     }
     if (extract_request.input_path.empty()) {
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "input_upload_id or input_path required");
@@ -3334,11 +3435,15 @@ Json CommandApplicationService::HandleBarcodeDetect(const std::string& connectio
         detect_request.formats = GetOptionalStringArrayField(request.params, "detect_type");
     }
     if (!detect_request.input_upload_id.empty()) {
-        AssetAccessResult input_asset = ResolveImageAsset(connection_id, detect_request.input_upload_id, "asset-original");
-        if (!IsOkStatusCode(input_asset.code)) {
-            return BuildWsResponse(request.request_id, input_asset.code, input_asset.message);
+        Json error_response;
+        if (!ResolveImageInputPath(connection_id,
+                                   detect_request.input_upload_id,
+                                   request.request_id,
+                                   "recognition.barcode_detect",
+                                   &detect_request.input_path,
+                                   &error_response)) {
+            return error_response;
         }
-        detect_request.input_path = input_asset.asset.path;
     }
     if (detect_request.input_path.empty()) {
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "input_upload_id or input_path required");

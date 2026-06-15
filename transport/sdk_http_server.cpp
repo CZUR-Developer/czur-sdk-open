@@ -43,6 +43,13 @@ int HttpStatusForSdkCode(int code) {
     if (IsOkStatusCode(code)) {
         return ToHttpStatus(SdkHttpStatus::Ok);
     }
+    if (code == ToCode(SdkStatusCode::InvalidRequest)) {
+        return 400;
+    }
+    if (code == ToCode(SdkStatusCode::InvalidMethod) ||
+        code == ToCode(SdkStatusCode::UnsupportedMethod)) {
+        return ToHttpStatus(SdkHttpStatus::NotFound);
+    }
     if (code == ToCode(SdkStatusCode::AuthRequired) ||
         code == ToCode(SdkStatusCode::TokenInvalid) ||
         code == ToCode(SdkStatusCode::SessionTokenInvalid)) {
@@ -51,8 +58,12 @@ int HttpStatusForSdkCode(int code) {
     if (code == ToCode(SdkStatusCode::CapabilityNotAllowed)) {
         return 403;
     }
+    if (code == ToCode(SdkStatusCode::UploadFileEmpty) ||
+        code == ToCode(SdkStatusCode::UploadFileTooLarge)) {
+        return 400;
+    }
     if (code == ToCode(SdkStatusCode::InvalidParams)) {
-        return ToHttpStatus(SdkHttpStatus::NotFound);
+        return 400;
     }
     return 500;
 }
@@ -273,7 +284,7 @@ bool SdkHttpServer::ConfigureRoutes() {
         const std::size_t tail_bytes = ParseSizeParam(req.get_param_value("tailBytes"), 262144, 1048576);
         const Json body = log_read_handler_(req.matches[1], tail_bytes);
         const int code = body.value("code", 0);
-        res.status = IsOkStatusCode(code) ? ToHttpStatus(SdkHttpStatus::Ok) : 404;
+        res.status = HttpStatusForSdkCode(code);
         res.set_header("Cache-Control", "no-store");
         res.set_content(DumpJson(body), kJsonContentType);
     });
@@ -326,9 +337,11 @@ bool SdkHttpServer::ConfigureRoutes() {
             res.set_content(DumpJson(BuildErrorBody(SdkStatusCode::InvalidParams, "invalid json")), kJsonContentType);
             return;
         }
-        res.status = ToHttpStatus(SdkHttpStatus::Ok);
+        const Json body = config_update_handler_(request_json);
+        const int code = body.value("code", 0);
+        res.status = HttpStatusForSdkCode(code);
         res.set_header("Cache-Control", "no-store");
-        res.set_content(DumpJson(config_update_handler_(request_json)), kJsonContentType);
+        res.set_content(DumpJson(body), kJsonContentType);
     });
 
     server_->Post(R"(/api/uploads/(images|files))", [this](const httplib::Request& req, httplib::Response& res) {
@@ -346,6 +359,11 @@ bool SdkHttpServer::ConfigureRoutes() {
         const httplib::MultipartFormData file = req.get_file_value("file");
         const std::string session_token = ExtractBearerToken(req.get_header_value("Authorization"));
         const UploadResult result = image_upload_handler_(session_token, file.filename, file.content_type, file.content);
+        SDK_OPEN_LOG_INFO("[sdk_http_server] upload request handled route=/api/uploads/images filename={} content_type={} code={} message={}",
+                          file.filename,
+                          file.content_type,
+                          result.code,
+                          result.message);
         if (!IsOkStatusCode(result.code)) {
             res.status = HttpStatusForSdkCode(result.code);
             res.set_content(DumpJson(BuildErrorBody(result.code, result.message)), kJsonContentType);
@@ -433,18 +451,8 @@ bool SdkHttpServer::ConfigureRoutes() {
         }
     }
 
-    server_->set_error_handler([this](const httplib::Request& req, httplib::Response& res) {
-        if (res.status == ToHttpStatus(SdkHttpStatus::NotFound)) {
-            const std::string index_path = JoinPath(document_root_, "index.html");
-            if (mount_static_site_ &&
-                req.method == "GET" &&
-                ShouldServeSpaFallback(req.path, req.get_header_value("Accept")) &&
-                FileExists(index_path)) {
-                res.status = ToHttpStatus(SdkHttpStatus::Ok);
-                res.set_header("Cache-Control", "no-store");
-                res.set_file_content(index_path, "text/html; charset=utf-8");
-                return;
-            }
+    server_->set_error_handler([](const httplib::Request&, httplib::Response& res) {
+        if (res.status == ToHttpStatus(SdkHttpStatus::NotFound) && res.body.empty()) {
             res.set_content("Not Found", "text/plain; charset=utf-8");
         }
     });

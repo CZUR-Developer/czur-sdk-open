@@ -71,6 +71,8 @@
 | `1002` | `INVALID_PARAMS` | `params` 缺失、不完整或类型不匹配 |
 | `1003` | `UNSUPPORTED_METHOD` | method 未公开或尚未实现 |
 | `1004` | `RATE_LIMITED` | 请求命中限流或并发保护 |
+| `1005` | `UPLOAD_FILE_EMPTY` | 上传字段存在，但文件内容为空 |
+| `1006` | `UPLOAD_FILE_TOO_LARGE` | 上传文件超过 50 MB 限制 |
 | `1100` | `AUTH_REQUIRED` | 当前方法需要已绑定的合法会话 |
 | `1101` | `TOKEN_INVALID` | `token` 非法或不可解析 |
 | `1102` | `TOKEN_EXPIRED` | `token` 已过期 |
