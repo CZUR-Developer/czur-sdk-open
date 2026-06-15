@@ -60,7 +60,9 @@ AuthorizationService::SessionResult AuthorizationService::RefreshSession(const s
     SessionResult result;
     AuthRefreshResult provider_result;
     const std::int64_t now_ts = static_cast<std::int64_t>(std::time(NULL));
-    if (bound_session.auth_context.license_mode == "online_api_key" && !bound_session.token.empty()) {
+    if ((bound_session.auth_context.license_mode == "online_api_key" ||
+         bound_session.auth_context.license_mode == "offline_api_key") &&
+        !bound_session.token.empty()) {
         AuthValidateRequest validate_request;
         validate_request.token = bound_session.token;
         validate_request.authz_base_url = AuthzBaseUrl();

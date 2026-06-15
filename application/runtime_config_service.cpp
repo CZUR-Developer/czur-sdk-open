@@ -55,6 +55,11 @@ std::string RuntimeConfigService::AdminAuthzBaseUrl() const {
     return authz_base_url_;
 }
 
+RuntimeConfigService::CentralAuthConfig RuntimeConfigService::AdminCentralAuth() const {
+    std::lock_guard<std::mutex> lock(mu_);
+    return central_auth_;
+}
+
 std::string RuntimeConfigService::EffectiveOnlineImageEnhanceBaseUrl(std::string* source) const {
     const std::string env_value = GetEnvString(kOnlineImageEnhanceBaseUrlEnv);
     if (!env_value.empty()) {
@@ -110,6 +115,7 @@ Json RuntimeConfigService::BuildConfigJson() const {
     const std::string online_effective = EffectiveOnlineImageEnhanceBaseUrl(&online_source);
     std::string authz_source;
     const std::string authz_effective = EffectiveAuthzBaseUrl(&authz_source);
+    const CentralAuthConfig central_auth = AdminCentralAuth();
     return Json{
         {"online_image_enhance",
          Json{{"base_url", AdminOnlineImageEnhanceBaseUrl()},
@@ -119,6 +125,7 @@ Json RuntimeConfigService::BuildConfigJson() const {
          Json{{"base_url", AdminAuthzBaseUrl()},
               {"effective_base_url", authz_effective},
               {"source", authz_source}}},
+        {"central_auth", Json{{"base_url", central_auth.base_url}}},
     };
 }
 
@@ -133,10 +140,16 @@ Json RuntimeConfigService::UpdateConfigJson(const Json& request) {
     if (authz_it != request.end() && authz_it->is_object()) {
         authz_base_url = OptionalString(*authz_it, "base_url");
     }
+    CentralAuthConfig central_auth = AdminCentralAuth();
+    const Json::const_iterator central_it = request.find("central_auth");
+    if (central_it != request.end() && central_it->is_object()) {
+        central_auth.base_url = OptionalString(*central_it, "base_url");
+    }
     {
         std::lock_guard<std::mutex> lock(mu_);
         online_image_enhance_base_url_ = online_base_url;
         authz_base_url_ = authz_base_url;
+        central_auth_ = central_auth;
     }
     return BuildConfigJson();
 }

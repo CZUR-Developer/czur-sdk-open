@@ -58,6 +58,7 @@ public:
     void SetOfflineActivationHandler(OfflineActivationHandler handler);
     void SetAssetResolver(AssetResolver resolver);
     void SetImageUploadHandler(ImageUploadHandler handler);
+    static bool ShouldServeSpaFallback(const std::string& path, const std::string& accept_header);
     bool Start();
     void Stop();
 

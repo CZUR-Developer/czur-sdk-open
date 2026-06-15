@@ -13,6 +13,10 @@ namespace sdk {
 
 class RuntimeConfigService {
 public:
+    struct CentralAuthConfig {
+        std::string base_url;
+    };
+
     explicit RuntimeConfigService(const std::string& online_image_enhance_base_url = "",
                                   const std::string& authz_base_url = "");
 
@@ -26,10 +30,12 @@ private:
     std::string AdminAuthzBaseUrl() const;
     std::string EffectiveOnlineImageEnhanceBaseUrl(std::string* source) const;
     std::string EffectiveAuthzBaseUrl(std::string* source) const;
+    CentralAuthConfig AdminCentralAuth() const;
 
     mutable std::mutex mu_;
     std::string online_image_enhance_base_url_;
     std::string authz_base_url_;
+    CentralAuthConfig central_auth_;
 };
 
 } // namespace sdk

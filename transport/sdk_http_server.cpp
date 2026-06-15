@@ -21,6 +21,16 @@ bool FileExists(const std::string& path) {
     return !path.empty() && ::stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
 }
 
+std::string JoinPath(const std::string& base, const std::string& child) {
+    if (base.empty()) {
+        return child;
+    }
+    if (base[base.size() - 1] == '/') {
+        return base + child;
+    }
+    return base + "/" + child;
+}
+
 std::string ExtractBearerToken(const std::string& authorization) {
     const std::string prefix = "Bearer ";
     if (authorization.size() <= prefix.size() || authorization.substr(0, prefix.size()) != prefix) {
@@ -134,6 +144,24 @@ void SdkHttpServer::SetAssetResolver(AssetResolver resolver) {
 
 void SdkHttpServer::SetImageUploadHandler(ImageUploadHandler handler) {
     image_upload_handler_ = handler;
+}
+
+bool SdkHttpServer::ShouldServeSpaFallback(const std::string& path, const std::string& accept_header) {
+    if (path.empty() || path[0] != '/') {
+        return false;
+    }
+    if (path == "/") {
+        return true;
+    }
+    if (path.find("/api/") == 0 || path == "/api") {
+        return false;
+    }
+    const std::string::size_type last_slash = path.find_last_of('/');
+    const std::string file_name = last_slash == std::string::npos ? path : path.substr(last_slash + 1);
+    if (file_name.find('.') != std::string::npos) {
+        return false;
+    }
+    return accept_header.empty() || accept_header.find("text/html") != std::string::npos;
 }
 
 bool SdkHttpServer::IsAuthorized(const std::string& authorization) const {
@@ -405,8 +433,18 @@ bool SdkHttpServer::ConfigureRoutes() {
         }
     }
 
-    server_->set_error_handler([](const httplib::Request&, httplib::Response& res) {
+    server_->set_error_handler([this](const httplib::Request& req, httplib::Response& res) {
         if (res.status == ToHttpStatus(SdkHttpStatus::NotFound)) {
+            const std::string index_path = JoinPath(document_root_, "index.html");
+            if (mount_static_site_ &&
+                req.method == "GET" &&
+                ShouldServeSpaFallback(req.path, req.get_header_value("Accept")) &&
+                FileExists(index_path)) {
+                res.status = ToHttpStatus(SdkHttpStatus::Ok);
+                res.set_header("Cache-Control", "no-store");
+                res.set_file_content(index_path, "text/html; charset=utf-8");
+                return;
+            }
             res.set_content("Not Found", "text/plain; charset=utf-8");
         }
     });

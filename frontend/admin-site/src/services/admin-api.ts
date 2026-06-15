@@ -117,9 +117,14 @@ export interface EndpointConfig {
   source: string;
 }
 
+export interface CentralAuthConfig {
+  baseUrl: string;
+}
+
 export interface RuntimeConfig {
   onlineImageEnhance: EndpointConfig;
   authz: EndpointConfig;
+  centralAuth: CentralAuthConfig;
 }
 
 interface ConfigResponse {
@@ -132,6 +137,9 @@ interface ConfigResponse {
     base_url?: string;
     effective_base_url?: string;
     source?: string;
+  };
+  central_auth?: {
+    base_url?: string;
   };
 }
 
@@ -180,6 +188,9 @@ function normalizeConfig(payload: ConfigResponse): RuntimeConfig {
   return {
     onlineImageEnhance: normalizeEndpoint(payload.online_image_enhance),
     authz: normalizeEndpoint(payload.authz),
+    centralAuth: {
+      baseUrl: payload.central_auth?.base_url ?? '',
+    },
   };
 }
 
@@ -222,13 +233,14 @@ export async function fetchConfig(): Promise<RuntimeConfig> {
   return normalizeConfig(await requestJson<ConfigResponse>('/api/config'));
 }
 
-export async function saveRuntimeConfig(config: { onlineImageEnhanceBaseUrl: string; authzBaseUrl: string }): Promise<RuntimeConfig> {
+export async function saveRuntimeConfig(config: { onlineImageEnhanceBaseUrl: string; authzBaseUrl: string; centralAuth: CentralAuthConfig }): Promise<RuntimeConfig> {
   const payload = await requestJson<ConfigResponse>('/api/config', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       online_image_enhance: { base_url: config.onlineImageEnhanceBaseUrl },
       authz: { base_url: config.authzBaseUrl },
+      central_auth: { base_url: config.centralAuth.baseUrl },
     }),
   });
   return normalizeConfig(payload);
