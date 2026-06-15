@@ -160,6 +160,19 @@ private:
     std::string NextImageTaskId();
     SdkCaptureAsset AttachImageAssetUrls(const std::string& task_id, const SdkCaptureAsset& asset) const;
     void RegisterImageAsset(const std::string& connection_id, const std::string& task_id, const SdkCaptureAsset& asset);
+    bool ResolveImageInputAsset(const std::string& connection_id,
+                                const std::string& input_upload_id,
+                                const std::string& request_id,
+                                const char* method_name,
+                                std::string* input_path,
+                                std::string* source_extension,
+                                Json* error_response) const;
+    bool ResolveImageInputPath(const std::string& connection_id,
+                               const std::string& input_upload_id,
+                               const std::string& request_id,
+                               const char* method_name,
+                               std::string* input_path,
+                               Json* error_response) const;
     AssetAccessResult ResolveImageAsset(const std::string& connection_id,
                                         const std::string& task_id,
                                         const std::string& asset_id) const;

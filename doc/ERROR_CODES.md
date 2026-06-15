@@ -71,6 +71,8 @@ Rules:
 | `1002` | `INVALID_PARAMS` | `params` are missing, incomplete, or type-mismatched |
 | `1003` | `UNSUPPORTED_METHOD` | Method is not public or not implemented |
 | `1004` | `RATE_LIMITED` | Request hit a rate-limit or concurrency guard |
+| `1005` | `UPLOAD_FILE_EMPTY` | The uploaded file part is present but contains no data |
+| `1006` | `UPLOAD_FILE_TOO_LARGE` | The uploaded file exceeds the 50 MB upload limit |
 | `1100` | `AUTH_REQUIRED` | The method requires a valid bound session |
 | `1101` | `TOKEN_INVALID` | `token` is invalid or cannot be parsed |
 | `1102` | `TOKEN_EXPIRED` | `token` has expired |
