@@ -184,13 +184,13 @@ if(BUILD_SDK_WEB)
     set(SDK_WEB_DEMO_TARGET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/web/demo")
 
     add_custom_target(sdk_web_admin_build
-        COMMAND "${CMAKE_COMMAND}" -E chdir "${SDK_WEB_ADMIN_PROJECT_DIR}" "${PNPM_EXECUTABLE}" install --no-frozen-lockfile
+        COMMAND "${CMAKE_COMMAND}" -E chdir "${SDK_WEB_ADMIN_PROJECT_DIR}" "${PNPM_EXECUTABLE}" install --force --no-frozen-lockfile
         COMMAND "${CMAKE_COMMAND}" -E chdir "${SDK_WEB_ADMIN_PROJECT_DIR}" "${PNPM_EXECUTABLE}" build
         COMMENT "Build admin-site with pnpm"
     )
 
     add_custom_target(sdk_web_demo_build
-        COMMAND "${CMAKE_COMMAND}" -E chdir "${SDK_WEB_DEMO_PROJECT_DIR}" "${PNPM_EXECUTABLE}" install --no-frozen-lockfile
+        COMMAND "${CMAKE_COMMAND}" -E chdir "${SDK_WEB_DEMO_PROJECT_DIR}" "${PNPM_EXECUTABLE}" install --force --no-frozen-lockfile
         COMMAND "${CMAKE_COMMAND}" -E chdir "${SDK_WEB_DEMO_PROJECT_DIR}" "${PNPM_EXECUTABLE}" build
         COMMENT "Build demo-site with pnpm"
     )
