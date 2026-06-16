@@ -31,7 +31,6 @@ interface AuthContextPayload {
 }
 
 interface RuntimeAuthDiagnostics {
-  masterSecretConfigured?: boolean;
   authzBaseUrlConfigured?: boolean;
   imageEnhanceBaseUrlConfigured?: boolean;
 }

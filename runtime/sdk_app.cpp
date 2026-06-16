@@ -581,7 +581,6 @@ Json SdkApp::BuildStatusJson() const {
          }},
         {"authDiagnostics",
          {
-             {"masterSecretConfigured", IsEnvConfigured("CZUR_SDK_MASTER_SECRET")},
              {"authzBaseUrlConfigured", IsEnvConfigured("CZUR_SDK_AUTHZ_BASE_URL")},
              {"imageEnhanceBaseUrlConfigured", IsEnvConfigured("CZUR_SDK_IMAGE_ENHANCE_BASE_URL")},
          }},

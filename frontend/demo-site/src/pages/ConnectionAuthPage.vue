@@ -118,11 +118,6 @@ const authFormItems = computed(() => [
     monospace: true,
   },
   {
-    label: 'MASTER_SECRET',
-    value: runtimeDiagnosticValue('masterSecretConfigured'),
-    hint: t('pages.connectionAuth.masterSecretHint'),
-  },
-  {
     label: 'AUTHZ_BASE_URL',
     value: runtimeDiagnosticValue('authzBaseUrlConfigured'),
     hint: t('pages.connectionAuth.authzBaseUrlHint'),
@@ -249,7 +244,7 @@ function maskSecret(value: string): string {
   return `${value.slice(0, 8)}...${value.slice(-8)}`;
 }
 
-function runtimeDiagnosticValue(key: 'masterSecretConfigured' | 'authzBaseUrlConfigured' | 'imageEnhanceBaseUrlConfigured'): string {
+function runtimeDiagnosticValue(key: 'authzBaseUrlConfigured' | 'imageEnhanceBaseUrlConfigured'): string {
   const value = authSessionState.authDiagnostics?.[key];
   if (typeof value !== 'boolean') {
     return t('common.notSet');
