@@ -12,8 +12,8 @@ namespace {
 
 const char kOnlineImageEnhanceBaseUrlEnv[] = "CZUR_SDK_IMAGE_ENHANCE_BASE_URL";
 const char kAuthzBaseUrlEnv[] = "CZUR_SDK_AUTHZ_BASE_URL";
-const char kDefaultOnlineImageEnhanceBaseUrl[] = "https://gateway-cn.czur.com";
-const char kDefaultAuthzBaseUrl[] = "https://gateway-cn.czur.com";
+const char kDefaultOnlineImageEnhanceBaseUrl[] = "https://gateway.czur.com";
+const char kDefaultAuthzBaseUrl[] = "https://gateway.czur.com";
 
 std::string Trim(std::string value) {
     const std::string whitespace = " \t\r\n";

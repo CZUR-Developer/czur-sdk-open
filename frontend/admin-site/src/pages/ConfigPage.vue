@@ -8,7 +8,7 @@
             <input
               v-model.trim="onlineEnhanceBaseUrl"
               class="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 font-mono text-sm text-slate-900 shadow-sm outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
-              placeholder="https://gateway-cn.czur.com"
+              placeholder="https://gateway.czur.com"
             />
           </label>
           <label class="block">
@@ -16,7 +16,7 @@
             <input
               v-model.trim="authzBaseUrl"
               class="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 font-mono text-sm text-slate-900 shadow-sm outline-none transition focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
-              placeholder="https://gateway-cn.czur.com"
+              placeholder="https://gateway.czur.com"
             />
           </label>
           <div class="flex flex-wrap gap-3">
@@ -34,7 +34,7 @@
         <dl class="grid gap-3 rounded-2xl bg-slate-50 p-4">
           <div>
             <dt class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{{ t('pages.config.onlineEnhanceEffectiveBaseUrl') }}</dt>
-            <dd class="mt-1 break-all font-mono text-sm text-slate-900">{{ config?.onlineImageEnhance.effectiveBaseUrl || 'https://gateway-cn.czur.com' }}</dd>
+            <dd class="mt-1 break-all font-mono text-sm text-slate-900">{{ config?.onlineImageEnhance.effectiveBaseUrl || 'https://gateway.czur.com' }}</dd>
           </div>
           <div>
             <dt class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{{ t('pages.config.onlineEnhanceSource') }}</dt>
@@ -42,7 +42,7 @@
           </div>
           <div>
             <dt class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{{ t('pages.config.authzEffectiveBaseUrl') }}</dt>
-            <dd class="mt-1 break-all font-mono text-sm text-slate-900">{{ config?.authz.effectiveBaseUrl || 'https://gateway-cn.czur.com' }}</dd>
+            <dd class="mt-1 break-all font-mono text-sm text-slate-900">{{ config?.authz.effectiveBaseUrl || 'https://gateway.czur.com' }}</dd>
           </div>
           <div>
             <dt class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{{ t('pages.config.authzSource') }}</dt>
