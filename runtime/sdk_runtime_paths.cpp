@@ -23,6 +23,8 @@ namespace {
 
 const char kSdkOpenWorkDirEnv[] = "SDK_OPEN_WORK_DIR";
 const char kSdkOpenLogDirEnv[] = "SDK_OPEN_LOG_DIR";
+const char kCzurSdkRuntimeDirEnv[] = "CZUR_SDK_RUNTIME_DIR";
+const char kSystemSdkOpenWorkDir[] = "/var/lib/czur/sdk-open";
 
 bool IsAbsolutePath(const std::string& path) {
     if (path.empty()) {
@@ -68,6 +70,11 @@ std::string CurrentWorkingDirectory() {
 }
 
 std::string ResolveSdkOpenWorkDir() {
+    const char* runtime_dir = std::getenv(kCzurSdkRuntimeDirEnv);
+    if (runtime_dir != NULL && runtime_dir[0] != '\0') {
+        return std::string(runtime_dir);
+    }
+
     const char* override_dir = std::getenv(kSdkOpenWorkDirEnv);
     if (override_dir != NULL && override_dir[0] != '\0') {
         return std::string(override_dir);
@@ -76,12 +83,20 @@ std::string ResolveSdkOpenWorkDir() {
 #if defined(_WIN32)
     const char* home = std::getenv("USERPROFILE");
 #else
+    if (::geteuid() == 0) {
+        return kSystemSdkOpenWorkDir;
+    }
     const char* home = std::getenv("HOME");
 #endif
-    const std::string base = (home != NULL && home[0] != '\0')
-                                 ? std::string(home)
-                                 : CurrentWorkingDirectory();
-    return JoinPath(JoinPath(base, ".czur"), "sdk");
+    if (home != NULL && home[0] != '\0') {
+        return JoinPath(JoinPath(std::string(home), ".czur"), "sdk");
+    }
+
+#if !defined(_WIN32)
+    return kSystemSdkOpenWorkDir;
+#endif
+
+    return JoinPath(JoinPath(CurrentWorkingDirectory(), ".czur"), "sdk");
 }
 
 } // namespace
