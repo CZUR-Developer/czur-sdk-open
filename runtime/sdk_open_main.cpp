@@ -15,9 +15,9 @@
 #include <unistd.h>
 #endif
 
-#ifdef SDK_USE_PRIVATE_PROVIDER
+#if defined(SDK_USE_PRIVATE_PROVIDER) && !defined(_WIN32)
 #include "private_provider_factory.h"
-#else
+#elif !defined(SDK_USE_PRIVATE_PROVIDER)
 #include "mock_provider_factory.h"
 #endif
 #include "sdk_app.h"
@@ -207,7 +207,11 @@ int main(int argc, char* argv[]) {
     ApplyEnvStringOverride("SDK_ASSET_BASE_URL", config.asset_base_url);
     ApplyEnvStringOverride("SDK_AUTH_TOKEN", config.auth_token);
 
-#ifdef SDK_USE_PRIVATE_PROVIDER
+#if defined(SDK_USE_PRIVATE_PROVIDER) && defined(_WIN32)
+    ApplyDefaultSaneConfigDir();
+    editor::sdk::ProviderBundle providers;
+    SDK_OPEN_LOG_INFO("[sdk_open_app] provider mode: private");
+#elif defined(SDK_USE_PRIVATE_PROVIDER)
     ApplyDefaultSaneConfigDir();
     editor::sdk::ProviderBundle providers = editor::sdk::private_impl::CreateProviderBundle();
     SDK_OPEN_LOG_INFO("[sdk_open_app] provider mode: private");

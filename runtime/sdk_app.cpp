@@ -282,6 +282,16 @@ SdkApp::SdkApp(const SdkConfig& config, ProviderBundle providers)
       video_ws_server_(config_.bind_host, config_.video_ws_port),
       running_(false),
       start_time_(std::chrono::steady_clock::now()) {
+#if defined(SDK_USE_PRIVATE_PROVIDER) && defined(_WIN32)
+    provider_names_ = Json{{"device", "czur-device-provider"},
+                           {"graphic", "czur-graphic-provider"},
+                           {"imageEnhance", "czur-image-enhance-provider"},
+                           {"ocr", "czur-ocr-provider"},
+                           {"ofd", "czur-ofd-provider"},
+                           {"auth", "czur-sdk-auth-provider"},
+                           {"recognition", "czur-recognition-provider"},
+                           {"sane", "czur-sane-provider"}};
+#else
     provider_names_ = Json{{"device", providers_.device_provider ? providers_.device_provider->ProviderName() : ""},
                            {"graphic", providers_.graphic_provider ? providers_.graphic_provider->ProviderName() : ""},
                            {"imageEnhance",
@@ -292,6 +302,7 @@ SdkApp::SdkApp(const SdkConfig& config, ProviderBundle providers)
                            {"recognition",
                             providers_.recognition_provider ? providers_.recognition_provider->ProviderName() : ""},
                            {"sane", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}};
+#endif
     command_application_service_->SetProviderNames(provider_names_);
     admin_application_service_.SetStatusSupplier([this]() { return BuildStatusJson(); });
     admin_application_service_.SetSystemSupplier([this]() { return BuildSystemJson(); });

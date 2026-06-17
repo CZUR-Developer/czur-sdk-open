@@ -8,6 +8,7 @@
 
 #include <asio/ip/address.hpp>
 
+#include <exception>
 #include <map>
 #include <mutex>
 #include <set>
@@ -145,7 +146,16 @@ bool SdkWsCommandServer::Start() {
                           SafeRemoteEndpoint(impl_->server, hdl),
                           impl_->active_connections.load());
         if (!connection_id.empty() && close_handler_) {
-            close_handler_(connection_id);
+            try {
+                close_handler_(connection_id);
+            } catch (const std::exception& e) {
+                SDK_OPEN_LOG_ERROR("[sdk_ws_command_server] close handler failed, id={}, err={}",
+                                   connection_id,
+                                   e.what());
+            } catch (...) {
+                SDK_OPEN_LOG_ERROR("[sdk_ws_command_server] close handler failed, id={}, err=<unknown>",
+                                   connection_id);
+            }
         }
     });
 

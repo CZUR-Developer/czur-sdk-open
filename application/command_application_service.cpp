@@ -1495,10 +1495,12 @@ Json CommandApplicationService::HandleRequest(const std::string& connection_id, 
 }
 
 void CommandApplicationService::OnConnectionClosed(const std::string& connection_id) {
-    SdkSaneWatchRequest sane_watch_request;
-    sane_watch_request.connection_id = connection_id;
-    sane_watch_request.enabled = false;
-    sane_facade_.WatchStop(sane_watch_request);
+    if (ForgetSaneWatchConnection(connection_id)) {
+        SdkSaneWatchRequest sane_watch_request;
+        sane_watch_request.connection_id = connection_id;
+        sane_watch_request.enabled = false;
+        sane_facade_.WatchStop(sane_watch_request);
+    }
 
     authorization_service_.ClearConnection(connection_id);
     const std::vector<VideoSessionService::StreamBinding> removed = video_session_service_.ClearConnection(connection_id);
@@ -2189,7 +2191,7 @@ Json CommandApplicationService::HandleDeviceGet(const std::string& connection_id
         return BuildWsResponse(request.request_id, result.code, result.message);
     }
     Json data = BuildDeviceJson(result.device);
-    data["provider"] = providers_.device_provider ? providers_.device_provider->ProviderName() : "";
+    data["provider"] = provider_names_.value("device", "");
     return BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", data);
 }
 
@@ -2221,7 +2223,7 @@ Json CommandApplicationService::HandleDeviceOpen(const std::string& connection_i
     Json data = BuildDeviceJson(result.device);
     data["device_id"] = result.device.device_id.empty() ? open_request.device_id : result.device.device_id;
     data["opened"] = result.opened;
-    data["provider"] = providers_.device_provider ? providers_.device_provider->ProviderName() : "";
+    data["provider"] = provider_names_.value("device", "");
     if (result.opened) {
         RememberOpenedDevice(connection_id, open_request.device_id);
     }
@@ -2274,7 +2276,7 @@ Json CommandApplicationService::HandleDeviceClose(const std::string& connection_
                                 {"was_opened", close_result.was_opened},
                                 {"stopped_stream", stopped_stream},
                                 {"stream_id", stopped_stream_id},
-                                {"provider", providers_.device_provider ? providers_.device_provider->ProviderName() : ""}});
+                                {"provider", provider_names_.value("device", "")}});
 }
 
 Json CommandApplicationService::HandleCaptureTake(const std::string& connection_id, const Request& request) {
@@ -3512,6 +3514,9 @@ Json CommandApplicationService::HandleSaneWatchStart(const std::string& connecti
     watch_request.connection_id = connection_id;
     watch_request.enabled = true;
     const SdkSaneWatchResult result = sane_facade_.WatchStart(watch_request);
+    if (IsOkStatusCode(result.code) && result.watching) {
+        RememberSaneWatchConnection(connection_id);
+    }
     return BuildWsResponse(request.request_id,
                            result.code,
                            result.message,
@@ -3529,6 +3534,9 @@ Json CommandApplicationService::HandleSaneWatchStop(const std::string& connectio
     watch_request.connection_id = connection_id;
     watch_request.enabled = false;
     const SdkSaneWatchResult result = sane_facade_.WatchStop(watch_request);
+    if (IsOkStatusCode(result.code)) {
+        ForgetSaneWatchConnection(connection_id);
+    }
     return BuildWsResponse(request.request_id,
                            result.code,
                            result.message,
@@ -4369,6 +4377,22 @@ const CommandApplicationService::MethodDescriptor* CommandApplicationService::Fi
         }
     }
     return NULL;
+}
+
+void CommandApplicationService::RememberSaneWatchConnection(const std::string& connection_id) {
+    if (connection_id.empty()) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(sane_watch_connections_mu_);
+    sane_watch_connections_.insert(connection_id);
+}
+
+bool CommandApplicationService::ForgetSaneWatchConnection(const std::string& connection_id) {
+    if (connection_id.empty()) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(sane_watch_connections_mu_);
+    return sane_watch_connections_.erase(connection_id) > 0;
 }
 
 void CommandApplicationService::RememberOpenedDevice(const std::string& connection_id, const std::string& device_id) {

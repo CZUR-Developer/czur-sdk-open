@@ -126,6 +126,9 @@ target_link_libraries(sdk_open_runtime PUBLIC
     sdk_open_logging
     sdk_open_third_party
 )
+if(SDK_OPEN_USE_PRIVATE_PROVIDER)
+    target_compile_definitions(sdk_open_runtime PRIVATE SDK_USE_PRIVATE_PROVIDER)
+endif()
 if(NOT WIN32)
     target_link_libraries(sdk_open_runtime PUBLIC pthread)
 endif()
@@ -159,7 +162,11 @@ target_link_libraries(sdk_open_app PRIVATE
 
 if(SDK_OPEN_USE_PRIVATE_PROVIDER)
     target_compile_definitions(sdk_open_app PRIVATE SDK_USE_PRIVATE_PROVIDER)
-    target_link_libraries(sdk_open_app PRIVATE sdk_private_providers)
+    if(WIN32)
+        add_dependencies(sdk_open_app sdk_private_providers)
+    else()
+        target_link_libraries(sdk_open_app PRIVATE sdk_private_providers)
+    endif()
 else()
     target_link_libraries(sdk_open_app PRIVATE sdk_mock_providers)
 endif()

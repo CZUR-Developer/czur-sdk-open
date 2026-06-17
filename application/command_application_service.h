@@ -155,6 +155,8 @@ private:
     const MethodDescriptor* FindMethod(const std::string& method) const;
     void DispatchSaneDeviceEvent(const SdkSaneDeviceEvent& event);
     void DispatchSaneScanTaskEvent(const SdkSaneScanTaskEvent& event);
+    void RememberSaneWatchConnection(const std::string& connection_id);
+    bool ForgetSaneWatchConnection(const std::string& connection_id);
     void RememberOpenedDevice(const std::string& connection_id, const std::string& device_id);
     void ForgetOpenedDevice(const std::string& connection_id, const std::string& device_id);
     std::vector<std::string> ClearOpenedDevices(const std::string& connection_id);
@@ -207,6 +209,8 @@ private:
     std::map<std::string, SdkImageEnhancePipeline> sane_pipelines_by_task_;
     std::map<std::string, std::string> sane_online_api_keys_by_task_;
     std::map<std::string, std::string> sane_online_base_urls_by_task_;
+    mutable std::mutex sane_watch_connections_mu_;
+    std::set<std::string> sane_watch_connections_;
     mutable std::mutex opened_devices_mu_;
     std::map<std::string, std::set<std::string> > opened_devices_by_connection_;
 };
