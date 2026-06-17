@@ -61,6 +61,7 @@ public:
                                        const ProviderBundle& providers,
                                        std::shared_ptr<RuntimeConfigService> runtime_config = std::shared_ptr<RuntimeConfigService>());
 
+    void SetProviderNames(const Json& provider_names);
     void SetStatusSupplier(StatusSupplier supplier);
     void SetVideoFrameSink(VideoFrameSink sink);
     void SetVideoStreamClosedSink(VideoStreamClosedSink sink);
@@ -159,6 +160,8 @@ private:
     const MethodDescriptor* FindMethod(const std::string& method) const;
     void DispatchSaneDeviceEvent(const SdkSaneDeviceEvent& event);
     void DispatchSaneScanTaskEvent(const SdkSaneScanTaskEvent& event);
+    void RememberSaneWatchConnection(const std::string& connection_id);
+    bool ForgetSaneWatchConnection(const std::string& connection_id);
     void RememberOpenedDevice(const std::string& connection_id, const std::string& device_id);
     void ForgetOpenedDevice(const std::string& connection_id, const std::string& device_id);
     std::vector<std::string> ClearOpenedDevices(const std::string& connection_id);
@@ -187,6 +190,7 @@ private:
     mutable std::mutex command_event_sink_mu_;
     CommandEventSink command_event_sink_;
     ProviderBundle providers_;
+    Json provider_names_;
     AuthorizationService authorization_service_;
     VideoSessionService video_session_service_;
     DeviceFacade device_facade_;
@@ -210,6 +214,8 @@ private:
     std::map<std::string, SdkImageEnhancePipeline> sane_pipelines_by_task_;
     std::map<std::string, std::string> sane_online_api_keys_by_task_;
     std::map<std::string, std::string> sane_online_base_urls_by_task_;
+    mutable std::mutex sane_watch_connections_mu_;
+    std::set<std::string> sane_watch_connections_;
     mutable std::mutex opened_devices_mu_;
     std::map<std::string, std::set<std::string> > opened_devices_by_connection_;
 };

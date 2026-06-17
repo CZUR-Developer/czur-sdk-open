@@ -41,6 +41,7 @@ private:
 
     SdkConfig config_;
     ProviderBundle providers_;
+    Json provider_names_;
     std::shared_ptr<RuntimeConfigService> runtime_config_service_;
     std::shared_ptr<RuntimeRecordService> runtime_record_service_;
     std::unique_ptr<CommandApplicationService> command_application_service_;
