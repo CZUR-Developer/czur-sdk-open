@@ -853,6 +853,7 @@ struct SdkImageEnhanceTaskRequest {
     std::string output_dir;
     SdkImageEnhancePipeline pipeline;
     std::string online_api_key;
+    std::string online_session_token;
     std::string online_base_url;
     std::string authz_base_url;
 };

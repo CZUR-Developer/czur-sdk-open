@@ -14,6 +14,7 @@
 #include <utility>
 
 #include "sdk_runtime_paths.h"
+#include "sdk_entitlement_policy.h"
 
 namespace editor {
 namespace sdk {
@@ -90,6 +91,114 @@ std::string NormalizeLower(std::string value) {
 
 bool HasOnlineImageEnhanceApiKey(const AuthorizationService::SessionResult& session_result) {
     return !session_result.token.empty();
+}
+
+
+SdkAccountType MaxRequiredTier(SdkAccountType lhs, SdkAccountType rhs) {
+    return EntitlementRank(lhs) >= EntitlementRank(rhs) ? lhs : rhs;
+}
+
+SdkAccountType RequiredTierForColorMode(const std::string& color_mode) {
+    const std::string value = NormalizeLower(color_mode);
+    if (value == "white_paper_seal" || value == "white_paper_stamp") {
+        return SdkAccountType::Svip;
+    }
+    if (value == "ancient" || value == "ancient_book") {
+        return SdkAccountType::SvipPlus;
+    }
+    return SdkAccountType::Trial;
+}
+
+SdkAccountType RequiredTierForImageProcess(const std::string& page_processing,
+                                           const std::string& color_mode,
+                                           const SdkSinglePageOptions& single_page,
+                                           const SdkCurvedBookOptions&) {
+    SdkAccountType required = RequiredTierForColorMode(color_mode);
+    if (single_page.auto_rotate) {
+        required = MaxRequiredTier(required, SdkAccountType::Vip);
+    }
+    const std::string processing = NormalizeLower(page_processing);
+    if (processing == "curved_book" || processing == "book" || processing == "curve_flatten") {
+        required = MaxRequiredTier(required, SdkAccountType::Svip);
+    }
+    return required;
+}
+
+SdkAccountType RequiredTierForEnhanceStep(const std::string& step_type) {
+    const std::string type = NormalizeLower(step_type);
+    if (type == "rotate") {
+        return SdkAccountType::Vip;
+    }
+    if (type == "blank_page_detect" || type == "normalize_spec" || type == "red_green_head" ||
+        type == "white_paper_seal" || type == "white_paper_stamp" || type == "curved_book") {
+        return SdkAccountType::Svip;
+    }
+    if (type == "ancient" || type == "ancient_book" || type == "hole_fill" || type == "punch_hole_fill" ||
+        type == "doc_crop_enhance" || type == "document_rectify_enhance" || type == "remove_handwriting" ||
+        type == "doc_repair" || type == "remove_background_texture" || type == "remove_moire") {
+        return SdkAccountType::SvipPlus;
+    }
+    return SdkAccountType::Trial;
+}
+
+SdkAccountType RequiredTierForEnhancePipeline(const SdkImageEnhancePipeline& pipeline) {
+    SdkAccountType required = SdkAccountType::Trial;
+    for (std::vector<SdkImageEnhanceStep>::const_iterator it = pipeline.steps.begin();
+         it != pipeline.steps.end();
+         ++it) {
+        if (!it->enabled) {
+            continue;
+        }
+        required = MaxRequiredTier(required, RequiredTierForEnhanceStep(it->type));
+    }
+    return required;
+}
+
+SdkAccountType RequiredTierForFileConvert(const SdkFileConvertRequest& request) {
+    std::string format = NormalizeLower(request.output_format);
+    if (format == "jpeg") {
+        format = "jpg";
+    }
+    if (format == "tif") {
+        format = "tiff";
+    }
+    if (format == "pdf" || format == "ofd") {
+        const std::string export_type = NormalizeLower(request.export_type);
+        if (export_type == "double-layer" || export_type == "double_layer" || export_type == "searchable" ||
+            export_type == "text-layer" || export_type == "text_layer") {
+            return SdkAccountType::Vip;
+        }
+        return SdkAccountType::Trial;
+    }
+    if (format == "txt") {
+        return SdkAccountType::Vip;
+    }
+    if (format == "jpg" || format == "png" || format == "bmp" || format == "tiff") {
+        return SdkAccountType::Svip;
+    }
+    return SdkAccountType::Trial;
+}
+
+std::string TrialQuotaCapabilityFor(const std::string& method, SdkAccountType required) {
+    if (required == SdkAccountType::Vip) {
+        if (method.find("image.enhance") == 0) return "image.enhance.vip";
+        if (method.find("image.") == 0) return "image.process.vip";
+        if (method == "file.convert") return "file.convert.vip";
+        return method;
+    }
+    if (required == SdkAccountType::Svip) {
+        if (method.find("image.enhance") == 0) return "image.enhance.svip";
+        if (method.find("image.") == 0) return "image.process.svip";
+        if (method == "file.convert") return "file.convert.svip";
+        return method;
+    }
+    if (required == SdkAccountType::SvipPlus) {
+        if (method.find("image.enhance") == 0) return "image.enhance.svip_plus";
+        if (method.find("image.") == 0) return "image.process.svip_plus";
+        if (method == "file.convert") return "file.convert.svip_plus";
+        return method;
+    }
+    return method;
 }
 
 void ApplyOnlineImageEnhanceAvailability(SdkImageEnhanceCapabilityResult* result, bool online_available) {
@@ -2541,11 +2650,6 @@ Json CommandApplicationService::HandleImageProcess(const std::string& connection
     if (!IsOkStatusCode(session_result.code)) {
         return BuildWsResponse(request.request_id, session_result.code, session_result.message);
     }
-    const AuthorizationService::SessionResult quota_result = ConsumeQuota(connection_id, request.method, request.request_id);
-    if (!IsOkStatusCode(quota_result.code)) {
-        return BuildWsResponse(request.request_id, quota_result.code, quota_result.message);
-    }
-
     SdkImageProcessRequest process_request;
     process_request.input_upload_id = GetOptionalStringField(request.params, "input_upload_id");
     process_request.input_path = GetOptionalStringField(request.params, "input_path");
@@ -2599,6 +2703,16 @@ Json CommandApplicationService::HandleImageProcess(const std::string& connection
         const Json source_json = GetOptionalObjectField(selected_area_json, "source");
         process_request.selected_area_source_width = GetOptionalIntField(source_json, "width", 0);
         process_request.selected_area_source_height = GetOptionalIntField(source_json, "height", 0);
+    }
+
+    const SdkAccountType required_tier = RequiredTierForImageProcess(process_request.page_processing,
+                                                                     process_request.color_mode,
+                                                                     process_request.single_page,
+                                                                     process_request.curved_book);
+    const AuthorizationService::SessionResult entitlement_result =
+        RequireFeatureEntitlement(connection_id, request.method, request.method, required_tier, request.request_id);
+    if (!IsOkStatusCode(entitlement_result.code)) {
+        return BuildWsResponse(request.request_id, entitlement_result.code, entitlement_result.message);
     }
 
     std::string image_task_id = process_request.input_upload_id;
@@ -2687,11 +2801,6 @@ Json CommandApplicationService::HandleImageProcessPage(const std::string& connec
     if (!IsOkStatusCode(session_result.code)) {
         return BuildWsResponse(request.request_id, session_result.code, session_result.message);
     }
-    const AuthorizationService::SessionResult quota_result = ConsumeQuota(connection_id, request.method, request.request_id);
-    if (!IsOkStatusCode(quota_result.code)) {
-        return BuildWsResponse(request.request_id, quota_result.code, quota_result.message);
-    }
-
     SdkPageProcessRequest page_request;
     const std::string input_upload_id = GetOptionalStringField(request.params, "input_upload_id");
     page_request.input_path = GetOptionalStringField(request.params, "input_path");
@@ -2728,6 +2837,16 @@ Json CommandApplicationService::HandleImageProcessPage(const std::string& connec
         const Json source_json = GetOptionalObjectField(selected_area_json, "source");
         page_request.selected_area_source_width = GetOptionalIntField(source_json, "width", 0);
         page_request.selected_area_source_height = GetOptionalIntField(source_json, "height", 0);
+    }
+
+    const SdkAccountType required_tier = RequiredTierForImageProcess(page_request.page_processing,
+                                                                     "no_optimize",
+                                                                     page_request.single_page,
+                                                                     page_request.curved_book);
+    const AuthorizationService::SessionResult entitlement_result =
+        RequireFeatureEntitlement(connection_id, request.method, request.method, required_tier, request.request_id);
+    if (!IsOkStatusCode(entitlement_result.code)) {
+        return BuildWsResponse(request.request_id, entitlement_result.code, entitlement_result.message);
     }
 
     std::string image_task_id = input_upload_id;
@@ -2867,11 +2986,6 @@ Json CommandApplicationService::HandleImageApplyColorMode(const std::string& con
     if (!IsOkStatusCode(session_result.code)) {
         return BuildWsResponse(request.request_id, session_result.code, session_result.message);
     }
-    const AuthorizationService::SessionResult quota_result = ConsumeQuota(connection_id, request.method, request.request_id);
-    if (!IsOkStatusCode(quota_result.code)) {
-        return BuildWsResponse(request.request_id, quota_result.code, quota_result.message);
-    }
-
     SdkColorModeRequest color_request;
     const std::string input_upload_id = GetOptionalStringField(request.params, "input_upload_id");
     color_request.input_path = GetOptionalStringField(request.params, "input_path");
@@ -2880,6 +2994,13 @@ Json CommandApplicationService::HandleImageApplyColorMode(const std::string& con
     if (color_request.color_mode.empty()) {
         const SdkCaptureProfile profile = ParseCaptureProfile(request.params, "");
         color_request.color_mode = profile.color_mode.empty() ? "no_optimize" : profile.color_mode;
+    }
+
+    const SdkAccountType required_tier = RequiredTierForColorMode(color_request.color_mode);
+    const AuthorizationService::SessionResult entitlement_result =
+        RequireFeatureEntitlement(connection_id, request.method, request.method, required_tier, request.request_id);
+    if (!IsOkStatusCode(entitlement_result.code)) {
+        return BuildWsResponse(request.request_id, entitlement_result.code, entitlement_result.message);
     }
 
     std::string image_task_id = input_upload_id;
@@ -3003,6 +3124,7 @@ Json CommandApplicationService::HandleImageEnhance(const std::string& connection
     enhance_request.connection_id = connection_id;
     enhance_request.output_dir = GetOptionalStringField(request.params, "output_dir");
     enhance_request.online_api_key = session_result.token;
+    enhance_request.online_session_token = session_result.session_token;
     enhance_request.online_base_url = runtime_config_ ? runtime_config_->OnlineImageEnhanceBaseUrl() : "";
     enhance_request.authz_base_url = runtime_config_ ? runtime_config_->AuthzBaseUrl() : "";
     Json source_json = GetOptionalObjectField(request.params, "source");
@@ -3034,6 +3156,13 @@ Json CommandApplicationService::HandleImageEnhance(const std::string& connection
     }
 
     enhance_request.pipeline = ParseImageEnhancePipeline(GetOptionalObjectField(request.params, "pipeline"));
+    const SdkAccountType required_tier = RequiredTierForEnhancePipeline(enhance_request.pipeline);
+    const AuthorizationService::SessionResult entitlement_result =
+        RequireFeatureEntitlement(connection_id, request.method, request.method, required_tier, request.request_id);
+    if (!IsOkStatusCode(entitlement_result.code)) {
+        return BuildWsResponse(request.request_id, entitlement_result.code, entitlement_result.message);
+    }
+
     const SdkImageEnhanceTaskResult result = image_enhance_task_service_.StartTask(enhance_request);
     if (!IsOkStatusCode(result.code)) {
         return BuildWsResponse(request.request_id, result.code, result.message);
@@ -3201,6 +3330,11 @@ Json CommandApplicationService::HandleOcrRecognize(const std::string& connection
     const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
     if (!IsOkStatusCode(session_result.code)) {
         return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    const AuthorizationService::SessionResult entitlement_result =
+        RequireFeatureEntitlement(connection_id, request.method, request.method, SdkAccountType::Vip, request.request_id);
+    if (!IsOkStatusCode(entitlement_result.code)) {
+        return BuildWsResponse(request.request_id, entitlement_result.code, entitlement_result.message);
     }
 
     SdkOcrRecognizeRequest ocr_request;
@@ -3379,6 +3513,11 @@ Json CommandApplicationService::HandleOcrExtractText(const std::string& connecti
     const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
     if (!IsOkStatusCode(session_result.code)) {
         return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    const AuthorizationService::SessionResult entitlement_result =
+        RequireFeatureEntitlement(connection_id, request.method, request.method, SdkAccountType::Vip, request.request_id);
+    if (!IsOkStatusCode(entitlement_result.code)) {
+        return BuildWsResponse(request.request_id, entitlement_result.code, entitlement_result.message);
     }
 
     SdkOcrExtractTextRequest extract_request;
@@ -3883,11 +4022,6 @@ Json CommandApplicationService::HandleFileConvert(const std::string& connection_
     if (!IsOkStatusCode(session_result.code)) {
         return BuildWsResponse(request.request_id, session_result.code, session_result.message);
     }
-    const AuthorizationService::SessionResult quota_result = ConsumeQuota(connection_id, request.method, request.request_id);
-    if (!IsOkStatusCode(quota_result.code)) {
-        return BuildWsResponse(request.request_id, quota_result.code, quota_result.message);
-    }
-
     SdkFileConvertRequest convert_request;
     bool export_type_set = false;
     const Json source_json = GetOptionalObjectField(request.params, "source");
@@ -3989,6 +4123,12 @@ Json CommandApplicationService::HandleFileConvert(const std::string& connection_
         return BuildWsResponse(request.request_id,
                                SdkStatusCode::UnsupportedMethod,
                                "unsupported output format: " + convert_request.output_format);
+    }
+    const SdkAccountType required_tier = RequiredTierForFileConvert(convert_request);
+    const AuthorizationService::SessionResult entitlement_result =
+        RequireFeatureEntitlement(connection_id, request.method, request.method, required_tier, request.request_id);
+    if (!IsOkStatusCode(entitlement_result.code)) {
+        return BuildWsResponse(request.request_id, entitlement_result.code, entitlement_result.message);
     }
 
     std::string image_task_id = convert_request.input_upload_id;
@@ -4229,6 +4369,29 @@ AuthorizationService::SessionResult CommandApplicationService::ConsumeQuota(cons
     return authorization_service_.ConsumeQuota(connection_id, "image.process", request_id, units);
 }
 
+AuthorizationService::SessionResult CommandApplicationService::RequireFeatureEntitlement(
+    const std::string& connection_id,
+    const std::string& method,
+    const std::string& feature,
+    SdkAccountType required_account_type,
+    const std::string& request_id) {
+    AuthorizationService::SessionResult result = authorization_service_.RequireSession(connection_id);
+    if (!IsOkStatusCode(result.code)) {
+        return result;
+    }
+    const EntitlementCheckResult check =
+        CheckFeatureEntitlement(result.auth_context, feature, required_account_type);
+    if (!IsOkStatusCode(check.code)) {
+        result.code = check.code;
+        result.message = check.message;
+        return result;
+    }
+    if (!check.requires_trial_quota) {
+        return result;
+    }
+    return ConsumeQuota(connection_id, TrialQuotaCapabilityFor(method, required_account_type), request_id);
+}
+
 Json CommandApplicationService::BuildSessionJson(const AuthorizationService::SessionResult& session_result) const {
     return Json{
         {"session_token", session_result.session_token},
@@ -4271,6 +4434,7 @@ Json CommandApplicationService::BuildAdminSessionJson(const AuthorizationService
         {"licensedAccountType", ToAccountTypeString(context.licensed_account_type)},
         {"licensedAccountTypeCode", context.licensed_account_type_code},
         {"entitlementState", context.entitlement_state},
+        {"commercialAuthorized", context.commercial_authorized},
         {"machineCode", context.machine_code},
         {"offlineActivationRequired", offline_mode && !activated},
         {"activationPayload", offline_mode && !activated ? context.machine_code : ""},
@@ -4328,6 +4492,7 @@ Json CommandApplicationService::BuildAuthContextJson(const AuthContext& auth_con
         {"auth_scene", auth_context.auth_scene},
         {"license_mode", auth_context.license_mode},
         {"entitlement_state", auth_context.entitlement_state},
+        {"commercial_authorized", auth_context.commercial_authorized},
         {"machine_code", auth_context.machine_code},
         {"device_scope", device_scope},
         {"expires_at", auth_context.expires_at},

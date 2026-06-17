@@ -158,6 +158,7 @@ QuotaConsumeResult ConfirmOnlineEnhanceQuota(const ProviderBundle& providers,
          ++it) {
         QuotaConsumeRequest quota_request;
         quota_request.token = request.online_api_key;
+        quota_request.session_token = request.online_session_token;
         quota_request.authz_base_url = request.authz_base_url;
         quota_request.capability = it->first;
         quota_request.request_id = "image.enhance:" + task_id + ":" + it->first;

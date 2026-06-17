@@ -147,6 +147,11 @@ private:
                                                      const std::string& capability,
                                                      const std::string& request_id,
                                                      int units = 1);
+    AuthorizationService::SessionResult RequireFeatureEntitlement(const std::string& connection_id,
+                                                                  const std::string& method,
+                                                                  const std::string& feature,
+                                                                  SdkAccountType required_account_type,
+                                                                  const std::string& request_id);
     Json BuildSessionJson(const AuthorizationService::SessionResult& session_result) const;
     Json BuildAdminSessionJson(const AuthorizationService::SessionResult& session_result) const;
     Json BuildAuthContextJson(const AuthContext& auth_context) const;

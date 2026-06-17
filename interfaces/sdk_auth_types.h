@@ -44,6 +44,7 @@ struct AuthContext {
     std::string license_mode;
     std::string host_auth_mode;
     std::string entitlement_state;
+    bool commercial_authorized = true;
     std::string machine_code;
     std::vector<SdkDeviceGrant> device_scope;
     std::int64_t expires_at = 0;

@@ -48,6 +48,13 @@ target_include_directories(sdk_open_interfaces INTERFACE
     "${CMAKE_CURRENT_SOURCE_DIR}/interfaces"
 )
 
+add_library(sdk_open_entitlement_policy STATIC
+    interfaces/sdk_entitlement_policy.cpp
+)
+target_link_libraries(sdk_open_entitlement_policy PUBLIC
+    sdk_open_interfaces
+)
+
 file(GLOB_RECURSE SDK_OPEN_CGRAPH_SRCS
     "${SDK_OPEN_CGRAPH_DIR}/src/*.cpp"
 )
@@ -107,6 +114,7 @@ target_compile_definitions(sdk_open_runtime PUBLIC
 )
 target_link_libraries(sdk_open_runtime PUBLIC
     sdk_open_interfaces
+    sdk_open_entitlement_policy
     sdk_open_cgraph
     sdk_open_logging
     sdk_open_third_party
