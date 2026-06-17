@@ -26,6 +26,10 @@ struct PrivateProvidersCApi {
     HMODULE module = NULL;
     PrivateProviderJsonFn image_enhance_capabilities = NULL;
     PrivateProviderJsonFn image_enhance_run_step = NULL;
+    PrivateProviderJsonFn ocr_recognize = NULL;
+    PrivateProviderJsonFn ocr_get = NULL;
+    PrivateProviderJsonFn ocr_cancel = NULL;
+    PrivateProviderJsonFn ocr_extract_text = NULL;
     PrivateProviderFreeStringFn free_string = NULL;
 };
 
@@ -44,6 +48,14 @@ PrivateProvidersCApi& GetPrivateProvidersCApi() {
         ::GetProcAddress(api.module, "czur_sdk_private_image_enhance_capabilities_json"));
     api.image_enhance_run_step = reinterpret_cast<PrivateProviderJsonFn>(
         ::GetProcAddress(api.module, "czur_sdk_private_image_enhance_run_step_json"));
+    api.ocr_recognize = reinterpret_cast<PrivateProviderJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_ocr_recognize_json"));
+    api.ocr_get = reinterpret_cast<PrivateProviderJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_ocr_get_json"));
+    api.ocr_cancel = reinterpret_cast<PrivateProviderJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_ocr_cancel_json"));
+    api.ocr_extract_text = reinterpret_cast<PrivateProviderJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_ocr_extract_text_json"));
     api.free_string = reinterpret_cast<PrivateProviderFreeStringFn>(
         ::GetProcAddress(api.module, "czur_sdk_private_providers_free_string"));
     return api;
@@ -106,6 +118,48 @@ SdkImageEnhancePage ImageEnhancePageFromJson(const Json& value) {
     page.dropped = BoolField(value, "dropped");
     page.metadata_json = StringField(value, "metadata_json", "{}");
     return page;
+}
+
+Json OcrRecognizeRequestToJson(const SdkOcrRecognizeRequest& request) {
+    return Json{{"input_upload_ids", request.input_upload_ids},
+                {"input_files", request.input_files},
+                {"output_path", request.output_path},
+                {"output_dir", request.output_dir},
+                {"format", request.format},
+                {"export_type", request.export_type},
+                {"ext_params_json", request.ext_params_json}};
+}
+
+SdkOcrTaskSnapshot OcrTaskFromJson(const Json& value) {
+    SdkOcrTaskSnapshot task;
+    task.task_id = StringField(value, "task_id");
+    task.status = StringField(value, "status", task.status);
+    task.progress = IntField(value, "progress");
+    task.output_path = StringField(value, "output_path");
+    task.output_paths = StringArrayField(value, "output_paths");
+    task.format = StringField(value, "format");
+    task.export_type = StringField(value, "export_type", task.export_type);
+    task.message = StringField(value, "message", task.message);
+    task.error = StringField(value, "error");
+    return task;
+}
+
+SdkOcrTextBlock OcrTextBlockFromJson(const Json& value) {
+    SdkOcrTextBlock block;
+    block.text = StringField(value, "text");
+    Json::const_iterator x_it = value.find("x");
+    Json::const_iterator y_it = value.find("y");
+    Json::const_iterator width_it = value.find("width");
+    Json::const_iterator height_it = value.find("height");
+    Json::const_iterator confidence_it = value.find("confidence");
+    Json::const_iterator font_size_it = value.find("font_size");
+    block.x = x_it != value.end() && x_it->is_number() ? x_it->get<float>() : 0.0f;
+    block.y = y_it != value.end() && y_it->is_number() ? y_it->get<float>() : 0.0f;
+    block.width = width_it != value.end() && width_it->is_number() ? width_it->get<float>() : 0.0f;
+    block.height = height_it != value.end() && height_it->is_number() ? height_it->get<float>() : 0.0f;
+    block.confidence = confidence_it != value.end() && confidence_it->is_number() ? confidence_it->get<float>() : 0.0f;
+    block.font_size = font_size_it != value.end() && font_size_it->is_number() ? font_size_it->get<float>() : 0.0f;
+    return block;
 }
 
 Json ImageEnhanceStepToJson(const SdkImageEnhanceStep& step) {
@@ -243,6 +297,98 @@ public:
     }
 };
 
+class WindowsPrivateOcrProvider : public ISdkOcrProvider {
+public:
+    std::string ProviderName() const override { return "czur-ocr-provider"; }
+
+    SdkOcrRecognizeResult Recognize(const SdkOcrRecognizeRequest& request) override {
+        SdkOcrRecognizeResult result;
+        PrivateProvidersCApi& api = GetPrivateProvidersCApi();
+        Json response;
+        std::string error;
+        if (!InvokePrivateProviderCApi(api.ocr_recognize, OcrRecognizeRequestToJson(request), &response, &error)) {
+            result.code = ToCode(SdkStatusCode::ProviderNotReady);
+            result.message = error;
+            return result;
+        }
+        result.code = IntField(response, "code");
+        result.message = StringField(response, "message");
+        result.task_id = StringField(response, "task_id");
+        Json::const_iterator task_it = response.find("task");
+        if (task_it != response.end()) {
+            result.task = OcrTaskFromJson(*task_it);
+        }
+        return result;
+    }
+
+    SdkOcrGetResult GetTask(const SdkOcrGetRequest& request) override {
+        SdkOcrGetResult result;
+        PrivateProvidersCApi& api = GetPrivateProvidersCApi();
+        Json response;
+        std::string error;
+        if (!InvokePrivateProviderCApi(api.ocr_get, Json{{"task_id", request.task_id}}, &response, &error)) {
+            result.code = ToCode(SdkStatusCode::ProviderNotReady);
+            result.message = error;
+            return result;
+        }
+        result.code = IntField(response, "code");
+        result.message = StringField(response, "message");
+        Json::const_iterator task_it = response.find("task");
+        if (task_it != response.end()) {
+            result.task = OcrTaskFromJson(*task_it);
+        }
+        return result;
+    }
+
+    SdkOcrCancelResult Cancel(const SdkOcrCancelRequest& request) override {
+        SdkOcrCancelResult result;
+        PrivateProvidersCApi& api = GetPrivateProvidersCApi();
+        Json response;
+        std::string error;
+        if (!InvokePrivateProviderCApi(api.ocr_cancel, Json{{"task_id", request.task_id}}, &response, &error)) {
+            result.code = ToCode(SdkStatusCode::ProviderNotReady);
+            result.message = error;
+            return result;
+        }
+        result.code = IntField(response, "code");
+        result.message = StringField(response, "message");
+        result.cancelled = BoolField(response, "cancelled");
+        Json::const_iterator task_it = response.find("task");
+        if (task_it != response.end()) {
+            result.task = OcrTaskFromJson(*task_it);
+        }
+        return result;
+    }
+
+    SdkOcrExtractTextResult ExtractText(const SdkOcrExtractTextRequest& request) override {
+        SdkOcrExtractTextResult result;
+        PrivateProvidersCApi& api = GetPrivateProvidersCApi();
+        Json response;
+        std::string error;
+        if (!InvokePrivateProviderCApi(api.ocr_extract_text,
+                                       Json{{"input_upload_id", request.input_upload_id}, {"input_path", request.input_path}},
+                                       &response,
+                                       &error)) {
+            result.code = ToCode(SdkStatusCode::ProviderNotReady);
+            result.message = error;
+            return result;
+        }
+        result.code = IntField(response, "code");
+        result.message = StringField(response, "message");
+        result.recognized = BoolField(response, "recognized");
+        result.input_path = StringField(response, "input_path");
+        result.width = IntField(response, "width");
+        result.height = IntField(response, "height");
+        Json::const_iterator blocks_it = response.find("blocks");
+        if (blocks_it != response.end() && blocks_it->is_array()) {
+            for (Json::const_iterator it = blocks_it->begin(); it != blocks_it->end(); ++it) {
+                result.blocks.push_back(OcrTextBlockFromJson(*it));
+            }
+        }
+        return result;
+    }
+};
+
 #endif
 
 } // namespace
@@ -251,6 +397,7 @@ ProviderBundle CreateProviderBundle() {
     ProviderBundle bundle;
 #if defined(_WIN32)
     bundle.image_enhance_provider = std::make_shared<WindowsPrivateImageEnhanceProvider>();
+    bundle.ocr_provider = std::make_shared<WindowsPrivateOcrProvider>();
 #endif
     return bundle;
 }

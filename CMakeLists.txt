@@ -231,6 +231,15 @@ if(BUILD_SDK_PRIVATE)
                 "${SDK_OPEN_CZOCR_MODEL_DIR}"
                 "$<TARGET_FILE_DIR:sdk_open_app>/models"
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${CMAKE_SOURCE_DIR}/third_party_repo/czocr/models/x86-64/license.lic"
+                "$<TARGET_FILE_DIR:sdk_open_app>/models/license.lic"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${CMAKE_SOURCE_DIR}/third_party_repo/czocr/models/x86-64/serial.txt"
+                "$<TARGET_FILE_DIR:sdk_open_app>/models/serial.txt"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${CMAKE_SOURCE_DIR}/third_party_repo/czocr/lib/${LIB_ARCH}/czcv_ocr.dll"
+                "$<TARGET_FILE_DIR:sdk_open_app>/models/czcv_ocr.dll"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                 "${SDK_OPEN_LIBXML2_DLL_SRC}"
                 "${SDK_OPEN_LIBXML2_DLL_DST}"
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different

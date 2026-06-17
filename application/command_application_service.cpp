@@ -3327,7 +3327,7 @@ Json CommandApplicationService::HandleOcrRecognize(const std::string& connection
                                 {"output_paths", output_paths},
                                 {"format", ocr_request.format},
                                 {"exportType", ocr_request.export_type},
-                                {"provider", providers_.ocr_provider ? providers_.ocr_provider->ProviderName() : ""}});
+                                {"provider", provider_names_.value("ocr", "")}});
 }
 
 Json CommandApplicationService::HandleOcrGet(const std::string& connection_id, const Request& request) {
@@ -3348,7 +3348,7 @@ Json CommandApplicationService::HandleOcrGet(const std::string& connection_id, c
                            SdkStatusCode::Ok,
                            "ok",
                            Json{{"task", BuildOcrTaskJson(result.task)},
-                                {"provider", providers_.ocr_provider ? providers_.ocr_provider->ProviderName() : ""}});
+                                {"provider", provider_names_.value("ocr", "")}});
 }
 
 Json CommandApplicationService::HandleOcrCancel(const std::string& connection_id, const Request& request) {
@@ -3370,7 +3370,7 @@ Json CommandApplicationService::HandleOcrCancel(const std::string& connection_id
                            "ok",
                            Json{{"cancelled", result.cancelled},
                                 {"task", BuildOcrTaskJson(result.task)},
-                                {"provider", providers_.ocr_provider ? providers_.ocr_provider->ProviderName() : ""}});
+                                {"provider", provider_names_.value("ocr", "")}});
 }
 
 Json CommandApplicationService::HandleOcrExtractText(const std::string& connection_id, const Request& request) {
@@ -3416,7 +3416,7 @@ Json CommandApplicationService::HandleOcrExtractText(const std::string& connecti
                                 {"width", result.width},
                                 {"height", result.height},
                                 {"blocks", blocks},
-                                {"provider", providers_.ocr_provider ? providers_.ocr_provider->ProviderName() : ""}});
+                                {"provider", provider_names_.value("ocr", "")}});
 }
 
 Json CommandApplicationService::HandleBarcodeDetect(const std::string& connection_id, const Request& request) {
