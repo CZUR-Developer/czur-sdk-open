@@ -445,6 +445,21 @@ bool SdkHttpServer::ConfigureRoutes() {
     });
 
     if (mount_static_site_) {
+        server_->Get(R"(/.*)", [this](const httplib::Request& req, httplib::Response& res) {
+            if (!ShouldServeSpaFallback(req.path, req.get_header_value("Accept"))) {
+                return;
+            }
+            const std::string index_path = JoinPath(document_root_, "index.html");
+            if (!FileExists(index_path)) {
+                res.status = ToHttpStatus(SdkHttpStatus::NotFound);
+                res.set_content("Not Found", "text/plain; charset=utf-8");
+                return;
+            }
+            res.status = ToHttpStatus(SdkHttpStatus::Ok);
+            res.set_header("Cache-Control", "no-store");
+            res.set_file_content(index_path, "text/html");
+        });
+
         if (!server_->set_mount_point("/", document_root_)) {
             SDK_OPEN_LOG_ERROR("[sdk_http_server] {} set_mount_point failed, root={}", site_name_, document_root_);
             return false;

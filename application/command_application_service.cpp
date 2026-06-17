@@ -1286,6 +1286,10 @@ CommandApplicationService::CommandApplicationService(const SdkConfig& config,
     methods_.push_back(MakeMethod("sane.scan_cancel", true, "Cancel one SANE scan task"));
 }
 
+void CommandApplicationService::SetProviderNames(const Json& provider_names) {
+    provider_names_ = provider_names.is_object() ? provider_names : Json::object();
+}
+
 void CommandApplicationService::SetStatusSupplier(StatusSupplier supplier) {
     status_supplier_ = std::move(supplier);
 }
@@ -1787,7 +1791,7 @@ Json CommandApplicationService::BuildCapabilitiesJson() const {
          Json{{"sane",
                Json{{"supported_platforms", Json::array({"linux"})},
                     {"linux_only", true},
-                    {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}}}}},
+                    {"provider", provider_names_.value("sane", "")}}}}},
     };
 }
 
@@ -1801,15 +1805,7 @@ Json CommandApplicationService::BuildAdminAuthJson() const {
     }
 
     return Json{
-        {"providers",
-         Json{{"device", providers_.device_provider ? providers_.device_provider->ProviderName() : ""},
-              {"graphic", providers_.graphic_provider ? providers_.graphic_provider->ProviderName() : ""},
-              {"imageEnhance", providers_.image_enhance_provider ? providers_.image_enhance_provider->ProviderName() : ""},
-              {"ocr", providers_.ocr_provider ? providers_.ocr_provider->ProviderName() : ""},
-              {"ofd", providers_.ofd_provider ? providers_.ofd_provider->ProviderName() : ""},
-              {"auth", providers_.auth_provider ? providers_.auth_provider->ProviderName() : ""},
-              {"recognition", providers_.recognition_provider ? providers_.recognition_provider->ProviderName() : ""},
-              {"sane", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}}},
+        {"providers", provider_names_},
         {"activeSessionCount", sessions.size()},
         {"sessions", sessions},
         {"capabilityCatalog", BuildCapabilitiesJson()},

@@ -61,6 +61,7 @@ public:
                                        const ProviderBundle& providers,
                                        std::shared_ptr<RuntimeConfigService> runtime_config = std::shared_ptr<RuntimeConfigService>());
 
+    void SetProviderNames(const Json& provider_names);
     void SetStatusSupplier(StatusSupplier supplier);
     void SetVideoFrameSink(VideoFrameSink sink);
     void SetVideoStreamClosedSink(VideoStreamClosedSink sink);
@@ -182,6 +183,7 @@ private:
     mutable std::mutex command_event_sink_mu_;
     CommandEventSink command_event_sink_;
     ProviderBundle providers_;
+    Json provider_names_;
     AuthorizationService authorization_service_;
     VideoSessionService video_session_service_;
     DeviceFacade device_facade_;

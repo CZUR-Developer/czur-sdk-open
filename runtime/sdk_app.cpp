@@ -282,6 +282,17 @@ SdkApp::SdkApp(const SdkConfig& config, ProviderBundle providers)
       video_ws_server_(config_.bind_host, config_.video_ws_port),
       running_(false),
       start_time_(std::chrono::steady_clock::now()) {
+    provider_names_ = Json{{"device", providers_.device_provider ? providers_.device_provider->ProviderName() : ""},
+                           {"graphic", providers_.graphic_provider ? providers_.graphic_provider->ProviderName() : ""},
+                           {"imageEnhance",
+                            providers_.image_enhance_provider ? providers_.image_enhance_provider->ProviderName() : ""},
+                           {"ocr", providers_.ocr_provider ? providers_.ocr_provider->ProviderName() : ""},
+                           {"ofd", providers_.ofd_provider ? providers_.ofd_provider->ProviderName() : ""},
+                           {"auth", providers_.auth_provider ? providers_.auth_provider->ProviderName() : ""},
+                           {"recognition",
+                            providers_.recognition_provider ? providers_.recognition_provider->ProviderName() : ""},
+                           {"sane", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}};
+    command_application_service_->SetProviderNames(provider_names_);
     admin_application_service_.SetStatusSupplier([this]() { return BuildStatusJson(); });
     admin_application_service_.SetSystemSupplier([this]() { return BuildSystemJson(); });
     admin_application_service_.SetAuthSupplier([this]() { return BuildAuthJson(); });
@@ -487,22 +498,6 @@ bool SdkApp::Start() {
         return false;
     }
 
-    if (providers_.device_provider) {
-        SDK_OPEN_LOG_INFO("[sdk_app] device provider: {}", providers_.device_provider->ProviderName());
-    }
-    if (providers_.graphic_provider) {
-        SDK_OPEN_LOG_INFO("[sdk_app] graphic provider: {}", providers_.graphic_provider->ProviderName());
-    }
-    if (providers_.ocr_provider) {
-        SDK_OPEN_LOG_INFO("[sdk_app] ocr provider: {}", providers_.ocr_provider->ProviderName());
-    }
-    if (providers_.ofd_provider) {
-        SDK_OPEN_LOG_INFO("[sdk_app] ofd provider: {}", providers_.ofd_provider->ProviderName());
-    }
-    if (providers_.auth_provider) {
-        SDK_OPEN_LOG_INFO("[sdk_app] auth provider: {}", providers_.auth_provider->ProviderName());
-    }
-
     start_time_ = std::chrono::steady_clock::now();
     running_.store(true);
     SDK_OPEN_LOG_INFO("[sdk_app] started");
@@ -570,15 +565,7 @@ Json SdkApp::BuildStatusJson() const {
              {"commandWs", config_.command_ws_port},
              {"videoWs", config_.video_ws_port},
          }},
-        {"providers",
-         {
-             {"device", providers_.device_provider ? providers_.device_provider->ProviderName() : ""},
-             {"graphic", providers_.graphic_provider ? providers_.graphic_provider->ProviderName() : ""},
-             {"imageEnhance", providers_.image_enhance_provider ? providers_.image_enhance_provider->ProviderName() : ""},
-             {"ocr", providers_.ocr_provider ? providers_.ocr_provider->ProviderName() : ""},
-             {"ofd", providers_.ofd_provider ? providers_.ofd_provider->ProviderName() : ""},
-             {"auth", providers_.auth_provider ? providers_.auth_provider->ProviderName() : ""},
-         }},
+        {"providers", provider_names_},
         {"authDiagnostics",
          {
              {"authzBaseUrlConfigured", IsEnvConfigured("CZUR_SDK_AUTHZ_BASE_URL")},
