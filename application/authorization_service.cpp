@@ -25,6 +25,7 @@ typedef void (*PrivateAuthFreeStringFn)(const char*);
 struct PrivateAuthCApi {
     HMODULE module = NULL;
     PrivateAuthJsonFn create_session = NULL;
+    PrivateAuthJsonFn consume_quota = NULL;
     PrivateAuthFreeStringFn free_string = NULL;
 };
 
@@ -41,6 +42,8 @@ PrivateAuthCApi& GetPrivateAuthCApi() {
     }
     api.create_session = reinterpret_cast<PrivateAuthJsonFn>(
         ::GetProcAddress(api.module, "czur_sdk_private_create_session_json"));
+    api.consume_quota = reinterpret_cast<PrivateAuthJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_consume_quota_json"));
     api.free_string = reinterpret_cast<PrivateAuthFreeStringFn>(
         ::GetProcAddress(api.module, "czur_sdk_private_free_string"));
     return api;
@@ -190,6 +193,74 @@ AuthorizationService::SessionResult CreatePrivateSessionWithCApi(const std::stri
     if (auth_context_it != response.end()) {
         result.auth_context = AuthContextFromJson(*auth_context_it);
     }
+    return result;
+}
+
+bool InvokePrivateAuthCApi(PrivateAuthJsonFn fn,
+                           const Json& request,
+                           Json* response,
+                           std::string* message) {
+    PrivateAuthCApi& api = GetPrivateAuthCApi();
+    if (fn == NULL || api.free_string == NULL) {
+        if (message != NULL) {
+            *message = "private auth c api not ready";
+        }
+        return false;
+    }
+
+    const char* response_ptr = fn(request.dump().c_str());
+    if (response_ptr == NULL) {
+        if (message != NULL) {
+            *message = "private auth c api returned null";
+        }
+        return false;
+    }
+    const std::string response_text(response_ptr);
+    api.free_string(response_ptr);
+
+    std::string parse_error;
+    if (!TryParseJson(response_text, response, &parse_error) || response == NULL || !response->is_object()) {
+        if (message != NULL) {
+            *message = "private auth c api returned invalid json";
+        }
+        return false;
+    }
+    return true;
+}
+
+AuthorizationService::SessionResult ConsumeQuotaWithCApi(const AuthorizationService::SessionResult& bound_session,
+                                                         const std::string& authz_base_url,
+                                                         const std::string& capability,
+                                                         const std::string& request_id,
+                                                         int units,
+                                                         std::int64_t now_ts) {
+    AuthorizationService::SessionResult result = bound_session;
+    PrivateAuthCApi& api = GetPrivateAuthCApi();
+    Json response;
+    std::string error;
+    const Json request = Json{{"token", bound_session.token},
+                              {"session_token", bound_session.session_token},
+                              {"authz_base_url", authz_base_url},
+                              {"capability", capability},
+                              {"request_id", request_id},
+                              {"units", units},
+                              {"now_ts", now_ts}};
+    if (!InvokePrivateAuthCApi(api.consume_quota, request, &response, &error)) {
+        result.code = ToCode(SdkStatusCode::ProviderNotReady);
+        result.message = error;
+        return result;
+    }
+
+    result.code = IntField(response, "code");
+    result.message = StringField(response, "message");
+    if (result.message.empty()) {
+        result.message = IsOkStatusCode(result.code) ? "ok" : "private auth failed";
+    }
+    Json::const_iterator auth_context_it = response.find("auth_context");
+    if (auth_context_it != response.end()) {
+        result.auth_context = AuthContextFromJson(*auth_context_it);
+    }
+    result.last_seen_at = now_ts;
     return result;
 }
 
@@ -417,6 +488,22 @@ AuthorizationService::SessionResult AuthorizationService::ConsumeQuota(const std
     if (!IsOkStatusCode(bound_session.code)) {
         return bound_session;
     }
+#if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
+    const std::int64_t now_ts = static_cast<std::int64_t>(std::time(NULL));
+    SessionResult result = ConsumeQuotaWithCApi(bound_session, AuthzBaseUrl(), capability, request_id, units, now_ts);
+    if (IsOkStatusCode(result.code)) {
+        std::lock_guard<std::mutex> lock(sessions_mu_);
+        std::map<std::string, SessionResult>::iterator it = sessions_.find(connection_id);
+        if (it != sessions_.end()) {
+            it->second.auth_context = result.auth_context;
+            it->second.last_seen_at = now_ts;
+            result = it->second;
+            result.code = ToCode(SdkStatusCode::Ok);
+            result.message = "ok";
+        }
+    }
+    return result;
+#else
     if (!providers_.auth_provider) {
         bound_session.code = ToCode(SdkStatusCode::ProviderNotReady);
         bound_session.message = "provider not ready";
@@ -450,6 +537,7 @@ AuthorizationService::SessionResult AuthorizationService::ConsumeQuota(const std
         }
     }
     return result;
+#endif
 }
 
 void AuthorizationService::ClearConnection(const std::string& connection_id) {

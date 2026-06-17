@@ -2677,7 +2677,7 @@ Json CommandApplicationService::HandleImageProcess(const std::string& connection
                                 {"color_mode", process_request.color_mode},
                                 {"output_format", process_request.output_format},
                                 {"processed", result.processed},
-                                {"provider", providers_.graphic_provider ? providers_.graphic_provider->ProviderName() : ""}});
+                                {"provider", provider_names_.value("graphic", "")}});
 }
 
 Json CommandApplicationService::HandleImageProcessPage(const std::string& connection_id, const Request& request) {
@@ -2857,7 +2857,7 @@ Json CommandApplicationService::HandleImageProcessPage(const std::string& connec
                                 {"page_processing", page_request.page_processing},
                                 {"output_format", source_format},
                                 {"processed", page_result.processed},
-                                {"provider", providers_.graphic_provider ? providers_.graphic_provider->ProviderName() : ""}});
+                                {"provider", provider_names_.value("graphic", "")}});
 }
 
 Json CommandApplicationService::HandleImageApplyColorMode(const std::string& connection_id, const Request& request) {
@@ -2967,7 +2967,7 @@ Json CommandApplicationService::HandleImageApplyColorMode(const std::string& con
                                 {"color_mode", color_request.color_mode},
                                 {"output_format", source_format},
                                 {"processed", color_result.processed},
-                                {"provider", providers_.graphic_provider ? providers_.graphic_provider->ProviderName() : ""}});
+                                {"provider", provider_names_.value("graphic", "")}});
 }
 
 Json CommandApplicationService::HandleImageEnhanceCapabilities(const std::string& connection_id, const Request& request) {
@@ -4152,7 +4152,7 @@ Json CommandApplicationService::HandleFileConvert(const std::string& connection_
                                     {"outputs", Json::array({Json{{"path", final_path},
                                                                   {"format", convert_request.output_format},
                                                                   {"asset", BuildAssetJson(asset)}}})},
-                                    {"provider", providers_.graphic_provider ? providers_.graphic_provider->ProviderName() : ""}});
+                                    {"provider", provider_names_.value("graphic", "")}});
     }
 
     const SdkFileConvertResult result = ofd_facade_.Convert(convert_request);
@@ -4209,7 +4209,7 @@ Json CommandApplicationService::HandleFileConvert(const std::string& connection_
                                 {"asset", assets_json.empty() ? Json::object() : assets_json.front()},
                                 {"assets", assets_json},
                                 {"outputs", outputs_json},
-                                {"provider", providers_.ofd_provider ? providers_.ofd_provider->ProviderName() : ""}});
+                                {"provider", provider_names_.value("ofd", "")}});
 }
 
 AuthorizationService::SessionResult CommandApplicationService::RequireCapability(const std::string& connection_id,
