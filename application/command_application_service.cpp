@@ -1585,7 +1585,7 @@ void CommandApplicationService::DispatchSaneScanTaskEvent(const SdkSaneScanTaskE
                          BuildWsEvent("sane.scan_changed",
                                       Json{{"task_id", task.task_id},
                                            {"task", BuildSaneScanTaskJson(task)},
-                                           {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}},
+                                           {"provider", provider_names_.value("sane", "")}},
                                       ToCode(SdkStatusCode::Ok),
                                       task.message));
         }
@@ -1685,7 +1685,7 @@ void CommandApplicationService::DispatchSaneScanTaskEvent(const SdkSaneScanTaskE
                  BuildWsEvent("sane.scan_changed",
                               Json{{"task_id", converting_task.task_id},
                                    {"task", BuildSaneScanTaskJson(converting_task)},
-                                   {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}},
+                                   {"provider", provider_names_.value("sane", "")}},
                               ToCode(SdkStatusCode::Ok),
                               "converting scan pages"));
         }
@@ -1765,7 +1765,7 @@ void CommandApplicationService::DispatchSaneScanTaskEvent(const SdkSaneScanTaskE
          BuildWsEvent(event.event_name.empty() ? "sane.scan_changed" : event.event_name,
                       Json{{"task_id", task.task_id},
                            {"task", BuildSaneScanTaskJson(task)},
-                           {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}},
+                           {"provider", provider_names_.value("sane", "")}},
                       event.code,
                       task.message.empty() ? event.message : task.message));
 }
@@ -3099,7 +3099,7 @@ Json CommandApplicationService::HandleImageEnhanceWorkflowList(const std::string
                            "ok",
                            Json{{"workflows", workflows},
                                 {"count", workflows.size()},
-                                {"provider", providers_.image_enhance_provider ? providers_.image_enhance_provider->ProviderName() : ""}});
+                                {"provider", provider_names_.value("imageEnhance", "")}});
 }
 
 Json CommandApplicationService::HandleImageEnhanceWorkflowGet(const std::string& connection_id, const Request& request) {
@@ -3479,7 +3479,7 @@ Json CommandApplicationService::HandleSaneStatus(const std::string& connection_i
     return BuildWsResponse(request.request_id,
                            result.code,
                            result.message,
-                           BuildSaneStatusJson(result, providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""));
+                           BuildSaneStatusJson(result, provider_names_.value("sane", "")));
 }
 
 Json CommandApplicationService::HandleSaneList(const std::string& connection_id, const Request& request) {
@@ -3494,7 +3494,7 @@ Json CommandApplicationService::HandleSaneList(const std::string& connection_id,
     Json payload{{"devices", BuildSaneDevicesJson(result.devices)},
                  {"count", result.devices.size()},
                  {"generation", result.generation},
-                 {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}};
+                 {"provider", provider_names_.value("sane", "")}};
     if (list_request.include_detected) {
         payload["detected_devices"] = BuildSaneDevicesJson(result.detected_devices);
         payload["detected_count"] = result.detected_devices.size();
@@ -3522,7 +3522,7 @@ Json CommandApplicationService::HandleSaneWatchStart(const std::string& connecti
                            result.message,
                            Json{{"watching", result.watching},
                                 {"generation", result.generation},
-                                {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+                                {"provider", provider_names_.value("sane", "")}});
 }
 
 Json CommandApplicationService::HandleSaneWatchStop(const std::string& connection_id, const Request& request) {
@@ -3542,7 +3542,7 @@ Json CommandApplicationService::HandleSaneWatchStop(const std::string& connectio
                            result.message,
                            Json{{"watching", result.watching},
                                 {"generation", result.generation},
-                                {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+                                {"provider", provider_names_.value("sane", "")}});
 }
 
 Json CommandApplicationService::HandleSaneOpen(const std::string& connection_id, const Request& request) {
@@ -3570,7 +3570,7 @@ Json CommandApplicationService::HandleSaneOpen(const std::string& connection_id,
                            Json{{"opened", result.opened},
                                 {"session_id", result.session_id},
                                 {"device", BuildSaneDeviceJson(result.device)},
-                                {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+                                {"provider", provider_names_.value("sane", "")}});
 }
 
 Json CommandApplicationService::HandleSaneClose(const std::string& connection_id, const Request& request) {
@@ -3610,7 +3610,7 @@ Json CommandApplicationService::HandleSaneGetOptions(const std::string& connecti
                            result.message,
                            Json{{"options", options},
                                 {"count", result.options.size()},
-                                {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+                                {"provider", provider_names_.value("sane", "")}});
 }
 
 Json CommandApplicationService::HandleSaneSetOptions(const std::string& connection_id, const Request& request) {
@@ -3639,7 +3639,7 @@ Json CommandApplicationService::HandleSaneSetOptions(const std::string& connecti
                            Json{{"applied", result.applied},
                                 {"requires_reload", result.requires_reload},
                                 {"results", results},
-                                {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+                                {"provider", provider_names_.value("sane", "")}});
 }
 
 Json CommandApplicationService::HandleSaneProfileList(const std::string& connection_id, const Request& request) {
@@ -3657,7 +3657,7 @@ Json CommandApplicationService::HandleSaneProfileList(const std::string& connect
                            result.message,
                            Json{{"profiles", profiles},
                                 {"count", result.profiles.size()},
-                                {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+                                {"provider", provider_names_.value("sane", "")}});
 }
 
 Json CommandApplicationService::HandleSaneProfileSave(const std::string& connection_id, const Request& request) {
@@ -3675,7 +3675,7 @@ Json CommandApplicationService::HandleSaneProfileSave(const std::string& connect
                            result.message,
                            Json{{"saved", result.saved},
                                 {"profile", BuildSaneProfileJson(result.profile)},
-                                {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+                                {"provider", provider_names_.value("sane", "")}});
 }
 
 Json CommandApplicationService::HandleSaneProfileApply(const std::string& connection_id, const Request& request) {
@@ -3693,7 +3693,7 @@ Json CommandApplicationService::HandleSaneProfileApply(const std::string& connec
                            result.message,
                            Json{{"applied", result.applied},
                                 {"profile", BuildSaneProfileJson(result.profile)},
-                                {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+                                {"provider", provider_names_.value("sane", "")}});
 }
 
 Json CommandApplicationService::HandleSaneProfileDelete(const std::string& connection_id, const Request& request) {
@@ -3711,7 +3711,7 @@ Json CommandApplicationService::HandleSaneProfileDelete(const std::string& conne
                            result.message,
                            Json{{"deleted", result.deleted},
                                 {"profile", BuildSaneProfileJson(result.profile)},
-                                {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+                                {"provider", provider_names_.value("sane", "")}});
 }
 
 Json CommandApplicationService::HandleSaneScan(const std::string& connection_id, const Request& request) {
@@ -3804,7 +3804,7 @@ Json CommandApplicationService::HandleSaneScan(const std::string& connection_id,
                            Json{{"accepted", result.accepted},
                                 {"task_id", result.task_id},
                                 {"task", BuildSaneScanTaskJson(result.task)},
-                                {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+                                {"provider", provider_names_.value("sane", "")}});
 }
 
 Json CommandApplicationService::HandleSaneScanGet(const std::string& connection_id, const Request& request) {
@@ -3834,7 +3834,7 @@ Json CommandApplicationService::HandleSaneScanGet(const std::string& connection_
                                    Json{{"task_id", get_request.task_id},
                                         {"accepted", true},
                                         {"task", BuildSaneScanTaskJson(it->second)},
-                                        {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+                                        {"provider", provider_names_.value("sane", "")}});
         }
     }
     SdkSaneScanResult result = sane_facade_.GetScan(get_request);
@@ -3851,7 +3851,7 @@ Json CommandApplicationService::HandleSaneScanGet(const std::string& connection_
                            Json{{"accepted", result.accepted},
                                 {"task_id", result.task_id},
                                 {"task", BuildSaneScanTaskJson(result.task)},
-                                {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+                                {"provider", provider_names_.value("sane", "")}});
 }
 
 Json CommandApplicationService::HandleSaneScanCancel(const std::string& connection_id, const Request& request) {
@@ -3879,7 +3879,7 @@ Json CommandApplicationService::HandleSaneScanCancel(const std::string& connecti
                            Json{{"accepted", result.accepted},
                                 {"task_id", result.task_id},
                                 {"task", BuildSaneScanTaskJson(result.task)},
-                                {"provider", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}});
+                                {"provider", provider_names_.value("sane", "")}});
 }
 
 Json CommandApplicationService::HandleFileConvert(const std::string& connection_id, const Request& request) {
