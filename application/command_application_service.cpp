@@ -3467,7 +3467,7 @@ Json CommandApplicationService::HandleBarcodeDetect(const std::string& connectio
                                 {"width", result.width},
                                 {"height", result.height},
                                 {"barcodes", barcodes},
-                                {"provider", providers_.recognition_provider ? providers_.recognition_provider->ProviderName() : ""}});
+                                {"provider", provider_names_.value("recognition", "")}});
 }
 
 Json CommandApplicationService::HandleSaneStatus(const std::string& connection_id, const Request& request) {
