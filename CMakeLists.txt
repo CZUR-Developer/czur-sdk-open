@@ -147,12 +147,14 @@ target_link_libraries(sdk_mock_providers PUBLIC
 
 add_executable(sdk_open_app
     runtime/sdk_open_main.cpp
+    providers/private_windows/private_windows_provider_factory.cpp
 )
 target_include_directories(sdk_open_app PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/runtime"
     "${CMAKE_CURRENT_SOURCE_DIR}/transport"
     "${CMAKE_CURRENT_SOURCE_DIR}/application"
     "${CMAKE_CURRENT_SOURCE_DIR}/facade"
+    "${CMAKE_CURRENT_SOURCE_DIR}/providers/private_windows"
     "${CMAKE_CURRENT_SOURCE_DIR}/providers/mock"
     "${CMAKE_CURRENT_SOURCE_DIR}/interfaces"
 )

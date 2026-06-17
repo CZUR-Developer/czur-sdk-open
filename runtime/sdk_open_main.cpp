@@ -17,6 +17,8 @@
 
 #if defined(SDK_USE_PRIVATE_PROVIDER) && !defined(_WIN32)
 #include "private_provider_factory.h"
+#elif defined(SDK_USE_PRIVATE_PROVIDER) && defined(_WIN32)
+#include "private_windows_provider_factory.h"
 #elif !defined(SDK_USE_PRIVATE_PROVIDER)
 #include "mock_provider_factory.h"
 #endif
@@ -209,7 +211,7 @@ int main(int argc, char* argv[]) {
 
 #if defined(SDK_USE_PRIVATE_PROVIDER) && defined(_WIN32)
     ApplyDefaultSaneConfigDir();
-    editor::sdk::ProviderBundle providers;
+    editor::sdk::ProviderBundle providers = editor::sdk::private_windows::CreateProviderBundle();
     SDK_OPEN_LOG_INFO("[sdk_open_app] provider mode: private");
 #elif defined(SDK_USE_PRIVATE_PROVIDER)
     ApplyDefaultSaneConfigDir();
