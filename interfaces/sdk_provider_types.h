@@ -392,6 +392,7 @@ struct SdkOcrTaskSnapshot {
     int progress = 0;
     std::string output_path;
     std::vector<std::string> output_paths;
+    std::vector<SdkCaptureAsset> assets;
     std::string format;
     std::string export_type = "multi-page";
     std::string message = "queued";

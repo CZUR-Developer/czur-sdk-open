@@ -377,7 +377,7 @@ Demo 站点通过资源服务的 `POST /api/uploads/files` 上传浏览器选择
 OCR 与识别方法：
 
 - `ocr.extract_text`：对单张图片做轻量 OCR，返回文字块和图片坐标系下的矩形。
-- `ocr.recognize`：提交异步 OCR 导出任务。支持 `input_upload_ids` 或 `input_files`、`output_path` 或 `output_dir`、`format`，以及 `encoding`、`paperSize`、`exportType`、`ocrPreference`、`quality`、`exportFormat` 等导出参数。导出格式支持 `txt`、`pdf`、`docx`、`xlsx`、`ofd`、`json`。
+- `ocr.recognize`：提交异步 OCR 导出任务。支持 `input_upload_ids` 或 `input_files`、可选 `output_path` 或 `output_dir`、`format`，以及 `encoding`、`paperSize`、`exportType`、`ocrPreference`、`quality`、`exportFormat` 等导出参数。导出格式支持 `txt`、`pdf`、`docx`、`xlsx`、`ofd`、`json`。
 - `ocr.get`：查询 OCR 任务状态。
 - `ocr.cancel`：请求取消 OCR 任务。
 - `recognition.barcode_detect`：对静态图片做条码/二维码识别。实时条码识别归属采集/视频流，不由该方法启动。
@@ -411,7 +411,9 @@ OCR 导出示例：
 }
 ```
 
-如果需要一张图片导出一个文件，传 `exportType: "single-page"` 和 `output_dir`。响应会返回 `data.output_paths` 和 `data.task.output_paths`。
+如果 `multi-page` 不传 `output_path`，SDK 会在自己的任务资产目录生成结果文件，并在 `data.task.assets[].download_url` 返回可下载地址。客户端可下载到本地用户选择的最终路径。
+
+如果需要一张图片导出一个文件，传 `exportType: "single-page"` 和 `output_dir`。响应会返回 `data.output_paths`、`data.task.output_paths` 和可下载 assets。
 
 OCR 任务查询/取消示例：
 

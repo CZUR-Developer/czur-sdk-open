@@ -727,11 +727,16 @@ Json BuildOcrTaskJson(const SdkOcrTaskSnapshot& task) {
     for (std::vector<std::string>::const_iterator it = task.output_paths.begin(); it != task.output_paths.end(); ++it) {
         output_paths.push_back(*it);
     }
+    Json assets = Json::array();
+    for (std::vector<SdkCaptureAsset>::const_iterator it = task.assets.begin(); it != task.assets.end(); ++it) {
+        assets.push_back(BuildAssetJson(*it));
+    }
     return Json{{"task_id", task.task_id},
                 {"status", task.status},
                 {"progress", task.progress},
                 {"output_path", task.output_path},
                 {"output_paths", output_paths},
+                {"assets", assets},
                 {"format", task.format},
                 {"exportType", task.export_type},
                 {"message", task.message},
@@ -1224,6 +1229,55 @@ std::string ContentTypeForFileConvertFormat(const std::string& format) {
         return "application/vnd.ofd";
     }
     return ContentTypeForImageExtension(value);
+}
+
+std::string ContentTypeForOcrFormat(const std::string& format) {
+    const std::string value = NormalizeLower(format);
+    if (value == "pdf") {
+        return "application/pdf";
+    }
+    if (value == "ofd") {
+        return "application/vnd.ofd";
+    }
+    if (value == "txt") {
+        return "text/plain";
+    }
+    if (value == "docx") {
+        return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    }
+    if (value == "xlsx") {
+        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    }
+    if (value == "json") {
+        return "application/json";
+    }
+    return "application/octet-stream";
+}
+
+std::vector<SdkCaptureAsset> BuildOcrAssetsFromPaths(const SdkOcrTaskSnapshot& task) {
+    std::vector<std::string> paths = task.output_paths;
+    if (paths.empty() && !task.output_path.empty()) {
+        paths.push_back(task.output_path);
+    }
+    std::vector<SdkCaptureAsset> assets;
+    for (std::size_t i = 0; i < paths.size(); ++i) {
+        if (paths[i].empty()) {
+            continue;
+        }
+        SdkCaptureAsset asset;
+        std::ostringstream asset_id;
+        asset_id << "asset-ocr";
+        if (paths.size() > 1) {
+            asset_id << "-" << std::setw(3) << std::setfill('0') << (i + 1);
+        }
+        asset.asset_id = asset_id.str();
+        asset.kind = "ocr";
+        asset.path = paths[i];
+        asset.content_type = ContentTypeForOcrFormat(task.format);
+        asset.size = FileSize(paths[i]);
+        assets.push_back(asset);
+    }
+    return assets;
 }
 
 std::string NormalizeExportType(std::string value) {
@@ -1961,6 +2015,7 @@ CommandApplicationService::AssetAccessResult CommandApplicationService::ResolveA
             IsOkStatusCode(authorization_service_.RequireCapability(session_result.connection_id, "image.process").code) ||
             IsOkStatusCode(authorization_service_.RequireCapability(session_result.connection_id, "image.enhance").code) ||
             IsOkStatusCode(authorization_service_.RequireCapability(session_result.connection_id, "file.convert").code) ||
+            IsOkStatusCode(authorization_service_.RequireCapability(session_result.connection_id, "ocr.recognize").code) ||
             IsOkStatusCode(authorization_service_.RequireCapability(session_result.connection_id, "sane.scan").code);
         if (!can_read_image_asset) {
             result.code = ToCode(SdkStatusCode::CapabilityNotAllowed);
@@ -3415,8 +3470,15 @@ Json CommandApplicationService::HandleOcrRecognize(const std::string& connection
     if (ocr_request.input_files.empty()) {
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "input required");
     }
+    std::string ocr_asset_task_id = NextImageTaskId();
+    if (ocr_request.output_dir.empty()) {
+        ocr_request.output_dir = GetSdkOpenTaskAssetDir("ocr", ocr_asset_task_id, "assets");
+    }
     if (ocr_request.export_type == "multi-page" && ocr_request.output_path.empty()) {
-        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "output_path required");
+        ocr_request.output_path = JoinLocalPath(ocr_request.output_dir, "recognized." + ocr_request.format);
+    }
+    if (!ocr_request.output_dir.empty() && !EnsureDirectoryRecursive(ocr_request.output_dir)) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "failed to create ocr output directory");
     }
     if (ocr_request.export_type == "single-page") {
         if (ocr_request.output_dir.empty() && !ocr_request.output_path.empty()) {
@@ -3446,15 +3508,38 @@ Json CommandApplicationService::HandleOcrRecognize(const std::string& connection
     if (!IsOkStatusCode(result.code)) {
         return BuildWsResponse(request.request_id, result.code, result.message);
     }
+    SdkOcrTaskSnapshot task = result.task;
+    if (task.task_id.empty()) {
+        task.task_id = result.task_id.empty() ? ocr_asset_task_id : result.task_id;
+    }
+    if (task.output_path.empty()) {
+        task.output_path = ocr_request.output_path;
+    }
+    if (task.output_paths.empty() && !task.output_path.empty()) {
+        task.output_paths.push_back(task.output_path);
+    }
+    if (task.format.empty()) {
+        task.format = ocr_request.format;
+    }
+    if (task.export_type.empty()) {
+        task.export_type = ocr_request.export_type;
+    }
+    if (task.assets.empty()) {
+        task.assets = BuildOcrAssetsFromPaths(task);
+    }
+    for (std::vector<SdkCaptureAsset>::iterator it = task.assets.begin(); it != task.assets.end(); ++it) {
+        *it = AttachImageAssetUrls(task.task_id, *it);
+        RegisterImageAsset(connection_id, task.task_id, *it);
+    }
     Json output_paths = Json::array();
-    for (std::vector<std::string>::const_iterator it = result.task.output_paths.begin(); it != result.task.output_paths.end(); ++it) {
+    for (std::vector<std::string>::const_iterator it = task.output_paths.begin(); it != task.output_paths.end(); ++it) {
         output_paths.push_back(*it);
     }
     return BuildWsResponse(request.request_id,
                            SdkStatusCode::Ok,
                            "ok",
-                           Json{{"task_id", result.task_id},
-                                {"task", BuildOcrTaskJson(result.task)},
+                           Json{{"task_id", task.task_id},
+                                {"task", BuildOcrTaskJson(task)},
                                 {"input_count", ocr_request.input_files.size()},
                                 {"output_path", ocr_request.output_path},
                                 {"output_dir", ocr_request.output_dir},
@@ -3478,10 +3563,21 @@ Json CommandApplicationService::HandleOcrGet(const std::string& connection_id, c
     if (!IsOkStatusCode(result.code)) {
         return BuildWsResponse(request.request_id, result.code, result.message);
     }
+    SdkOcrTaskSnapshot task = result.task;
+    if (task.task_id.empty()) {
+        task.task_id = get_request.task_id;
+    }
+    if (task.assets.empty()) {
+        task.assets = BuildOcrAssetsFromPaths(task);
+    }
+    for (std::vector<SdkCaptureAsset>::iterator it = task.assets.begin(); it != task.assets.end(); ++it) {
+        *it = AttachImageAssetUrls(task.task_id, *it);
+        RegisterImageAsset(connection_id, task.task_id, *it);
+    }
     return BuildWsResponse(request.request_id,
                            SdkStatusCode::Ok,
                            "ok",
-                           Json{{"task", BuildOcrTaskJson(result.task)},
+                           Json{{"task", BuildOcrTaskJson(task)},
                                 {"provider", provider_names_.value("ocr", "")}});
 }
 

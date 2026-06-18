@@ -226,7 +226,13 @@ if(BUILD_SDK_PRIVATE)
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${CMAKE_SOURCE_DIR}/src/app/process/publicd/sane_open_source_devices.json"
             "$<TARGET_FILE_DIR:sdk_open_app>/configs/sane_open_source_devices.json"
-        COMMENT "Copy device config into sdk_open_app runtime directory"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory
+            "${CMAKE_SOURCE_DIR}/resources/ocr/fonts"
+            "$<TARGET_FILE_DIR:sdk_open_app>/ocr_fonts"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory
+            "${CMAKE_SOURCE_DIR}/resources/ofd/fonts"
+            "$<TARGET_FILE_DIR:sdk_open_app>/ofd_fonts"
+        COMMENT "Copy config and OCR/OFD font resources into sdk_open_app runtime directory"
     )
 
     if(WIN32)

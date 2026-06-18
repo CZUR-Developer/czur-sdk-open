@@ -377,7 +377,7 @@ For `selected_area`, pass frontend-scaled points in `params.selected_area.points
 OCR and recognition methods:
 
 - `ocr.extract_text`: runs lightweight OCR on one image and returns text blocks with image-space rectangles.
-- `ocr.recognize`: starts an asynchronous OCR export task. It accepts `input_upload_ids` or `input_files`, `output_path` or `output_dir`, `format`, and optional export parameters such as `encoding`, `paperSize`, `exportType`, `ocrPreference`, `quality`, and `exportFormat`. Supported export formats are `txt`, `pdf`, `docx`, `xlsx`, `ofd`, and `json`.
+- `ocr.recognize`: starts an asynchronous OCR export task. It accepts `input_upload_ids` or `input_files`, optional `output_path` or `output_dir`, `format`, and optional export parameters such as `encoding`, `paperSize`, `exportType`, `ocrPreference`, `quality`, and `exportFormat`. Supported export formats are `txt`, `pdf`, `docx`, `xlsx`, `ofd`, and `json`.
 - `ocr.get`: returns the current OCR task snapshot.
 - `ocr.cancel`: requests cancellation of one OCR task.
 - `recognition.barcode_detect`: detects barcode/QR content from one static image. Realtime barcode recognition belongs to the capture/video flow and is not started by this method.
@@ -411,7 +411,9 @@ OCR export example:
 }
 ```
 
-Use `exportType: "single-page"` with `output_dir` to export one file per input image. The response includes `data.output_paths` and `data.task.output_paths`.
+When `multi-page` omits `output_path`, SDK writes the result into its task asset directory and returns a downloadable URL in `data.task.assets[].download_url`, so clients can download it into a user-owned final path.
+
+Use `exportType: "single-page"` with `output_dir` to export one file per input image. The response includes `data.output_paths`, `data.task.output_paths`, and downloadable assets.
 
 OCR task query/cancel examples:
 
