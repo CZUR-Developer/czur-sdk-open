@@ -2573,7 +2573,21 @@ Json CommandApplicationService::HandleCaptureGet(const std::string& connection_i
     if (task.status.empty()) {
         return BuildWsResponse(request.request_id, task.code, task.message);
     }
-    return BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", BuildCaptureTaskJson(task));
+    const Json task_json = BuildCaptureTaskJson(task);
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"task", task_json},
+                                {"task_id", task.task_id},
+                                {"status", task.status},
+                                {"code", task.code},
+                                {"message", task.message},
+                                {"device_id", task.device_id},
+                                {"profile_revision", task.profile_revision},
+                                {"stages", task_json.value("stages", Json::array())},
+                                {"assets", task_json.value("assets", Json::array())},
+                                {"warnings", task.warnings},
+                                {"error", task.error}});
 }
 
 Json CommandApplicationService::HandleVideoStart(const std::string& connection_id, const Request& request) {
@@ -2742,12 +2756,22 @@ Json CommandApplicationService::HandleVideoSetProfile(const std::string& connect
     if (profile_request.device_id.empty()) {
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "device_id required");
     }
-    const Json profile_json = GetOptionalObjectField(request.params, "profile");
+    Json profile_params = request.params;
+    const Json profile_json = GetOptionalObjectField(profile_params, "profile");
     if (profile_json.empty()) {
-        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "profile required");
+        const bool has_inline_profile =
+            profile_params.find("capture") != profile_params.end() ||
+            profile_params.find("device") != profile_params.end() ||
+            profile_params.find("output") != profile_params.end() ||
+            profile_params.find("page_processing") != profile_params.end() ||
+            profile_params.find("single_page") != profile_params.end();
+        if (!has_inline_profile) {
+            return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "profile required");
+        }
+        profile_params = Json{{"profile", request.params}};
     }
 
-    const SdkCaptureProfile profile = ParseCaptureProfile(request.params, profile_request.device_id);
+    const SdkCaptureProfile profile = ParseCaptureProfile(profile_params, profile_request.device_id);
     profile_request.page_processing = profile.page_processing;
     profile_request.single_page_realtime_detect_rects = profile.single_page_realtime_detect_rects;
     profile_request.single_page_multi_target_paging = profile.single_page.multi_target_paging;
@@ -3936,6 +3960,13 @@ Json CommandApplicationService::HandleSaneSetOptions(const std::string& connecti
     const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
     if (!IsOkStatusCode(session_result.code)) {
         return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    const SdkSaneStatusResult status_result = sane_facade_.GetStatus();
+    if (status_result.code == ToCode(SdkStatusCode::SaneNotAvailable)) {
+        return BuildWsResponse(request.request_id,
+                               status_result.code,
+                               status_result.message,
+                               BuildSaneStatusJson(status_result, provider_names_.value("sane", "")));
     }
     SdkSaneSetOptionsRequest set_request;
     set_request.session_id = GetOptionalStringField(request.params, "session_id");
