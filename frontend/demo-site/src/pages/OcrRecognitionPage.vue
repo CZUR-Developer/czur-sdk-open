@@ -149,7 +149,7 @@ import SectionPanel from '../components/blocks/SectionPanel.vue';
 import StatusPill from '../components/cards/StatusPill.vue';
 import { authSessionState, sendBoundCommand } from '../services/auth-session';
 import { openImageViewer } from '../services/image-viewer';
-import { isOkResponse, resolveRuntimeHost } from '../services/protocol';
+import { buildAssetApiUrl, isOkResponse } from '../services/protocol';
 
 type RunningAction = '' | 'extract' | 'recognize' | 'barcode' | 'get' | 'cancel';
 
@@ -490,8 +490,7 @@ function buildRecognizeRequestPreview(): Record<string, unknown> {
 }
 
 function buildUploadUrl(): string {
-  const protocol = window.location.protocol === 'https:' ? 'https' : 'http';
-  return `${protocol}://${resolveRuntimeHost()}:17082/api/uploads/images`;
+  return buildAssetApiUrl('/api/uploads/images');
 }
 
 function defaultOutputPath(format: string): string {

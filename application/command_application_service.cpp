@@ -3498,6 +3498,9 @@ Json CommandApplicationService::HandleOcrRecognize(const std::string& connection
     ocr_request.output_path = GetOptionalStringField(request.params, "output_path");
     ocr_request.output_dir = GetOptionalStringField(request.params, "output_dir");
     ocr_request.format = NormalizeLower(GetOptionalStringField(request.params, "format"));
+    if (ocr_request.format.empty()) {
+        ocr_request.format = NormalizeLower(GetOptionalStringField(request.params, "output_format"));
+    }
     if (ocr_request.format.empty() && !ocr_request.output_path.empty()) {
         ocr_request.format = NormalizeLower(InferOutputFormatFromPath(ocr_request.output_path));
     }

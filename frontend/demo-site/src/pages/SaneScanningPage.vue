@@ -327,7 +327,7 @@ import StatusPill from '../components/cards/StatusPill.vue';
 import { authSessionState, onCommandEvent, sendBoundCommand } from '../services/auth-session';
 import type { EnhancePipeline, EnhanceWorkflow } from '../services/image-enhance-workflows';
 import { openImageViewer } from '../services/image-viewer';
-import { buildCommandRequest, isOkResponse, resolveRuntimeHost, type CommandEvent, type CommandResponse } from '../services/protocol';
+import { buildAssetApiUrl, buildCommandRequest, isOkResponse, type CommandEvent, type CommandResponse } from '../services/protocol';
 import saneI18nZh from '../data/sane_i18n_zh.json';
 
 interface SaneDevice {
@@ -729,8 +729,7 @@ function resolveAssetUrl(path: string): string {
   if (/^https?:\/\//i.test(path)) {
     return path;
   }
-  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
-  return `${protocol}//${resolveRuntimeHost()}:17082${path.startsWith('/') ? path : `/${path}`}`;
+  return buildAssetApiUrl(path);
 }
 
 function isBrowserRenderable(contentType: string): boolean {

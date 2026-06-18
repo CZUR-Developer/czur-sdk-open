@@ -180,7 +180,7 @@ import SectionPanel from '../components/blocks/SectionPanel.vue';
 import StatusPill from '../components/cards/StatusPill.vue';
 import { authSessionState, sendBoundCommand } from '../services/auth-session';
 import { openImageViewer } from '../services/image-viewer';
-import { isOkResponse, resolveRuntimeHost } from '../services/protocol';
+import { buildAssetApiUrl, isOkResponse } from '../services/protocol';
 
 type TargetType = 'png' | 'jpg' | 'tiff' | 'pdf' | 'ofd';
 type ExportType = 'multi-page' | 'single-page';
@@ -502,8 +502,7 @@ function openOutputImageViewer(preview: OutputPreview): void {
 }
 
 function buildUploadUrl(): string {
-  const protocol = window.location.protocol === 'https:' ? 'https' : 'http';
-  return `${protocol}://${resolveRuntimeHost()}:17082/api/uploads/files`;
+  return buildAssetApiUrl('/api/uploads/files');
 }
 
 function inferDocumentType(file: File): DocumentType {
@@ -521,8 +520,7 @@ function resolveAssetUrl(path: string): string {
   if (/^https?:\/\//i.test(path)) {
     return path;
   }
-  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
-  return `${protocol}//${window.location.hostname || '127.0.0.1'}:17082${path.startsWith('/') ? path : `/${path}`}`;
+  return buildAssetApiUrl(path);
 }
 
 function isBrowserRenderable(contentType: string): boolean {

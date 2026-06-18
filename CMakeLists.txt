@@ -369,6 +369,10 @@ if(BUILD_SDK_WEB)
     set(SDK_WEB_DEMO_DIST_DIR "${SDK_WEB_DEMO_PROJECT_DIR}/dist")
     set(SDK_WEB_ADMIN_TARGET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/web/admin")
     set(SDK_WEB_DEMO_TARGET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/web/demo")
+    set(SDK_WEB_RUNTIME_DIR "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+    if(CMAKE_CONFIGURATION_TYPES)
+        set(SDK_WEB_RUNTIME_DIR "${SDK_WEB_RUNTIME_DIR}/$<CONFIG>")
+    endif()
 
     add_custom_target(sdk_web_admin_build
         COMMAND "${CMAKE_COMMAND}" -E chdir "${SDK_WEB_ADMIN_PROJECT_DIR}" "${PNPM_EXECUTABLE}" install --force --no-frozen-lockfile
@@ -390,6 +394,12 @@ if(BUILD_SDK_WEB)
         COMMAND "${CMAKE_COMMAND}" -E remove_directory "${SDK_WEB_DEMO_TARGET_DIR}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${SDK_WEB_DEMO_TARGET_DIR}"
         COMMAND "${CMAKE_COMMAND}" -E copy_directory "${SDK_WEB_DEMO_DIST_DIR}" "${SDK_WEB_DEMO_TARGET_DIR}"
+        COMMAND "${CMAKE_COMMAND}" -E remove_directory "${SDK_WEB_RUNTIME_DIR}/web/admin"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${SDK_WEB_RUNTIME_DIR}/web/admin"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory "${SDK_WEB_ADMIN_DIST_DIR}" "${SDK_WEB_RUNTIME_DIR}/web/admin"
+        COMMAND "${CMAKE_COMMAND}" -E remove_directory "${SDK_WEB_RUNTIME_DIR}/web/demo"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${SDK_WEB_RUNTIME_DIR}/web/demo"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory "${SDK_WEB_DEMO_DIST_DIR}" "${SDK_WEB_RUNTIME_DIR}/web/demo"
         COMMENT "Build sdk web assets and copy dist into web/admin|demo"
     )
 

@@ -216,7 +216,7 @@ import {
   type EnhancePipeline,
   type EnhanceWorkflow,
 } from '../services/image-enhance-workflows';
-import { isOkResponse, resolveRuntimeHost, type CommandResponse } from '../services/protocol';
+import { buildAssetApiUrl, isOkResponse, type CommandResponse } from '../services/protocol';
 
 interface SelectedImage {
   file: File;
@@ -621,16 +621,14 @@ function importPipeline(value: EnhancePipeline): EditablePipeline {
 }
 
 function buildUploadUrl(): string {
-  const protocol = window.location.protocol === 'https:' ? 'https' : 'http';
-  return `${protocol}://${resolveRuntimeHost()}:17082/api/uploads/images`;
+  return buildAssetApiUrl('/api/uploads/images');
 }
 
 function resolveAssetUrl(path: string): string {
   if (/^https?:\/\//i.test(path)) {
     return path;
   }
-  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
-  return `${protocol}//${window.location.hostname || '127.0.0.1'}:17082${path.startsWith('/') ? path : `/${path}`}`;
+  return buildAssetApiUrl(path);
 }
 
 function collectRecords(value: unknown): Array<Record<string, unknown>> {
