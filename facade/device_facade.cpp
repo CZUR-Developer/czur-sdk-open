@@ -35,6 +35,7 @@ struct PrivateDeviceCApi {
     PrivateDeviceJsonFn capture_still = NULL;
     PrivateDeviceVideoStartJsonFn start_video = NULL;
     PrivateDeviceJsonFn stop_video = NULL;
+    PrivateDeviceJsonFn set_video_format = NULL;
     PrivateDeviceJsonFn set_video_profile = NULL;
     PrivateDeviceFreeStringFn free_string = NULL;
 };
@@ -93,6 +94,8 @@ PrivateDeviceCApi& GetPrivateDeviceCApi() {
         ::GetProcAddress(api.module, "czur_sdk_private_video_start_json"));
     api.stop_video = reinterpret_cast<PrivateDeviceJsonFn>(
         ::GetProcAddress(api.module, "czur_sdk_private_video_stop_json"));
+    api.set_video_format = reinterpret_cast<PrivateDeviceJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_video_format_json"));
     api.set_video_profile = reinterpret_cast<PrivateDeviceJsonFn>(
         ::GetProcAddress(api.module, "czur_sdk_private_video_profile_json"));
     api.free_string = reinterpret_cast<PrivateDeviceFreeStringFn>(
@@ -511,6 +514,30 @@ SdkVideoStopResult StopProviderVideoWithCApi(const SdkVideoStopRequest& request)
     return result;
 }
 
+SdkVideoFormatResult SetProviderVideoFormatWithCApi(const SdkVideoFormatRequest& request) {
+    SdkVideoFormatResult result;
+    PrivateDeviceCApi& api = GetPrivateDeviceCApi();
+    Json response;
+    std::string error;
+    Json request_json{{"device_id", request.device_id},
+                      {"width", request.width},
+                      {"height", request.height},
+                      {"fps", request.fps},
+                      {"pixel_format", request.pixel_format}};
+    if (!InvokePrivateDeviceCApi(api.set_video_format, request_json, &response, &error)) {
+        result.code = ToCode(SdkStatusCode::ProviderNotReady);
+        result.message = error;
+        return result;
+    }
+    result.code = IntField(response, "code");
+    result.message = StringField(response, "message");
+    if (result.message.empty()) {
+        result.message = IsOkStatusCode(result.code) ? "ok" : "private device failed";
+    }
+    result.applied = BoolField(response, "applied");
+    return result;
+}
+
 SdkVideoProfileResult SetProviderVideoProfileWithCApi(const SdkVideoProfileRequest& request) {
     SdkVideoProfileResult result;
     PrivateDeviceCApi& api = GetPrivateDeviceCApi();
@@ -744,10 +771,7 @@ SdkVideoFormatResult DeviceFacade::SetVideoFormat(const AuthContext& auth_contex
     SdkVideoFormatResult result;
 #if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
     (void)auth_context;
-    (void)request;
-    result.code = ToCode(SdkStatusCode::UnsupportedMethod);
-    result.message = "video.set_format is not supported by the private Windows provider";
-    return result;
+    return SetProviderVideoFormatWithCApi(request);
 #else
     const DeviceGetResult device_result = LookupDevice(auth_context, request.device_id);
     if (!IsOkStatusCode(device_result.code)) {
