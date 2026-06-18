@@ -35,6 +35,7 @@ struct PrivateDeviceCApi {
     PrivateDeviceJsonFn capture_still = NULL;
     PrivateDeviceVideoStartJsonFn start_video = NULL;
     PrivateDeviceJsonFn stop_video = NULL;
+    PrivateDeviceJsonFn set_video_profile = NULL;
     PrivateDeviceFreeStringFn free_string = NULL;
 };
 
@@ -92,6 +93,8 @@ PrivateDeviceCApi& GetPrivateDeviceCApi() {
         ::GetProcAddress(api.module, "czur_sdk_private_video_start_json"));
     api.stop_video = reinterpret_cast<PrivateDeviceJsonFn>(
         ::GetProcAddress(api.module, "czur_sdk_private_video_stop_json"));
+    api.set_video_profile = reinterpret_cast<PrivateDeviceJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_video_profile_json"));
     api.free_string = reinterpret_cast<PrivateDeviceFreeStringFn>(
         ::GetProcAddress(api.module, "czur_sdk_private_providers_free_string"));
     return api;
@@ -508,6 +511,32 @@ SdkVideoStopResult StopProviderVideoWithCApi(const SdkVideoStopRequest& request)
     return result;
 }
 
+SdkVideoProfileResult SetProviderVideoProfileWithCApi(const SdkVideoProfileRequest& request) {
+    SdkVideoProfileResult result;
+    PrivateDeviceCApi& api = GetPrivateDeviceCApi();
+    Json response;
+    std::string error;
+    Json request_json{{"device_id", request.device_id},
+                      {"page_processing", request.page_processing},
+                      {"single_page_realtime_detect_rects", request.single_page_realtime_detect_rects},
+                      {"single_page_multi_target_paging", request.single_page_multi_target_paging}};
+    if (!InvokePrivateDeviceCApi(api.set_video_profile, request_json, &response, &error)) {
+        result.code = ToCode(SdkStatusCode::ProviderNotReady);
+        result.message = error;
+        return result;
+    }
+    result.code = IntField(response, "code");
+    result.message = StringField(response, "message");
+    if (result.message.empty()) {
+        result.message = IsOkStatusCode(result.code) ? "ok" : "private device failed";
+    }
+    result.applied = BoolField(response, "applied");
+    result.page_processing = StringField(response, "page_processing");
+    result.single_page_realtime_detect_rects = BoolField(response, "single_page_realtime_detect_rects");
+    result.single_page_multi_target_paging = BoolField(response, "single_page_multi_target_paging");
+    return result;
+}
+
 #endif
 
 } // namespace
@@ -713,25 +742,56 @@ SdkVideoStopResult DeviceFacade::StopVideo(const AuthContext& auth_context, cons
 SdkVideoFormatResult DeviceFacade::SetVideoFormat(const AuthContext& auth_context,
                                                   const SdkVideoFormatRequest& request) const {
     SdkVideoFormatResult result;
+#if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
+    (void)auth_context;
+    (void)request;
+    result.code = ToCode(SdkStatusCode::UnsupportedMethod);
+    result.message = "video.set_format is not supported by the private Windows provider";
+    return result;
+#else
     const DeviceGetResult device_result = LookupDevice(auth_context, request.device_id);
     if (!IsOkStatusCode(device_result.code)) {
         result.code = device_result.code;
         result.message = device_result.message;
         return result;
     }
-    return providers_.device_provider->SetVideoFormat(request);
+    try {
+        return providers_.device_provider->SetVideoFormat(request);
+    } catch (const std::exception& e) {
+        result.code = ToCode(SdkStatusCode::InternalError);
+        result.message = e.what();
+    } catch (...) {
+        result.code = ToCode(SdkStatusCode::InternalError);
+        result.message = "video.set_format failed";
+    }
+    return result;
+#endif
 }
 
 SdkVideoProfileResult DeviceFacade::SetVideoProfile(const AuthContext& auth_context,
                                                     const SdkVideoProfileRequest& request) const {
     SdkVideoProfileResult result;
+#if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
+    (void)auth_context;
+    return SetProviderVideoProfileWithCApi(request);
+#else
     const DeviceGetResult device_result = LookupDevice(auth_context, request.device_id);
     if (!IsOkStatusCode(device_result.code)) {
         result.code = device_result.code;
         result.message = device_result.message;
         return result;
     }
-    return providers_.device_provider->SetVideoProfile(request);
+    try {
+        return providers_.device_provider->SetVideoProfile(request);
+    } catch (const std::exception& e) {
+        result.code = ToCode(SdkStatusCode::InternalError);
+        result.message = e.what();
+    } catch (...) {
+        result.code = ToCode(SdkStatusCode::InternalError);
+        result.message = "video.set_profile failed";
+    }
+    return result;
+#endif
 }
 
 } // namespace sdk

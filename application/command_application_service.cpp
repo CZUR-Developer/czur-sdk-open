@@ -3574,7 +3574,21 @@ Json CommandApplicationService::HandleOcrRecognize(const std::string& connection
         }
     }
 
-    const SdkOcrRecognizeResult result = ocr_facade_.Recognize(ocr_request);
+    SdkOcrRecognizeResult result;
+    try {
+        result = ocr_facade_.Recognize(ocr_request);
+    } catch (const std::exception& e) {
+        SDK_OPEN_LOG_ERROR("[command_application] ocr.recognize provider threw connection={} request_id={} err={}",
+                           connection_id,
+                           request.request_id,
+                           e.what());
+        return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, e.what());
+    } catch (...) {
+        SDK_OPEN_LOG_ERROR("[command_application] ocr.recognize provider threw connection={} request_id={} err=<unknown>",
+                           connection_id,
+                           request.request_id);
+        return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "ocr.recognize provider failed");
+    }
     if (!IsOkStatusCode(result.code)) {
         return BuildWsResponse(request.request_id, result.code, result.message);
     }
