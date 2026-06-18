@@ -27,6 +27,7 @@ typedef void (*PrivateAuthFreeStringFn)(const char*);
 struct PrivateAuthCApi {
     HMODULE module = NULL;
     PrivateAuthJsonFn create_session = NULL;
+    PrivateAuthJsonFn activate_offline = NULL;
     PrivateAuthJsonFn consume_quota = NULL;
     PrivateAuthFreeStringFn free_string = NULL;
 };
@@ -44,6 +45,8 @@ PrivateAuthCApi& GetPrivateAuthCApi() {
     }
     api.create_session = reinterpret_cast<PrivateAuthJsonFn>(
         ::GetProcAddress(api.module, "czur_sdk_private_create_session_json"));
+    api.activate_offline = reinterpret_cast<PrivateAuthJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_activate_offline_json"));
     api.consume_quota = reinterpret_cast<PrivateAuthJsonFn>(
         ::GetProcAddress(api.module, "czur_sdk_private_consume_quota_json"));
     api.free_string = reinterpret_cast<PrivateAuthFreeStringFn>(
@@ -383,6 +386,43 @@ AuthorizationService::SessionResult ConsumeQuotaWithCApi(const AuthorizationServ
     return result;
 }
 
+AuthorizationService::SessionResult ActivateOfflineWithCApi(const AuthorizationService::SessionResult& bound_session,
+                                                            const std::string& connection_id,
+                                                            const std::string& auth_code,
+                                                            std::int64_t now_ts) {
+    AuthorizationService::SessionResult result;
+    PrivateAuthCApi& api = GetPrivateAuthCApi();
+    Json response;
+    std::string error;
+    const Json request = Json{{"token", bound_session.token},
+                              {"session_token", bound_session.session_token},
+                              {"auth_code", auth_code},
+                              {"now_ts", now_ts}};
+    if (!InvokePrivateAuthCApi(api.activate_offline, request, &response, &error)) {
+        result = bound_session;
+        result.code = ToCode(SdkStatusCode::ProviderNotReady);
+        result.message = error;
+        return result;
+    }
+
+    result.code = IntField(response, "code");
+    result.message = StringField(response, "message");
+    if (result.message.empty()) {
+        result.message = IsOkStatusCode(result.code) ? "ok" : "private auth failed";
+    }
+    result.token = bound_session.token;
+    result.session_token = StringField(response, "session_token");
+    result.connection_id = connection_id;
+    result.expires_in = IntField(response, "expires_in");
+    result.created_at = bound_session.created_at;
+    result.last_seen_at = now_ts;
+    Json::const_iterator auth_context_it = response.find("auth_context");
+    if (auth_context_it != response.end()) {
+        result.auth_context = AuthContextFromJson(*auth_context_it);
+    }
+    return result;
+}
+
 #endif
 
 } // namespace
@@ -584,6 +624,16 @@ AuthorizationService::SessionResult AuthorizationService::ActivateOffline(const 
     if (!IsOkStatusCode(bound_session.code)) {
         return bound_session;
     }
+#if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
+    const std::int64_t now_ts = static_cast<std::int64_t>(std::time(NULL));
+    SessionResult result = ActivateOfflineWithCApi(bound_session, connection_id, auth_code, now_ts);
+    if (IsOkStatusCode(result.code)) {
+        RebuildLocalCapabilities(&result.auth_context);
+        std::lock_guard<std::mutex> lock(sessions_mu_);
+        sessions_[connection_id] = CopySessionResultForStorage(result);
+    }
+    return result;
+#else
     if (!providers_.auth_provider) {
         bound_session.code = ToCode(SdkStatusCode::ProviderNotReady);
         bound_session.message = "provider not ready";
@@ -612,6 +662,7 @@ AuthorizationService::SessionResult AuthorizationService::ActivateOffline(const 
         sessions_[connection_id] = result;
     }
     return result;
+#endif
 }
 
 AuthorizationService::SessionResult AuthorizationService::ConsumeQuota(const std::string& connection_id,
