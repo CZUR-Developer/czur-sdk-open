@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "sdk_auth_types.h"
+#include "sdk_json_utils.h"
 #include "sdk_provider_bundle.h"
 
 namespace editor {
@@ -32,12 +33,19 @@ public:
         AuthContext auth_context;
     };
 
+    struct ContextDataResult {
+        int code = ToCode(SdkStatusCode::Ok);
+        std::string message = "ok";
+        Json data = Json::object();
+    };
+
     explicit AuthorizationService(const ProviderBundle& providers,
                                   AuthzBaseUrlSupplier authz_base_url_supplier = AuthzBaseUrlSupplier());
 
     SessionResult CreateSession(const std::string& connection_id, const std::string& token);
     SessionResult RefreshSession(const std::string& connection_id);
     SessionResult GetContext(const std::string& connection_id) const;
+    ContextDataResult GetContextData(const std::string& connection_id) const;
     SessionResult RequireSession(const std::string& connection_id) const;
     SessionResult RequireSessionToken(const std::string& session_token) const;
     SessionResult RequireCapability(const std::string& connection_id, const std::string& capability) const;

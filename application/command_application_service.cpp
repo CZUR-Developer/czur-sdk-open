@@ -15,6 +15,7 @@
 
 #include "sdk_runtime_paths.h"
 #include "sdk_entitlement_policy.h"
+#include "sdk_logger.h"
 
 namespace editor {
 namespace sdk {
@@ -1498,6 +1499,11 @@ Json CommandApplicationService::HandleRequest(const std::string& connection_id, 
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidMethod, "missing method");
     }
 
+    SDK_OPEN_LOG_INFO("[command_application] request begin connection={} request_id={} method={}",
+                      connection_id,
+                      request.request_id,
+                      request.method);
+
     const MethodDescriptor* descriptor = FindMethod(request.method);
     if (descriptor == NULL) {
         return BuildWsResponse(request.request_id, SdkStatusCode::UnsupportedMethod, "unsupported method");
@@ -2264,15 +2270,30 @@ Json CommandApplicationService::HandleAuthCreateSession(const std::string& conne
 }
 
 Json CommandApplicationService::HandleAuthGetContext(const std::string& connection_id, const Request& request) {
-    const AuthorizationService::SessionResult session_result = authorization_service_.GetContext(connection_id);
-    if (!IsOkStatusCode(session_result.code)) {
-        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    SDK_OPEN_LOG_INFO("[command_application] auth.get_context begin connection={} request_id={}",
+                      connection_id,
+                      request.request_id);
+    const AuthorizationService::ContextDataResult context_result = authorization_service_.GetContextData(connection_id);
+    const Json auth_context =
+        context_result.data.value("auth_context", Json::object());
+    SDK_OPEN_LOG_INFO("[command_application] auth.get_context data loaded connection={} request_id={} code={} token_len={} caps={} quotas={}",
+                      connection_id,
+                      request.request_id,
+                      context_result.code,
+                      context_result.data.value("session_token", std::string()).size(),
+                      auth_context.value("capability_count", 0U),
+                      auth_context.value("quota_bucket_count", 0U));
+    if (!IsOkStatusCode(context_result.code)) {
+        return BuildWsResponse(request.request_id, context_result.code, context_result.message);
     }
-    return BuildWsResponse(request.request_id,
-                           SdkStatusCode::Ok,
-                           "ok",
-                           Json{{"session_token", session_result.session_token},
-                                {"auth_context", BuildAuthContextJson(session_result.auth_context)}});
+    Json data = context_result.data;
+    data["session_token"] = "";
+    Json response = BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", data);
+    SDK_OPEN_LOG_INFO("[command_application] auth.get_context response built connection={} request_id={} data_fields={}",
+                      connection_id,
+                      request.request_id,
+                      response["data"].size());
+    return response;
 }
 
 Json CommandApplicationService::HandleAuthRefreshSession(const std::string& connection_id, const Request& request) {
@@ -2408,15 +2429,15 @@ Json CommandApplicationService::HandleDeviceClose(const std::string& connection_
 
     bool stopped_stream = false;
     std::string stopped_stream_id;
-    SdkVideoStopRequest stop_request;
-    stop_request.device_id = close_request.device_id;
-    const SdkVideoStopResult stop_result = device_facade_.StopVideo(session_result.auth_context, stop_request);
-    if (!IsOkStatusCode(stop_result.code)) {
-        return BuildWsResponse(request.request_id, stop_result.code, stop_result.message);
-    }
     const VideoSessionService::StreamResult stream_result =
         video_session_service_.StopStream(connection_id, close_request.device_id);
     if (IsOkStatusCode(stream_result.code)) {
+        SdkVideoStopRequest stop_request;
+        stop_request.device_id = close_request.device_id;
+        const SdkVideoStopResult stop_result = device_facade_.StopVideo(session_result.auth_context, stop_request);
+        if (!IsOkStatusCode(stop_result.code)) {
+            return BuildWsResponse(request.request_id, stop_result.code, stop_result.message);
+        }
         stopped_stream = true;
         stopped_stream_id = stream_result.binding.stream_id;
         if (video_stream_closed_sink_) {
@@ -4550,6 +4571,12 @@ Json CommandApplicationService::BuildAdminSessionJson(const AuthorizationService
 }
 
 Json CommandApplicationService::BuildAuthContextJson(const AuthContext& auth_context) const {
+    SDK_OPEN_LOG_INFO("[command_application] build_auth_context begin valid={} account={} caps={} quotas={} device_scope={}",
+                      auth_context.is_valid,
+                      ToAccountTypeString(auth_context.account_type),
+                      auth_context.capabilities.size(),
+                      auth_context.quota_buckets.size(),
+                      auth_context.device_scope.size());
     Json device_scope = Json::array();
     for (std::vector<SdkDeviceGrant>::const_iterator it = auth_context.device_scope.begin();
          it != auth_context.device_scope.end();
@@ -4560,45 +4587,25 @@ Json CommandApplicationService::BuildAuthContextJson(const AuthContext& auth_con
         });
     }
 
-    Json capabilities = Json::array();
-    for (std::vector<std::string>::const_iterator it = auth_context.capabilities.begin();
-         it != auth_context.capabilities.end();
-         ++it) {
-        capabilities.push_back(*it);
-    }
-
-    Json quota_buckets = Json::array();
-    for (std::vector<AuthQuotaBucket>::const_iterator it = auth_context.quota_buckets.begin();
-         it != auth_context.quota_buckets.end();
-         ++it) {
-        Json methods = Json::array();
-        for (std::vector<std::string>::const_iterator method_it = it->methods.begin(); method_it != it->methods.end();
-             ++method_it) {
-            methods.push_back(*method_it);
-        }
-        quota_buckets.push_back(Json{
-            {"bucket", it->bucket},
-            {"methods", methods},
-            {"limit", it->limit},
-            {"remaining", it->remaining},
-            {"enforcement", it->enforcement},
-        });
-    }
-
-    return Json{
+    Json result = Json{
         {"is_valid", auth_context.is_valid},
         {"account_type", ToAccountTypeString(auth_context.account_type)},
         {"account_type_code", auth_context.account_type_code},
+        {"licensed_account_type", ToAccountTypeString(auth_context.licensed_account_type)},
+        {"licensed_account_type_code", auth_context.licensed_account_type_code},
         {"auth_scene", auth_context.auth_scene},
         {"license_mode", auth_context.license_mode},
+        {"host_auth_mode", auth_context.host_auth_mode},
         {"entitlement_state", auth_context.entitlement_state},
         {"commercial_authorized", auth_context.commercial_authorized},
         {"machine_code", auth_context.machine_code},
         {"device_scope", device_scope},
         {"expires_at", auth_context.expires_at},
-        {"capabilities", capabilities},
-        {"quota_buckets", quota_buckets},
+        {"capability_count", auth_context.capabilities.size()},
+        {"quota_bucket_count", auth_context.quota_buckets.size()},
     };
+    SDK_OPEN_LOG_INFO("[command_application] build_auth_context end fields={}", result.size());
+    return result;
 }
 
 Json CommandApplicationService::BuildDeviceJson(const SdkDeviceDescriptor& device) const {
