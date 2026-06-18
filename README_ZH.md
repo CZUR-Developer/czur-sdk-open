@@ -174,6 +174,30 @@ cmake --build build --target sdk_open_app -j4
 ./build/Debug/sdk_open_app
 ```
 
+### 4. Windows Service
+
+Windows 版本的 `sdk_open_app.exe` 同时支持控制台模式和 Windows Service 模式。安装或卸载服务需要在管理员终端执行：
+
+```powershell
+.\sdk_open_app.exe --install-service
+.\sdk_open_app.exe --uninstall-service
+```
+
+可选参数：
+
+- `--service-name <name>`：指定服务名，默认 `CZURSdkOpenApp`
+- `--display-name <name>`：指定服务显示名，默认 `CZUR SDK Open App`
+- `--config <path>`：指定运行时配置文件路径
+
+安装后可通过系统服务管理器或 `sc.exe` 启停：
+
+```powershell
+sc.exe start CZURSdkOpenApp
+sc.exe stop CZURSdkOpenApp
+```
+
+服务模式下实际启动命令为 `sdk_open_app.exe --service ...`，该参数由 SCM 托管时使用；普通调试仍可直接运行 `sdk_open_app.exe [config]`。
+
 ## 环境变量
 
 `sdk_open_app` 支持以下端口和鉴权覆盖：

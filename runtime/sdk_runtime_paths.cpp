@@ -69,6 +69,22 @@ std::string CurrentWorkingDirectory() {
 #endif
 }
 
+#if defined(_WIN32)
+std::string ResolveWindowsLocalAppDataSdkDir() {
+    const char* local_app_data = std::getenv("LOCALAPPDATA");
+    if (local_app_data != NULL && local_app_data[0] != '\0') {
+        return JoinPath(JoinPath(std::string(local_app_data), ".czur"), "sdk");
+    }
+
+    const char* user_profile = std::getenv("USERPROFILE");
+    if (user_profile != NULL && user_profile[0] != '\0') {
+        return JoinPath(JoinPath(JoinPath(JoinPath(std::string(user_profile), "AppData"), "Local"), ".czur"), "sdk");
+    }
+
+    return JoinPath(JoinPath(CurrentWorkingDirectory(), ".czur"), "sdk");
+}
+#endif
+
 std::string ResolveSdkOpenWorkDir() {
     const char* runtime_dir = std::getenv(kCzurSdkRuntimeDirEnv);
     if (runtime_dir != NULL && runtime_dir[0] != '\0') {
@@ -81,22 +97,18 @@ std::string ResolveSdkOpenWorkDir() {
     }
 
 #if defined(_WIN32)
-    const char* home = std::getenv("USERPROFILE");
+    return ResolveWindowsLocalAppDataSdkDir();
 #else
     if (::geteuid() == 0) {
         return kSystemSdkOpenWorkDir;
     }
     const char* home = std::getenv("HOME");
-#endif
     if (home != NULL && home[0] != '\0') {
         return JoinPath(JoinPath(std::string(home), ".czur"), "sdk");
     }
 
-#if !defined(_WIN32)
     return kSystemSdkOpenWorkDir;
 #endif
-
-    return JoinPath(JoinPath(CurrentWorkingDirectory(), ".czur"), "sdk");
 }
 
 } // namespace

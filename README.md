@@ -176,6 +176,30 @@ cmake --build build --target sdk_open_app -j4
 ./build/Debug/sdk_open_app
 ```
 
+### 4. Windows Service
+
+On Windows, `sdk_open_app.exe` can run either as a console process or as a Windows Service. Install and uninstall commands must be run from an elevated terminal:
+
+```powershell
+.\sdk_open_app.exe --install-service
+.\sdk_open_app.exe --uninstall-service
+```
+
+Optional arguments:
+
+- `--service-name <name>`: service name, defaults to `CZURSdkOpenApp`
+- `--display-name <name>`: service display name, defaults to `CZUR SDK Open App`
+- `--config <path>`: runtime config file path
+
+After installation, start or stop the service through Services or `sc.exe`:
+
+```powershell
+sc.exe start CZURSdkOpenApp
+sc.exe stop CZURSdkOpenApp
+```
+
+Service mode is launched by SCM with `sdk_open_app.exe --service ...`; normal debugging can still run `sdk_open_app.exe [config]` directly.
+
 ## Environment Variables
 
 `sdk_open_app` supports these overrides:

@@ -1,6 +1,9 @@
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
 
 option(SDK_OPEN_ENABLE_HTTP_SERVER "Start sdk_open embedded admin/demo HTTP servers" ON)
 
@@ -169,6 +172,9 @@ target_include_directories(sdk_open_app PRIVATE
 target_link_libraries(sdk_open_app PRIVATE
     sdk_open_runtime
 )
+if(WIN32)
+    target_link_libraries(sdk_open_app PRIVATE Advapi32)
+endif()
 
 if(SDK_OPEN_USE_PRIVATE_PROVIDER)
     target_compile_definitions(sdk_open_app PRIVATE SDK_USE_PRIVATE_PROVIDER)
