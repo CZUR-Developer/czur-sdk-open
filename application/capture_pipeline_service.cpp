@@ -617,47 +617,6 @@ private:
     mutable std::mutex mu_;
 };
 
-class CaptureRawNode : public CGraph::GTemplateNode<CapturePipelineContext*> {
-public:
-    explicit CaptureRawNode(CapturePipelineContext* context) : context_(context) {}
-    CStatus run() override { return context_->CaptureRaw(); }
-private:
-    CapturePipelineContext* context_;
-};
-
-class ThumbnailNode : public CGraph::GTemplateNode<CapturePipelineContext*, ThumbnailTarget> {
-public:
-    ThumbnailNode(CapturePipelineContext* context, ThumbnailTarget target) : context_(context), target_(target) {}
-    CStatus run() override { return context_->RunThumbnail(target_); }
-private:
-    CapturePipelineContext* context_;
-    ThumbnailTarget target_;
-};
-
-class PageProcessNode : public CGraph::GTemplateNode<CapturePipelineContext*> {
-public:
-    explicit PageProcessNode(CapturePipelineContext* context) : context_(context) {}
-    CStatus run() override { return context_->PageProcess(); }
-private:
-    CapturePipelineContext* context_;
-};
-
-class OutputWorkflowNode : public CGraph::GTemplateNode<CapturePipelineContext*> {
-public:
-    explicit OutputWorkflowNode(CapturePipelineContext* context) : context_(context) {}
-    CStatus run() override { return context_->ProcessOutputWorkflow(); }
-private:
-    CapturePipelineContext* context_;
-};
-
-class FinalizeResultNode : public CGraph::GTemplateNode<CapturePipelineContext*> {
-public:
-    explicit FinalizeResultNode(CapturePipelineContext* context) : context_(context) {}
-    CStatus run() override { return context_->FinalizeResult(); }
-private:
-    CapturePipelineContext* context_;
-};
-
 } // namespace
 
 CapturePipelineService::CapturePipelineService(const ProviderBundle& providers)
@@ -668,21 +627,19 @@ CapturePipelineService::CapturePipelineService(const ProviderBundle& providers)
 CapturePipelineResult CapturePipelineService::Run(const CapturePipelineRequest& request,
                                                   CaptureStageCallback stage_callback) const {
     CapturePipelineContext context(request, device_facade_, graphic_facade_, providers_, stage_callback);
-    CGraph::GPipelinePtr pipeline = CGraph::GPipelineFactory::create();
-    CGraph::GTemplateNodePtr<CapturePipelineContext*> capture = nullptr;
-    CGraph::GTemplateNodePtr<CapturePipelineContext*, ThumbnailTarget> original_thumb = nullptr;
-    CGraph::GTemplateNodePtr<CapturePipelineContext*> page = nullptr;
-    CGraph::GTemplateNodePtr<CapturePipelineContext*> output_workflow = nullptr;
-    CGraph::GTemplateNodePtr<CapturePipelineContext*> finalize = nullptr;
-
-    pipeline->registerGElement<CaptureRawNode>(&capture, {}, &context);
-    pipeline->registerGElement<ThumbnailNode>(&original_thumb, {capture}, &context, ThumbnailTarget::Original);
-    pipeline->registerGElement<PageProcessNode>(&page, {original_thumb}, &context);
-    pipeline->registerGElement<OutputWorkflowNode>(&output_workflow, {page}, &context);
-    pipeline->registerGElement<FinalizeResultNode>(&finalize, {output_workflow}, &context);
-
-    const CStatus status = pipeline->process();
-    CGraph::GPipelineFactory::remove(pipeline);
+    CStatus status = context.CaptureRaw();
+    if (!status.isErr()) {
+        status = context.RunThumbnail(ThumbnailTarget::Original);
+    }
+    if (!status.isErr()) {
+        status = context.PageProcess();
+    }
+    if (!status.isErr()) {
+        status = context.ProcessOutputWorkflow();
+    }
+    if (!status.isErr()) {
+        status = context.FinalizeResult();
+    }
 
     CapturePipelineResult result = context.Result();
     if (status.isErr() && result.status != "failed") {

@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cstdio>
 #include <ctime>
+#include <exception>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -715,6 +716,8 @@ Json BuildCaptureTaskJson(const CaptureTaskSnapshot& task) {
     }
     return Json{{"task_id", task.task_id},
                 {"status", task.status},
+                {"code", task.code},
+                {"message", task.message},
                 {"device_id", task.device_id},
                 {"profile_revision", task.profile_revision},
                 {"stages", stages},
@@ -2483,23 +2486,69 @@ Json CommandApplicationService::HandleCaptureTake(const std::string& connection_
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "profile required");
     }
 
+    const Json pipeline_json = GetOptionalObjectField(request.params, "pipeline");
+    const std::size_t pipeline_steps =
+        pipeline_json.is_object() && pipeline_json.find("steps") != pipeline_json.end() && pipeline_json["steps"].is_array()
+            ? pipeline_json["steps"].size()
+            : 0;
+    SDK_OPEN_LOG_INFO("[command_application] capture.take prepare connection={} request_id={} profile_fields={} pipeline_steps={} include_base64={} timeout_ms={}",
+                      connection_id,
+                      request.request_id,
+                      profile_json.size(),
+                      pipeline_steps,
+                      GetOptionalBoolField(request.params, "include_base64", false),
+                      GetOptionalIntField(request.params, "timeout_ms", 15000));
+
     CaptureTaskStartRequest start_request;
-    start_request.connection_id = connection_id;
-    start_request.session_token = session_result.session_token;
-    start_request.device_id = device_id;
-    start_request.output_dir = GetOptionalStringField(request.params, "output_dir");
-    start_request.include_base64 = GetOptionalBoolField(request.params, "include_base64", false);
-    start_request.timeout_ms = GetOptionalIntField(request.params, "timeout_ms", 15000);
-    start_request.auth_context = session_result.auth_context;
-    start_request.profile = ParseCaptureProfile(request.params, device_id);
-    start_request.pipeline = ParseImageEnhancePipeline(GetOptionalObjectField(request.params, "pipeline"));
-    start_request.online_api_key = session_result.token;
-    start_request.online_base_url = runtime_config_ ? runtime_config_->OnlineImageEnhanceBaseUrl() : "";
-    if (start_request.profile.device_id.empty()) {
-        start_request.profile.device_id = device_id;
+    try {
+        start_request.connection_id = connection_id;
+        start_request.session_token = session_result.session_token;
+        start_request.device_id = device_id;
+        start_request.output_dir = GetOptionalStringField(request.params, "output_dir");
+        start_request.include_base64 = GetOptionalBoolField(request.params, "include_base64", false);
+        start_request.timeout_ms = GetOptionalIntField(request.params, "timeout_ms", 15000);
+        start_request.auth_context = session_result.auth_context;
+        start_request.profile = ParseCaptureProfile(request.params, device_id);
+        start_request.pipeline = ParseImageEnhancePipeline(pipeline_json);
+        start_request.online_api_key = session_result.token;
+        start_request.online_base_url = runtime_config_ ? runtime_config_->OnlineImageEnhanceBaseUrl() : "";
+        if (start_request.profile.device_id.empty()) {
+            start_request.profile.device_id = device_id;
+        }
+    } catch (const std::exception& e) {
+        SDK_OPEN_LOG_ERROR("[command_application] capture.take parse failed connection={} request_id={} err={}",
+                           connection_id,
+                           request.request_id,
+                           e.what());
+        return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, e.what());
+    } catch (...) {
+        SDK_OPEN_LOG_ERROR("[command_application] capture.take parse failed connection={} request_id={} err=<unknown>",
+                           connection_id,
+                           request.request_id);
+        return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "capture.take parse failed");
     }
 
-    const CaptureTaskStartResult result = capture_task_service_.StartTask(start_request);
+    CaptureTaskStartResult result;
+    try {
+        SDK_OPEN_LOG_INFO("[command_application] capture.take start_task connection={} request_id={} profile_revision={} pipeline_steps={} quotas={}",
+                          connection_id,
+                          request.request_id,
+                          start_request.profile.revision,
+                          start_request.pipeline.steps.size(),
+                          start_request.auth_context.quota_buckets.size());
+        result = capture_task_service_.StartTask(start_request);
+    } catch (const std::exception& e) {
+        SDK_OPEN_LOG_ERROR("[command_application] capture.take start_task failed connection={} request_id={} err={}",
+                           connection_id,
+                           request.request_id,
+                           e.what());
+        return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, e.what());
+    } catch (...) {
+        SDK_OPEN_LOG_ERROR("[command_application] capture.take start_task failed connection={} request_id={} err=<unknown>",
+                           connection_id,
+                           request.request_id);
+        return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "capture.take start_task failed");
+    }
     if (!IsOkStatusCode(result.code)) {
         return BuildWsResponse(request.request_id, result.code, result.message);
     }
@@ -2521,7 +2570,7 @@ Json CommandApplicationService::HandleCaptureGet(const std::string& connection_i
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "task_id required");
     }
     const CaptureTaskSnapshot task = capture_task_service_.GetTask(connection_id, task_id);
-    if (!IsOkStatusCode(task.code)) {
+    if (task.status.empty()) {
         return BuildWsResponse(request.request_id, task.code, task.message);
     }
     return BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", BuildCaptureTaskJson(task));

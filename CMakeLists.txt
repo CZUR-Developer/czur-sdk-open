@@ -224,6 +224,14 @@ if(BUILD_SDK_PRIVATE)
         set(SDK_OPEN_CZOCR_MODEL_DIR "${CMAKE_SOURCE_DIR}/third_party_repo/czocr/models/${LIB_ARCH}")
     endif()
 
+    set(SDK_OPEN_COPY_OCR_FONTS_COMMANDS)
+    if(EXISTS "${CMAKE_SOURCE_DIR}/resources/ocr/fonts")
+        list(APPEND SDK_OPEN_COPY_OCR_FONTS_COMMANDS
+            COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                "${CMAKE_SOURCE_DIR}/resources/ocr/fonts"
+                "$<TARGET_FILE_DIR:sdk_open_app>/ocr_fonts")
+    endif()
+
     add_custom_command(TARGET sdk_open_app POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:sdk_open_app>/configs"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
@@ -232,9 +240,7 @@ if(BUILD_SDK_PRIVATE)
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${CMAKE_SOURCE_DIR}/src/app/process/publicd/sane_open_source_devices.json"
             "$<TARGET_FILE_DIR:sdk_open_app>/configs/sane_open_source_devices.json"
-        COMMAND "${CMAKE_COMMAND}" -E copy_directory
-            "${CMAKE_SOURCE_DIR}/resources/ocr/fonts"
-            "$<TARGET_FILE_DIR:sdk_open_app>/ocr_fonts"
+        ${SDK_OPEN_COPY_OCR_FONTS_COMMANDS}
         COMMAND "${CMAKE_COMMAND}" -E copy_directory
             "${CMAKE_SOURCE_DIR}/resources/ofd/fonts"
             "$<TARGET_FILE_DIR:sdk_open_app>/ofd_fonts"

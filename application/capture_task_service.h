@@ -76,6 +76,10 @@ public:
 
 private:
     void RunTask(const std::string& task_id, CaptureTaskStartRequest request);
+    void RunTaskImpl(const std::string& task_id, CaptureTaskStartRequest request);
+    void FailTask(const std::string& task_id,
+                  const CaptureTaskStartRequest& request,
+                  const std::string& message);
     void PublishEvent(const std::string& connection_id,
                       const std::string& event,
                       const CaptureTaskSnapshot& task,

@@ -32,6 +32,7 @@ struct PrivateDeviceCApi {
     PrivateDeviceJsonFn get_device = NULL;
     PrivateDeviceJsonFn open_device = NULL;
     PrivateDeviceJsonFn close_device = NULL;
+    PrivateDeviceJsonFn capture_still = NULL;
     PrivateDeviceVideoStartJsonFn start_video = NULL;
     PrivateDeviceJsonFn stop_video = NULL;
     PrivateDeviceFreeStringFn free_string = NULL;
@@ -85,6 +86,8 @@ PrivateDeviceCApi& GetPrivateDeviceCApi() {
         ::GetProcAddress(api.module, "czur_sdk_private_device_open_json"));
     api.close_device = reinterpret_cast<PrivateDeviceJsonFn>(
         ::GetProcAddress(api.module, "czur_sdk_private_device_close_json"));
+    api.capture_still = reinterpret_cast<PrivateDeviceJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_device_capture_json"));
     api.start_video = reinterpret_cast<PrivateDeviceVideoStartJsonFn>(
         ::GetProcAddress(api.module, "czur_sdk_private_video_start_json"));
     api.stop_video = reinterpret_cast<PrivateDeviceJsonFn>(
@@ -117,6 +120,8 @@ bool BoolField(const Json& object, const char* key, bool fallback = false) {
     Json::const_iterator it = object.find(key);
     return it != object.end() && it->is_boolean() ? it->get<bool>() : fallback;
 }
+
+void PopulateDetectedRectsFromJson(const Json& value, std::vector<SdkRect4P>* rects);
 
 SdkVideoResolution VideoResolutionFromJson(const Json& value) {
     SdkVideoResolution resolution;
@@ -299,6 +304,49 @@ SdkDeviceCloseResult CloseProviderDeviceWithCApi(const SdkDeviceCloseRequest& re
     }
     result.closed = BoolField(response, "closed");
     result.was_opened = BoolField(response, "was_opened");
+    return result;
+}
+
+SdkCaptureResult CaptureProviderStillWithCApi(const SdkCaptureRequest& request) {
+    SdkCaptureResult result;
+    PrivateDeviceCApi& api = GetPrivateDeviceCApi();
+    Json response;
+    std::string error;
+    Json request_json{{"device_id", request.device_id},
+                      {"output_dir", request.output_dir},
+                      {"include_base64", request.include_base64},
+                      {"timeout_ms", request.timeout_ms}};
+    if (!InvokePrivateDeviceCApi(api.capture_still, request_json, &response, &error)) {
+        result.code = ToCode(SdkStatusCode::ProviderNotReady);
+        result.message = error;
+        return result;
+    }
+
+    result.code = IntField(response, "code");
+    result.message = StringField(response, "message");
+    if (result.message.empty()) {
+        result.message = IsOkStatusCode(result.code) ? "ok" : "private device failed";
+    }
+    result.captured = BoolField(response, "captured");
+    result.output_path = StringField(response, "output_path");
+    result.original_path = StringField(response, "original_path");
+    result.laser_path = StringField(response, "laser_path");
+    result.content_type = StringField(response, "content_type");
+    result.payload = StringField(response, "payload");
+    result.width = IntField(response, "width");
+    result.height = IntField(response, "height");
+    result.dpi = IntField(response, "dpi");
+    Json::const_iterator size_it = response.find("size");
+    if (size_it != response.end() && size_it->is_number_unsigned()) {
+        result.size = size_it->get<uint64_t>();
+    }
+    Json::const_iterator rects_it = response.find("detected_rects");
+    if (rects_it != response.end()) {
+        PopulateDetectedRectsFromJson(*rects_it, &result.detected_rects);
+    }
+    result.detected_rects_source_width = IntField(response, "detected_rects_source_width");
+    result.detected_rects_source_height = IntField(response, "detected_rects_source_height");
+    result.scan_device_type = IntField(response, "scan_device_type");
     return result;
 }
 
@@ -607,6 +655,14 @@ void DeviceFacade::CaptureStill(const AuthContext& auth_context,
                                 const SdkCaptureRequest& request,
                                 SdkCaptureCallback callback) const {
     SdkCaptureResult result;
+#if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
+    (void)auth_context;
+    result = CaptureProviderStillWithCApi(request);
+    if (callback) {
+        callback(result);
+    }
+    return;
+#else
     const DeviceGetResult device_result = LookupDevice(auth_context, request.device_id);
     if (!IsOkStatusCode(device_result.code)) {
         result.code = device_result.code;
@@ -617,6 +673,7 @@ void DeviceFacade::CaptureStill(const AuthContext& auth_context,
         return;
     }
     providers_.device_provider->CaptureStill(request, callback);
+#endif
 }
 
 SdkVideoStartResult DeviceFacade::StartVideo(const AuthContext& auth_context,
