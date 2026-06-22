@@ -7,6 +7,97 @@ endif()
 
 option(SDK_OPEN_ENABLE_HTTP_SERVER "Start sdk_open embedded admin/demo HTTP servers" ON)
 
+set(SDK_OPEN_VERSION_FILE_CANDIDATES
+    "${CMAKE_SOURCE_DIR}/version/sdk-open/version.ini"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../version/sdk-open/version.ini"
+    "${CMAKE_CURRENT_SOURCE_DIR}/version/sdk-open/version.ini"
+)
+set(SDK_OPEN_VERSION_FILE "")
+foreach(_sdk_open_version_file IN LISTS SDK_OPEN_VERSION_FILE_CANDIDATES)
+    if(EXISTS "${_sdk_open_version_file}")
+        get_filename_component(SDK_OPEN_VERSION_FILE "${_sdk_open_version_file}" ABSOLUTE)
+        break()
+    endif()
+endforeach()
+
+if(NOT EXISTS "${SDK_OPEN_VERSION_FILE}")
+    message(FATAL_ERROR "SDK Open版本源文件不存在: version/sdk-open/version.ini")
+endif()
+
+file(READ "${SDK_OPEN_VERSION_FILE}" SDK_OPEN_VERSION_CONTENT)
+
+set(SDK_OPEN_VERSION "0.0.0")
+set(SDK_OPEN_BUILD "0")
+set(SDK_OPEN_STAGE "Unknown")
+set(SDK_OPEN_INTERVAL "0")
+
+string(REGEX MATCH "version=([^\r\n]+)" SDK_OPEN_VERSION_MATCH "${SDK_OPEN_VERSION_CONTENT}")
+if(SDK_OPEN_VERSION_MATCH)
+    set(SDK_OPEN_VERSION "${CMAKE_MATCH_1}")
+endif()
+
+string(REGEX MATCH "build=([^\r\n]+)" SDK_OPEN_BUILD_MATCH "${SDK_OPEN_VERSION_CONTENT}")
+if(SDK_OPEN_BUILD_MATCH)
+    set(SDK_OPEN_BUILD "${CMAKE_MATCH_1}")
+endif()
+
+string(REGEX MATCH "stage=([^\r\n]+)" SDK_OPEN_STAGE_MATCH "${SDK_OPEN_VERSION_CONTENT}")
+if(SDK_OPEN_STAGE_MATCH)
+    set(SDK_OPEN_STAGE "${CMAKE_MATCH_1}")
+endif()
+
+string(REGEX MATCH "interval=([^\r\n]+)" SDK_OPEN_INTERVAL_MATCH "${SDK_OPEN_VERSION_CONTENT}")
+if(SDK_OPEN_INTERVAL_MATCH)
+    set(SDK_OPEN_INTERVAL "${CMAKE_MATCH_1}")
+endif()
+
+string(TIMESTAMP SDK_OPEN_BUILD_TIMESTAMP "%Y%m%d%H%M%S" UTC)
+string(TIMESTAMP SDK_OPEN_BUILD_DATE "%Y-%m-%d" UTC)
+string(TIMESTAMP SDK_OPEN_BUILD_TIME "%H:%M:%S" UTC)
+
+find_package(Git QUIET)
+if(GIT_FOUND)
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE SDK_OPEN_GIT_COMMIT_HASH
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} rev-parse --abbrev-ref HEAD
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE SDK_OPEN_GIT_BRANCH
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+else()
+    set(SDK_OPEN_GIT_COMMIT_HASH "unknown")
+    set(SDK_OPEN_GIT_BRANCH "unknown")
+endif()
+
+if(NOT SDK_OPEN_GIT_COMMIT_HASH)
+    set(SDK_OPEN_GIT_COMMIT_HASH "unknown")
+endif()
+if(NOT SDK_OPEN_GIT_BRANCH)
+    set(SDK_OPEN_GIT_BRANCH "unknown")
+endif()
+
+set(SDK_OPEN_GENERATED_INCLUDE_DIR "${CMAKE_BINARY_DIR}/generated/sdk_open/include")
+file(MAKE_DIRECTORY "${SDK_OPEN_GENERATED_INCLUDE_DIR}")
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/runtime/sdk_open_version.h.in"
+    "${SDK_OPEN_GENERATED_INCLUDE_DIR}/sdk_open_version.h"
+    @ONLY
+)
+
+message(STATUS "SDK Open版本信息:")
+message(STATUS "  版本: ${SDK_OPEN_VERSION}")
+message(STATUS "  构建号: ${SDK_OPEN_BUILD}")
+message(STATUS "  阶段: ${SDK_OPEN_STAGE}")
+message(STATUS "  Interval: ${SDK_OPEN_INTERVAL}")
+message(STATUS "  版本源文件: ${SDK_OPEN_VERSION_FILE}")
+
 set(SDK_OPEN_THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
 set(SDK_OPEN_CPP_HTTPLIB_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/cpp-httplib")
 set(SDK_OPEN_WEBSOCKETPP_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/websocketpp")
@@ -111,6 +202,7 @@ if(MSVC)
 endif()
 target_include_directories(sdk_open_logging PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/runtime"
+    "${SDK_OPEN_GENERATED_INCLUDE_DIR}"
 )
 target_link_libraries(sdk_open_logging PUBLIC
     sdk_open_third_party
@@ -122,6 +214,7 @@ endif()
 add_library(sdk_open_runtime STATIC ${SDK_OPEN_RUNTIME_SRCS})
 target_include_directories(sdk_open_runtime PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/runtime"
+    "${SDK_OPEN_GENERATED_INCLUDE_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/transport"
     "${CMAKE_CURRENT_SOURCE_DIR}/application"
     "${CMAKE_CURRENT_SOURCE_DIR}/facade"
@@ -162,6 +255,7 @@ add_executable(sdk_open_app
 )
 target_include_directories(sdk_open_app PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/runtime"
+    "${SDK_OPEN_GENERATED_INCLUDE_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/transport"
     "${CMAKE_CURRENT_SOURCE_DIR}/application"
     "${CMAKE_CURRENT_SOURCE_DIR}/facade"
@@ -171,6 +265,9 @@ target_include_directories(sdk_open_app PRIVATE
 )
 target_link_libraries(sdk_open_app PRIVATE
     sdk_open_runtime
+)
+set_target_properties(sdk_open_app PROPERTIES
+    VERSION "${SDK_OPEN_VERSION}.${SDK_OPEN_BUILD}"
 )
 if(WIN32)
     target_link_libraries(sdk_open_app PRIVATE Advapi32)
