@@ -6,6 +6,7 @@ if(MSVC)
 endif()
 
 option(SDK_OPEN_ENABLE_HTTP_SERVER "Start sdk_open embedded admin/demo HTTP servers" ON)
+option(SDK_OPEN_USE_PREBUILT_WEB "Use prebuilt sdk_open/web assets without running pnpm" OFF)
 
 set(SDK_OPEN_VERSION_FILE_CANDIDATES
     "${CMAKE_SOURCE_DIR}/version/sdk-open/version.ini"
@@ -445,7 +446,28 @@ if(BUILD_SDK_PRIVATE)
     endif()
 endif()
 
-if(BUILD_SDK_WEB)
+set(SDK_WEB_PREBUILT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/web")
+set(SDK_WEB_PREBUILT_ADMIN_DIR "${SDK_WEB_PREBUILT_ROOT}/admin")
+set(SDK_WEB_PREBUILT_DEMO_DIR "${SDK_WEB_PREBUILT_ROOT}/demo")
+
+if(SDK_OPEN_USE_PREBUILT_WEB)
+    if(NOT EXISTS "${SDK_WEB_PREBUILT_ADMIN_DIR}/index.html")
+        message(FATAL_ERROR "SDK_OPEN_USE_PREBUILT_WEB=ON requires ${SDK_WEB_PREBUILT_ADMIN_DIR}/index.html")
+    endif()
+    if(NOT EXISTS "${SDK_WEB_PREBUILT_DEMO_DIR}/index.html")
+        message(FATAL_ERROR "SDK_OPEN_USE_PREBUILT_WEB=ON requires ${SDK_WEB_PREBUILT_DEMO_DIR}/index.html")
+    endif()
+
+    add_custom_command(TARGET sdk_open_app POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E remove_directory "$<TARGET_FILE_DIR:sdk_open_app>/web/admin"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:sdk_open_app>/web/admin"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory "${SDK_WEB_PREBUILT_ADMIN_DIR}" "$<TARGET_FILE_DIR:sdk_open_app>/web/admin"
+        COMMAND "${CMAKE_COMMAND}" -E remove_directory "$<TARGET_FILE_DIR:sdk_open_app>/web/demo"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:sdk_open_app>/web/demo"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory "${SDK_WEB_PREBUILT_DEMO_DIR}" "$<TARGET_FILE_DIR:sdk_open_app>/web/demo"
+        COMMENT "Copy prebuilt sdk web assets into sdk_open_app runtime directory"
+    )
+elseif(BUILD_SDK_WEB)
     message(STATUS "ENV PATH=$ENV{PATH}")
     if(WIN32)
         find_program(PNPM_CMD_EXECUTABLE pnpm.cmd)
