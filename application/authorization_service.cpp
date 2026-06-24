@@ -86,6 +86,8 @@ bool BoolField(const Json& object, const char* key, bool fallback = false) {
     return it != object.end() && it->is_boolean() ? it->get<bool>() : fallback;
 }
 
+#endif
+
 void CopyAuthContextFields(const AuthContext& source, AuthContext* target) {
     if (target == NULL) {
         return;
@@ -154,12 +156,16 @@ AuthorizationService::SessionResult CopySessionResultForReturn(const Authorizati
     return CopySessionResultForStorage(source);
 }
 
+#if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
+
 void RebuildLocalCapabilities(AuthContext* auth_context) {
     if (auth_context == NULL) {
         return;
     }
     auth_context->capabilities = BuildEntitledCapabilities(auth_context->account_type);
 }
+
+#endif
 
 Json AuthContextDataToJson(const AuthContext& auth_context) {
     return Json{
@@ -188,6 +194,8 @@ Json SessionContextDataToJson(const AuthorizationService::SessionResult& session
         {"auth_context", AuthContextDataToJson(session.auth_context)},
     };
 }
+
+#if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
 
 AuthContext AuthContextFromJson(const Json& value) {
     AuthContext context;
