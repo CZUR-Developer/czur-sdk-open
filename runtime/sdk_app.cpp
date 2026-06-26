@@ -26,6 +26,7 @@
 
 #include "sdk_logger.h"
 #include "sdk_runtime_paths.h"
+#include "sdk_open_version.h"
 
 namespace editor {
 namespace sdk {
@@ -640,10 +641,14 @@ Json SdkApp::BuildSystemJson() const {
     return Json{
         {"software",
          Json{{"name", "sdk_open"},
-              {"version", "0.1.0"},
+              {"version", SDK_OPEN_VERSION_STRING},
+              {"build", SDK_OPEN_BUILD_NUMBER},
+              {"stage", SDK_OPEN_STAGE},
+              {"interval", SDK_OPEN_INTERVAL},
               {"protocolVersion", "2.0.0"},
-              {"buildDate", __DATE__},
-              {"buildTime", __TIME__}}},
+              {"buildDate", SDK_OPEN_BUILD_DATE},
+              {"buildTime", SDK_OPEN_BUILD_TIME},
+              {"gitCommit", SDK_OPEN_GIT_COMMIT_HASH}}},
         {"process",
          Json{{"pid", CurrentProcessId()},
               {"executablePath", CurrentExecutablePath()},

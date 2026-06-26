@@ -68,24 +68,46 @@ export function resolveRuntimeHost(): string {
   return window.location.hostname || '127.0.0.1';
 }
 
+export function resolveDemoHttpPort(): number {
+  const parsed = Number.parseInt(window.location.port, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 17081;
+}
+
+export function resolveAssetHttpPort(): number {
+  return resolveDemoHttpPort() + 1;
+}
+
+export function resolveCommandWsPort(): number {
+  return resolveDemoHttpPort() + 9;
+}
+
+export function resolveVideoWsPort(): number {
+  return resolveDemoHttpPort() + 10;
+}
+
+export function buildAssetApiUrl(path: string): string {
+  const protocol = window.location.protocol === 'https:' ? 'https' : 'http';
+  return `${protocol}://${resolveRuntimeHost()}:${resolveAssetHttpPort()}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
 export function buildCommandWsUrl(): string {
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${protocol}://${resolveRuntimeHost()}:17090`;
+  return `${protocol}://${resolveRuntimeHost()}:${resolveCommandWsPort()}`;
 }
 
 export function buildCommandEndpointLabel(): string {
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${protocol}://${resolveRuntimeHost()}:17090`;
+  return `${protocol}://${resolveRuntimeHost()}:${resolveCommandWsPort()}`;
 }
 
 export function buildCommandProbeUrl(): string {
   const protocol = window.location.protocol === 'https:' ? 'https' : 'http';
-  return `${protocol}://${resolveRuntimeHost()}:17090/__sdk_open_probe__`;
+  return `${protocol}://${resolveRuntimeHost()}:${resolveCommandWsPort()}/__sdk_open_probe__`;
 }
 
 export function buildVideoEndpointLabel(): string {
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${protocol}://${resolveRuntimeHost()}:17091`;
+  return `${protocol}://${resolveRuntimeHost()}:${resolveVideoWsPort()}`;
 }
 
 export function buildVideoWsUrl(sessionToken: string, streamId: string): string {
@@ -94,7 +116,7 @@ export function buildVideoWsUrl(sessionToken: string, streamId: string): string 
     session_token: sessionToken,
     stream_id: streamId,
   });
-  return `${protocol}://${resolveRuntimeHost()}:17091?${params.toString()}`;
+  return `${protocol}://${resolveRuntimeHost()}:${resolveVideoWsPort()}?${params.toString()}`;
 }
 
 export function extractSessionToken(data: Record<string, unknown> | null | undefined): string {

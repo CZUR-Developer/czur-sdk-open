@@ -6,6 +6,98 @@ if(MSVC)
 endif()
 
 option(SDK_OPEN_ENABLE_HTTP_SERVER "Start sdk_open embedded admin/demo HTTP servers" ON)
+option(SDK_OPEN_USE_PREBUILT_WEB "Use prebuilt sdk_open/web assets without running pnpm" OFF)
+
+set(SDK_OPEN_VERSION_FILE_CANDIDATES
+    "${CMAKE_SOURCE_DIR}/version/sdk-open/version.ini"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../version/sdk-open/version.ini"
+    "${CMAKE_CURRENT_SOURCE_DIR}/version/sdk-open/version.ini"
+)
+set(SDK_OPEN_VERSION_FILE "")
+foreach(_sdk_open_version_file IN LISTS SDK_OPEN_VERSION_FILE_CANDIDATES)
+    if(EXISTS "${_sdk_open_version_file}")
+        get_filename_component(SDK_OPEN_VERSION_FILE "${_sdk_open_version_file}" ABSOLUTE)
+        break()
+    endif()
+endforeach()
+
+if(NOT EXISTS "${SDK_OPEN_VERSION_FILE}")
+    message(FATAL_ERROR "SDK Open版本源文件不存在: version/sdk-open/version.ini")
+endif()
+
+file(READ "${SDK_OPEN_VERSION_FILE}" SDK_OPEN_VERSION_CONTENT)
+
+set(SDK_OPEN_VERSION "0.0.0")
+set(SDK_OPEN_BUILD "0")
+set(SDK_OPEN_STAGE "Unknown")
+set(SDK_OPEN_INTERVAL "0")
+
+string(REGEX MATCH "version=([^\r\n]+)" SDK_OPEN_VERSION_MATCH "${SDK_OPEN_VERSION_CONTENT}")
+if(SDK_OPEN_VERSION_MATCH)
+    set(SDK_OPEN_VERSION "${CMAKE_MATCH_1}")
+endif()
+
+string(REGEX MATCH "build=([^\r\n]+)" SDK_OPEN_BUILD_MATCH "${SDK_OPEN_VERSION_CONTENT}")
+if(SDK_OPEN_BUILD_MATCH)
+    set(SDK_OPEN_BUILD "${CMAKE_MATCH_1}")
+endif()
+
+string(REGEX MATCH "stage=([^\r\n]+)" SDK_OPEN_STAGE_MATCH "${SDK_OPEN_VERSION_CONTENT}")
+if(SDK_OPEN_STAGE_MATCH)
+    set(SDK_OPEN_STAGE "${CMAKE_MATCH_1}")
+endif()
+
+string(REGEX MATCH "interval=([^\r\n]+)" SDK_OPEN_INTERVAL_MATCH "${SDK_OPEN_VERSION_CONTENT}")
+if(SDK_OPEN_INTERVAL_MATCH)
+    set(SDK_OPEN_INTERVAL "${CMAKE_MATCH_1}")
+endif()
+
+string(TIMESTAMP SDK_OPEN_BUILD_TIMESTAMP "%Y%m%d%H%M%S" UTC)
+string(TIMESTAMP SDK_OPEN_BUILD_DATE "%Y-%m-%d" UTC)
+string(TIMESTAMP SDK_OPEN_BUILD_TIME "%H:%M:%S" UTC)
+
+find_package(Git QUIET)
+if(GIT_FOUND)
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE SDK_OPEN_GIT_COMMIT_HASH
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} rev-parse --abbrev-ref HEAD
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE SDK_OPEN_GIT_BRANCH
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+else()
+    set(SDK_OPEN_GIT_COMMIT_HASH "unknown")
+    set(SDK_OPEN_GIT_BRANCH "unknown")
+endif()
+
+if(NOT SDK_OPEN_GIT_COMMIT_HASH)
+    set(SDK_OPEN_GIT_COMMIT_HASH "unknown")
+endif()
+if(NOT SDK_OPEN_GIT_BRANCH)
+    set(SDK_OPEN_GIT_BRANCH "unknown")
+endif()
+
+set(SDK_OPEN_GENERATED_INCLUDE_DIR "${CMAKE_BINARY_DIR}/generated/sdk_open/include")
+file(MAKE_DIRECTORY "${SDK_OPEN_GENERATED_INCLUDE_DIR}")
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/runtime/sdk_open_version.h.in"
+    "${SDK_OPEN_GENERATED_INCLUDE_DIR}/sdk_open_version.h"
+    @ONLY
+)
+
+message(STATUS "SDK Open版本信息:")
+message(STATUS "  版本: ${SDK_OPEN_VERSION}")
+message(STATUS "  构建号: ${SDK_OPEN_BUILD}")
+message(STATUS "  阶段: ${SDK_OPEN_STAGE}")
+message(STATUS "  Interval: ${SDK_OPEN_INTERVAL}")
+message(STATUS "  版本源文件: ${SDK_OPEN_VERSION_FILE}")
 
 set(SDK_OPEN_THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
 set(SDK_OPEN_CPP_HTTPLIB_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/cpp-httplib")
@@ -111,6 +203,7 @@ if(MSVC)
 endif()
 target_include_directories(sdk_open_logging PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/runtime"
+    "${SDK_OPEN_GENERATED_INCLUDE_DIR}"
 )
 target_link_libraries(sdk_open_logging PUBLIC
     sdk_open_third_party
@@ -122,6 +215,7 @@ endif()
 add_library(sdk_open_runtime STATIC ${SDK_OPEN_RUNTIME_SRCS})
 target_include_directories(sdk_open_runtime PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/runtime"
+    "${SDK_OPEN_GENERATED_INCLUDE_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/transport"
     "${CMAKE_CURRENT_SOURCE_DIR}/application"
     "${CMAKE_CURRENT_SOURCE_DIR}/facade"
@@ -162,6 +256,7 @@ add_executable(sdk_open_app
 )
 target_include_directories(sdk_open_app PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/runtime"
+    "${SDK_OPEN_GENERATED_INCLUDE_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/transport"
     "${CMAKE_CURRENT_SOURCE_DIR}/application"
     "${CMAKE_CURRENT_SOURCE_DIR}/facade"
@@ -171,6 +266,9 @@ target_include_directories(sdk_open_app PRIVATE
 )
 target_link_libraries(sdk_open_app PRIVATE
     sdk_open_runtime
+)
+set_target_properties(sdk_open_app PROPERTIES
+    VERSION "${SDK_OPEN_VERSION}.${SDK_OPEN_BUILD}"
 )
 if(WIN32)
     target_link_libraries(sdk_open_app PRIVATE Advapi32)
@@ -224,6 +322,14 @@ if(BUILD_SDK_PRIVATE)
         set(SDK_OPEN_CZOCR_MODEL_DIR "${CMAKE_SOURCE_DIR}/third_party_repo/czocr/models/${LIB_ARCH}")
     endif()
 
+    set(SDK_OPEN_COPY_OCR_FONTS_COMMANDS)
+    if(EXISTS "${CMAKE_SOURCE_DIR}/resources/ocr/fonts")
+        list(APPEND SDK_OPEN_COPY_OCR_FONTS_COMMANDS
+            COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                "${CMAKE_SOURCE_DIR}/resources/ocr/fonts"
+                "$<TARGET_FILE_DIR:sdk_open_app>/ocr_fonts")
+    endif()
+
     add_custom_command(TARGET sdk_open_app POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:sdk_open_app>/configs"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
@@ -232,9 +338,7 @@ if(BUILD_SDK_PRIVATE)
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${CMAKE_SOURCE_DIR}/src/app/process/publicd/sane_open_source_devices.json"
             "$<TARGET_FILE_DIR:sdk_open_app>/configs/sane_open_source_devices.json"
-        COMMAND "${CMAKE_COMMAND}" -E copy_directory
-            "${CMAKE_SOURCE_DIR}/resources/ocr/fonts"
-            "$<TARGET_FILE_DIR:sdk_open_app>/ocr_fonts"
+        ${SDK_OPEN_COPY_OCR_FONTS_COMMANDS}
         COMMAND "${CMAKE_COMMAND}" -E copy_directory
             "${CMAKE_SOURCE_DIR}/resources/ofd/fonts"
             "$<TARGET_FILE_DIR:sdk_open_app>/ofd_fonts"
@@ -342,7 +446,28 @@ if(BUILD_SDK_PRIVATE)
     endif()
 endif()
 
-if(BUILD_SDK_WEB)
+set(SDK_WEB_PREBUILT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/web")
+set(SDK_WEB_PREBUILT_ADMIN_DIR "${SDK_WEB_PREBUILT_ROOT}/admin")
+set(SDK_WEB_PREBUILT_DEMO_DIR "${SDK_WEB_PREBUILT_ROOT}/demo")
+
+if(SDK_OPEN_USE_PREBUILT_WEB)
+    if(NOT EXISTS "${SDK_WEB_PREBUILT_ADMIN_DIR}/index.html")
+        message(FATAL_ERROR "SDK_OPEN_USE_PREBUILT_WEB=ON requires ${SDK_WEB_PREBUILT_ADMIN_DIR}/index.html")
+    endif()
+    if(NOT EXISTS "${SDK_WEB_PREBUILT_DEMO_DIR}/index.html")
+        message(FATAL_ERROR "SDK_OPEN_USE_PREBUILT_WEB=ON requires ${SDK_WEB_PREBUILT_DEMO_DIR}/index.html")
+    endif()
+
+    add_custom_command(TARGET sdk_open_app POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E remove_directory "$<TARGET_FILE_DIR:sdk_open_app>/web/admin"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:sdk_open_app>/web/admin"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory "${SDK_WEB_PREBUILT_ADMIN_DIR}" "$<TARGET_FILE_DIR:sdk_open_app>/web/admin"
+        COMMAND "${CMAKE_COMMAND}" -E remove_directory "$<TARGET_FILE_DIR:sdk_open_app>/web/demo"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:sdk_open_app>/web/demo"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory "${SDK_WEB_PREBUILT_DEMO_DIR}" "$<TARGET_FILE_DIR:sdk_open_app>/web/demo"
+        COMMENT "Copy prebuilt sdk web assets into sdk_open_app runtime directory"
+    )
+elseif(BUILD_SDK_WEB)
     message(STATUS "ENV PATH=$ENV{PATH}")
     if(WIN32)
         find_program(PNPM_CMD_EXECUTABLE pnpm.cmd)
@@ -363,6 +488,10 @@ if(BUILD_SDK_WEB)
     set(SDK_WEB_DEMO_DIST_DIR "${SDK_WEB_DEMO_PROJECT_DIR}/dist")
     set(SDK_WEB_ADMIN_TARGET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/web/admin")
     set(SDK_WEB_DEMO_TARGET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/web/demo")
+    set(SDK_WEB_RUNTIME_DIR "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+    if(CMAKE_CONFIGURATION_TYPES)
+        set(SDK_WEB_RUNTIME_DIR "${SDK_WEB_RUNTIME_DIR}/$<CONFIG>")
+    endif()
 
     add_custom_target(sdk_web_admin_build
         COMMAND "${CMAKE_COMMAND}" -E chdir "${SDK_WEB_ADMIN_PROJECT_DIR}" "${PNPM_EXECUTABLE}" install --force --no-frozen-lockfile
@@ -384,6 +513,12 @@ if(BUILD_SDK_WEB)
         COMMAND "${CMAKE_COMMAND}" -E remove_directory "${SDK_WEB_DEMO_TARGET_DIR}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${SDK_WEB_DEMO_TARGET_DIR}"
         COMMAND "${CMAKE_COMMAND}" -E copy_directory "${SDK_WEB_DEMO_DIST_DIR}" "${SDK_WEB_DEMO_TARGET_DIR}"
+        COMMAND "${CMAKE_COMMAND}" -E remove_directory "${SDK_WEB_RUNTIME_DIR}/web/admin"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${SDK_WEB_RUNTIME_DIR}/web/admin"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory "${SDK_WEB_ADMIN_DIST_DIR}" "${SDK_WEB_RUNTIME_DIR}/web/admin"
+        COMMAND "${CMAKE_COMMAND}" -E remove_directory "${SDK_WEB_RUNTIME_DIR}/web/demo"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${SDK_WEB_RUNTIME_DIR}/web/demo"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory "${SDK_WEB_DEMO_DIST_DIR}" "${SDK_WEB_RUNTIME_DIR}/web/demo"
         COMMENT "Build sdk web assets and copy dist into web/admin|demo"
     )
 

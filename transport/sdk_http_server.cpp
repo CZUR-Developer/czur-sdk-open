@@ -172,7 +172,9 @@ bool SdkHttpServer::ShouldServeSpaFallback(const std::string& path, const std::s
     if (file_name.find('.') != std::string::npos) {
         return false;
     }
-    return accept_header.empty() || accept_header.find("text/html") != std::string::npos;
+    return accept_header.empty() ||
+           accept_header.find("text/html") != std::string::npos ||
+           accept_header.find("*/*") != std::string::npos;
 }
 
 bool SdkHttpServer::IsAuthorized(const std::string& authorization) const {
@@ -447,6 +449,8 @@ bool SdkHttpServer::ConfigureRoutes() {
     if (mount_static_site_) {
         server_->Get(R"(/.*)", [this](const httplib::Request& req, httplib::Response& res) {
             if (!ShouldServeSpaFallback(req.path, req.get_header_value("Accept"))) {
+                res.status = ToHttpStatus(SdkHttpStatus::NotFound);
+                res.set_content("Not Found", "text/plain; charset=utf-8");
                 return;
             }
             const std::string index_path = JoinPath(document_root_, "index.html");

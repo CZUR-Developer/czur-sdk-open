@@ -4,10 +4,12 @@
 #include "capture_task_service.h"
 
 #include <ctime>
+#include <exception>
 #include <iomanip>
 #include <sstream>
 #include <sys/stat.h>
 
+#include "sdk_logger.h"
 #include "sdk_runtime_paths.h"
 
 namespace editor {
@@ -47,6 +49,8 @@ Json BuildTaskJson(const CaptureTaskSnapshot& task) {
     }
     return Json{{"task_id", task.task_id},
                 {"status", task.status},
+                {"code", task.code},
+                {"message", task.message},
                 {"device_id", task.device_id},
                 {"profile_revision", task.profile_revision},
                 {"stages", stages},
@@ -178,6 +182,18 @@ CaptureAssetResult CaptureTaskService::GetAsset(const std::string& connection_id
 }
 
 void CaptureTaskService::RunTask(const std::string& task_id, CaptureTaskStartRequest request) {
+    try {
+        RunTaskImpl(task_id, request);
+    } catch (const std::exception& e) {
+        SDK_OPEN_LOG_ERROR("[capture_task] task failed with exception task_id={} err={}", task_id, e.what());
+        FailTask(task_id, request, e.what());
+    } catch (...) {
+        SDK_OPEN_LOG_ERROR("[capture_task] task failed with unknown exception task_id={}", task_id);
+        FailTask(task_id, request, "capture task failed");
+    }
+}
+
+void CaptureTaskService::RunTaskImpl(const std::string& task_id, CaptureTaskStartRequest request) {
     CaptureTaskSnapshot running;
     {
         std::lock_guard<std::mutex> lock(mu_);
@@ -306,10 +322,39 @@ void CaptureTaskService::RunTask(const std::string& task_id, CaptureTaskStartReq
         busy_devices_.erase(request.device_id);
         final_task = task;
     }
+    SDK_OPEN_LOG_INFO("[capture_task] task finished task_id={} status={} code={} assets={} stages={}",
+                      task_id,
+                      final_task.status,
+                      final_task.code,
+                      final_task.assets.size(),
+                      final_task.stages.size());
 
     PublishEvent(request.connection_id,
                  final_task.status == "succeeded" ? "capture.completed" : "capture.failed",
                  final_task);
+}
+
+void CaptureTaskService::FailTask(const std::string& task_id,
+                                  const CaptureTaskStartRequest& request,
+                                  const std::string& message) {
+    CaptureTaskSnapshot final_task;
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        CaptureTaskSnapshot& task = tasks_[task_id];
+        task.status = "failed";
+        task.code = ToCode(SdkStatusCode::InternalError);
+        task.message = message.empty() ? "capture task failed" : message;
+        task.error = task.message;
+        busy_devices_.erase(request.device_id);
+        final_task = task;
+    }
+    SDK_OPEN_LOG_INFO("[capture_task] task finished task_id={} status={} code={} assets={} stages={}",
+                      task_id,
+                      final_task.status,
+                      final_task.code,
+                      final_task.assets.size(),
+                      final_task.stages.size());
+    PublishEvent(request.connection_id, "capture.failed", final_task);
 }
 
 void CaptureTaskService::PublishEvent(const std::string& connection_id,

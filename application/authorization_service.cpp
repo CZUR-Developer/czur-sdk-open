@@ -6,6 +6,8 @@
 #include <ctime>
 #include <utility>
 
+#include "sdk_entitlement_policy.h"
+
 #if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
 #include <windows.h>
 
@@ -25,6 +27,7 @@ typedef void (*PrivateAuthFreeStringFn)(const char*);
 struct PrivateAuthCApi {
     HMODULE module = NULL;
     PrivateAuthJsonFn create_session = NULL;
+    PrivateAuthJsonFn activate_offline = NULL;
     PrivateAuthJsonFn consume_quota = NULL;
     PrivateAuthFreeStringFn free_string = NULL;
 };
@@ -42,6 +45,8 @@ PrivateAuthCApi& GetPrivateAuthCApi() {
     }
     api.create_session = reinterpret_cast<PrivateAuthJsonFn>(
         ::GetProcAddress(api.module, "czur_sdk_private_create_session_json"));
+    api.activate_offline = reinterpret_cast<PrivateAuthJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_activate_offline_json"));
     api.consume_quota = reinterpret_cast<PrivateAuthJsonFn>(
         ::GetProcAddress(api.module, "czur_sdk_private_consume_quota_json"));
     api.free_string = reinterpret_cast<PrivateAuthFreeStringFn>(
@@ -81,6 +86,117 @@ bool BoolField(const Json& object, const char* key, bool fallback = false) {
     return it != object.end() && it->is_boolean() ? it->get<bool>() : fallback;
 }
 
+#endif
+
+void CopyAuthContextFields(const AuthContext& source, AuthContext* target) {
+    if (target == NULL) {
+        return;
+    }
+    target->is_valid = source.is_valid;
+    target->account_type = source.account_type;
+    target->account_type_code = source.account_type_code;
+    target->licensed_account_type = source.licensed_account_type;
+    target->licensed_account_type_code = source.licensed_account_type_code;
+    target->auth_scene.assign(source.auth_scene.c_str(), source.auth_scene.size());
+    target->license_mode.assign(source.license_mode.c_str(), source.license_mode.size());
+    target->host_auth_mode.assign(source.host_auth_mode.c_str(), source.host_auth_mode.size());
+    target->entitlement_state.assign(source.entitlement_state.c_str(), source.entitlement_state.size());
+    target->commercial_authorized = source.commercial_authorized;
+    target->machine_code.assign(source.machine_code.c_str(), source.machine_code.size());
+    target->expires_at = source.expires_at;
+
+    target->device_scope.clear();
+    target->device_scope.reserve(source.device_scope.size());
+    for (std::size_t i = 0; i < source.device_scope.size(); ++i) {
+        SdkDeviceGrant grant;
+        grant.vid = source.device_scope[i].vid;
+        grant.pid = source.device_scope[i].pid;
+        target->device_scope.push_back(grant);
+    }
+
+    target->capabilities.clear();
+    target->capabilities.reserve(source.capabilities.size());
+    for (std::size_t i = 0; i < source.capabilities.size(); ++i) {
+        target->capabilities.push_back(std::string(source.capabilities[i].c_str(), source.capabilities[i].size()));
+    }
+
+    target->quota_buckets.clear();
+    target->quota_buckets.reserve(source.quota_buckets.size());
+    for (std::size_t i = 0; i < source.quota_buckets.size(); ++i) {
+        AuthQuotaBucket bucket;
+        bucket.bucket.assign(source.quota_buckets[i].bucket.c_str(), source.quota_buckets[i].bucket.size());
+        bucket.limit = source.quota_buckets[i].limit;
+        bucket.remaining = source.quota_buckets[i].remaining;
+        bucket.enforcement.assign(source.quota_buckets[i].enforcement.c_str(),
+                                  source.quota_buckets[i].enforcement.size());
+        bucket.methods.reserve(source.quota_buckets[i].methods.size());
+        for (std::size_t j = 0; j < source.quota_buckets[i].methods.size(); ++j) {
+            bucket.methods.push_back(std::string(source.quota_buckets[i].methods[j].c_str(),
+                                                source.quota_buckets[i].methods[j].size()));
+        }
+        target->quota_buckets.push_back(bucket);
+    }
+}
+
+AuthorizationService::SessionResult CopySessionResultForStorage(const AuthorizationService::SessionResult& source) {
+    AuthorizationService::SessionResult target;
+    target.code = source.code;
+    target.message.assign(source.message.c_str(), source.message.size());
+    target.token.assign(source.token.c_str(), source.token.size());
+    target.session_token.assign(source.session_token.c_str(), source.session_token.size());
+    target.connection_id.assign(source.connection_id.c_str(), source.connection_id.size());
+    target.expires_in = source.expires_in;
+    target.created_at = source.created_at;
+    target.last_seen_at = source.last_seen_at;
+    CopyAuthContextFields(source.auth_context, &target.auth_context);
+    return target;
+}
+
+AuthorizationService::SessionResult CopySessionResultForReturn(const AuthorizationService::SessionResult& source) {
+    return CopySessionResultForStorage(source);
+}
+
+#if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
+
+void RebuildLocalCapabilities(AuthContext* auth_context) {
+    if (auth_context == NULL) {
+        return;
+    }
+    auth_context->capabilities = BuildEntitledCapabilities(auth_context->account_type);
+}
+
+#endif
+
+Json AuthContextDataToJson(const AuthContext& auth_context) {
+    return Json{
+        {"is_valid", auth_context.is_valid},
+        {"account_type", ToAccountTypeString(auth_context.account_type)},
+        {"account_type_code", auth_context.account_type_code},
+        {"licensed_account_type", ToAccountTypeString(auth_context.licensed_account_type)},
+        {"licensed_account_type_code", auth_context.licensed_account_type_code},
+        {"auth_scene", "plugin"},
+        {"license_mode", "offline_api_key"},
+        {"host_auth_mode", "activation_required"},
+        {"entitlement_state", "offline_trial"},
+        {"commercial_authorized", auth_context.commercial_authorized},
+        {"machine_code", ""},
+        {"device_scope", Json::array()},
+        {"expires_at", auth_context.expires_at},
+        {"capability_count", auth_context.capabilities.size()},
+        {"quota_bucket_count", auth_context.quota_buckets.size()},
+    };
+}
+
+Json SessionContextDataToJson(const AuthorizationService::SessionResult& session) {
+    return Json{
+        {"session_token", session.session_token},
+        {"expires_in", session.expires_in},
+        {"auth_context", AuthContextDataToJson(session.auth_context)},
+    };
+}
+
+#if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
+
 AuthContext AuthContextFromJson(const Json& value) {
     AuthContext context;
     if (!value.is_object()) {
@@ -97,6 +213,7 @@ AuthContext AuthContextFromJson(const Json& value) {
     context.license_mode = StringField(value, "license_mode");
     context.host_auth_mode = StringField(value, "host_auth_mode");
     context.entitlement_state = StringField(value, "entitlement_state");
+    context.commercial_authorized = BoolField(value, "commercial_authorized", true);
     context.machine_code = StringField(value, "machine_code");
     context.expires_at = Int64Field(value, "expires_at");
 
@@ -117,31 +234,44 @@ AuthContext AuthContextFromJson(const Json& value) {
     if (capabilities_it != value.end() && capabilities_it->is_array()) {
         for (Json::const_iterator it = capabilities_it->begin(); it != capabilities_it->end(); ++it) {
             if (it->is_string()) {
-                context.capabilities.push_back(it->get<std::string>());
+                const std::string capability = it->get<std::string>();
+                context.capabilities.push_back(std::string(capability.c_str(), capability.size()));
             }
         }
     }
 
     Json::const_iterator buckets_it = value.find("quota_buckets");
     if (buckets_it != value.end() && buckets_it->is_array()) {
-        for (Json::const_iterator it = buckets_it->begin(); it != buckets_it->end(); ++it) {
-            if (!it->is_object()) {
-                continue;
-            }
-            AuthQuotaBucket bucket;
-            bucket.bucket = StringField(*it, "bucket");
-            bucket.limit = IntField(*it, "limit");
-            bucket.remaining = IntField(*it, "remaining");
-            bucket.enforcement = StringField(*it, "enforcement");
-            Json::const_iterator methods_it = it->find("methods");
-            if (methods_it != it->end() && methods_it->is_array()) {
-                for (Json::const_iterator method_it = methods_it->begin(); method_it != methods_it->end(); ++method_it) {
-                    if (method_it->is_string()) {
-                        bucket.methods.push_back(method_it->get<std::string>());
+        try {
+            const std::size_t bucket_count = buckets_it->size();
+            const std::size_t capped_bucket_count = bucket_count > 64 ? 64 : bucket_count;
+            for (std::size_t bucket_index = 0; bucket_index < capped_bucket_count; ++bucket_index) {
+                const Json& bucket_json = (*buckets_it)[bucket_index];
+                if (!bucket_json.is_object()) {
+                    continue;
+                }
+                AuthQuotaBucket bucket;
+                bucket.bucket = StringField(bucket_json, "bucket");
+                bucket.limit = IntField(bucket_json, "limit");
+                bucket.remaining = IntField(bucket_json, "remaining");
+                bucket.enforcement = StringField(bucket_json, "enforcement");
+                Json::const_iterator methods_it = bucket_json.find("methods");
+                if (methods_it != bucket_json.end() && methods_it->is_array()) {
+                    const std::size_t method_count = methods_it->size();
+                    const std::size_t capped_method_count = method_count > 128 ? 128 : method_count;
+                    for (std::size_t method_index = 0; method_index < capped_method_count; ++method_index) {
+                        const Json& method_json = (*methods_it)[method_index];
+                        if (method_json.is_string()) {
+                            bucket.methods.push_back(method_json.get<std::string>());
+                        }
                     }
                 }
+                context.quota_buckets.push_back(bucket);
             }
-            context.quota_buckets.push_back(bucket);
+        } catch (const std::exception& e) {
+            context.quota_buckets.clear();
+        } catch (...) {
+            context.quota_buckets.clear();
         }
     }
 
@@ -264,6 +394,43 @@ AuthorizationService::SessionResult ConsumeQuotaWithCApi(const AuthorizationServ
     return result;
 }
 
+AuthorizationService::SessionResult ActivateOfflineWithCApi(const AuthorizationService::SessionResult& bound_session,
+                                                            const std::string& connection_id,
+                                                            const std::string& auth_code,
+                                                            std::int64_t now_ts) {
+    AuthorizationService::SessionResult result;
+    PrivateAuthCApi& api = GetPrivateAuthCApi();
+    Json response;
+    std::string error;
+    const Json request = Json{{"token", bound_session.token},
+                              {"session_token", bound_session.session_token},
+                              {"auth_code", auth_code},
+                              {"now_ts", now_ts}};
+    if (!InvokePrivateAuthCApi(api.activate_offline, request, &response, &error)) {
+        result = bound_session;
+        result.code = ToCode(SdkStatusCode::ProviderNotReady);
+        result.message = error;
+        return result;
+    }
+
+    result.code = IntField(response, "code");
+    result.message = StringField(response, "message");
+    if (result.message.empty()) {
+        result.message = IsOkStatusCode(result.code) ? "ok" : "private auth failed";
+    }
+    result.token = bound_session.token;
+    result.session_token = StringField(response, "session_token");
+    result.connection_id = connection_id;
+    result.expires_in = IntField(response, "expires_in");
+    result.created_at = bound_session.created_at;
+    result.last_seen_at = now_ts;
+    Json::const_iterator auth_context_it = response.find("auth_context");
+    if (auth_context_it != response.end()) {
+        result.auth_context = AuthContextFromJson(*auth_context_it);
+    }
+    return result;
+}
+
 #endif
 
 } // namespace
@@ -297,8 +464,9 @@ AuthorizationService::SessionResult AuthorizationService::CreateSession(const st
 #if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
     result = CreatePrivateSessionWithCApi(connection_id, token, request.authz_base_url, now_ts);
     if (IsOkStatusCode(result.code)) {
+        RebuildLocalCapabilities(&result.auth_context);
         std::lock_guard<std::mutex> lock(sessions_mu_);
-        sessions_[connection_id] = result;
+        sessions_[connection_id] = CopySessionResultForStorage(result);
     }
     return result;
 #else
@@ -385,6 +553,20 @@ AuthorizationService::SessionResult AuthorizationService::GetContext(const std::
     return RequireSession(connection_id);
 }
 
+AuthorizationService::ContextDataResult AuthorizationService::GetContextData(const std::string& connection_id) const {
+    ContextDataResult result;
+    std::lock_guard<std::mutex> lock(sessions_mu_);
+    const std::map<std::string, SessionResult>::const_iterator it = sessions_.find(connection_id);
+    if (it == sessions_.end()) {
+        result.code = ToCode(SdkStatusCode::AuthRequired);
+        result.message = "session required";
+        result.data = Json::object();
+        return result;
+    }
+    result.data = SessionContextDataToJson(it->second);
+    return result;
+}
+
 AuthorizationService::SessionResult AuthorizationService::RequireSession(const std::string& connection_id) const {
     SessionResult result;
     std::lock_guard<std::mutex> lock(sessions_mu_);
@@ -394,7 +576,7 @@ AuthorizationService::SessionResult AuthorizationService::RequireSession(const s
         result.message = "session required";
         return result;
     }
-    return it->second;
+    return CopySessionResultForReturn(it->second);
 }
 
 AuthorizationService::SessionResult AuthorizationService::RequireSessionToken(const std::string& session_token) const {
@@ -409,7 +591,7 @@ AuthorizationService::SessionResult AuthorizationService::RequireSessionToken(co
          it != sessions_.end();
          ++it) {
         if (it->second.session_token == session_token) {
-            result = it->second;
+            result = CopySessionResultForReturn(it->second);
             if (result.connection_id.empty()) {
                 result.connection_id = it->first;
             }
@@ -450,6 +632,16 @@ AuthorizationService::SessionResult AuthorizationService::ActivateOffline(const 
     if (!IsOkStatusCode(bound_session.code)) {
         return bound_session;
     }
+#if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
+    const std::int64_t now_ts = static_cast<std::int64_t>(std::time(NULL));
+    SessionResult result = ActivateOfflineWithCApi(bound_session, connection_id, auth_code, now_ts);
+    if (IsOkStatusCode(result.code)) {
+        RebuildLocalCapabilities(&result.auth_context);
+        std::lock_guard<std::mutex> lock(sessions_mu_);
+        sessions_[connection_id] = CopySessionResultForStorage(result);
+    }
+    return result;
+#else
     if (!providers_.auth_provider) {
         bound_session.code = ToCode(SdkStatusCode::ProviderNotReady);
         bound_session.message = "provider not ready";
@@ -478,6 +670,7 @@ AuthorizationService::SessionResult AuthorizationService::ActivateOffline(const 
         sessions_[connection_id] = result;
     }
     return result;
+#endif
 }
 
 AuthorizationService::SessionResult AuthorizationService::ConsumeQuota(const std::string& connection_id,

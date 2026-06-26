@@ -203,8 +203,17 @@ bool SdkWsCommandServer::Start() {
             return;
         }
 
-        Json response = request_handler_ ? request_handler_(connection_id, request)
-                                         : BuildWsResponse("", SdkStatusCode::UnsupportedMethod, "request handler not ready");
+        Json response;
+        try {
+            response = request_handler_ ? request_handler_(connection_id, request)
+                                        : BuildWsResponse("", SdkStatusCode::UnsupportedMethod, "request handler not ready");
+        } catch (const std::exception& e) {
+            SDK_OPEN_LOG_ERROR("[sdk_ws_command_server] request handler failed, id={}, err={}", connection_id, e.what());
+            response = BuildWsResponse("", SdkStatusCode::InternalError, e.what());
+        } catch (...) {
+            SDK_OPEN_LOG_ERROR("[sdk_ws_command_server] request handler failed, id={}, err=<unknown>", connection_id);
+            response = BuildWsResponse("", SdkStatusCode::InternalError, "unknown native error");
+        }
         int response_code = ToCode(SdkStatusCode::InternalError);
         const auto code_it = response.find("code");
         if (code_it != response.end() && code_it->is_number_integer()) {
@@ -214,8 +223,25 @@ bool SdkWsCommandServer::Start() {
             impl_->auth_failed.fetch_add(1);
         }
 
+        std::string response_payload;
+        try {
+            response_payload = DumpJson(response);
+        } catch (const std::exception& e) {
+            SDK_OPEN_LOG_ERROR("[sdk_ws_command_server] response dump failed, id={}, err={}", connection_id, e.what());
+            response_payload = DumpJson(BuildWsResponse("", SdkStatusCode::InternalError, "response serialization failed"));
+        } catch (...) {
+            SDK_OPEN_LOG_ERROR("[sdk_ws_command_server] response dump failed, id={}, err=<unknown>", connection_id);
+            response_payload = DumpJson(BuildWsResponse("", SdkStatusCode::InternalError, "response serialization failed"));
+        }
+        SDK_OPEN_LOG_INFO("[sdk_ws_command_server] sending response, id={}, bytes={}, code={}",
+                          connection_id,
+                          response_payload.size(),
+                          response_code);
         ErrorCode ec;
-        impl_->server.send(hdl, DumpJson(response), websocketpp::frame::opcode::text, ec);
+        impl_->server.send(hdl, response_payload, websocketpp::frame::opcode::text, ec);
+        if (ec) {
+            SDK_OPEN_LOG_ERROR("[sdk_ws_command_server] send failed, id={}, err={}", connection_id, ec.message());
+        }
     });
 
     ErrorCode ec;

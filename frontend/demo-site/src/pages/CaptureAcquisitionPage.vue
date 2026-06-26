@@ -467,7 +467,9 @@ import {
 } from '../services/device-video';
 import type { EnhancePipeline, EnhanceWorkflow } from '../services/image-enhance-workflows';
 import { openImageViewer } from '../services/image-viewer';
+import { buildAssetApiUrl } from '../services/protocol';
 import { recordInternalRuntimeEvent, recordRuntimeEvent, runtimeRecordState } from '../services/runtime-records';
+
 import type { TableColumn, TableRow, TimelineItem, Tone } from '../types/demo';
 
 type PageProcessingMode = 'single_page' | 'curved_book' | 'selected_area' | 'keep_original';
@@ -1650,8 +1652,7 @@ function resolveAssetUrl(path: string): string {
   if (/^https?:\/\//i.test(path)) {
     return path;
   }
-  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
-  return `${protocol}//${window.location.hostname || '127.0.0.1'}:17082${path.startsWith('/') ? path : `/${path}`}`;
+  return buildAssetApiUrl(path);
 }
 
 function assetAccessPath(asset: CaptureAssetPayload): string {

@@ -278,7 +278,7 @@ import SectionPanel from '../components/blocks/SectionPanel.vue';
 import StatusPill from '../components/cards/StatusPill.vue';
 import { authSessionState, sendBoundCommand } from '../services/auth-session';
 import { openImageViewer } from '../services/image-viewer';
-import { isOkResponse, resolveRuntimeHost } from '../services/protocol';
+import { buildAssetApiUrl, isOkResponse } from '../services/protocol';
 import type { Tone } from '../types/demo';
 
 type PageProcessing = 'keep_original' | 'single_page' | 'selected_area' | 'curved_book';
@@ -886,16 +886,14 @@ function openOutputImageViewer(preview: OutputPreview | undefined): void {
 }
 
 function buildUploadUrl(): string {
-  const protocol = window.location.protocol === 'https:' ? 'https' : 'http';
-  return `${protocol}://${resolveRuntimeHost()}:17082/api/uploads/images`;
+  return buildAssetApiUrl('/api/uploads/images');
 }
 
 function resolveAssetUrl(path: string): string {
   if (/^https?:\/\//i.test(path)) {
     return path;
   }
-  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
-  return `${protocol}//${window.location.hostname || '127.0.0.1'}:17082${path.startsWith('/') ? path : `/${path}`}`;
+  return buildAssetApiUrl(path);
 }
 
 function isBrowserRenderable(contentType: string): boolean {

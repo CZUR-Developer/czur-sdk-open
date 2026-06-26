@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cstdio>
 #include <ctime>
+#include <exception>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -715,6 +716,8 @@ Json BuildCaptureTaskJson(const CaptureTaskSnapshot& task) {
     }
     return Json{{"task_id", task.task_id},
                 {"status", task.status},
+                {"code", task.code},
+                {"message", task.message},
                 {"device_id", task.device_id},
                 {"profile_revision", task.profile_revision},
                 {"stages", stages},
@@ -1507,6 +1510,11 @@ Json CommandApplicationService::HandleRequest(const std::string& connection_id, 
     if (request.method.empty()) {
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidMethod, "missing method");
     }
+
+    SDK_OPEN_LOG_INFO("[command_application] request begin connection={} request_id={} method={}",
+                      connection_id,
+                      request.request_id,
+                      request.method);
 
     const MethodDescriptor* descriptor = FindMethod(request.method);
     if (descriptor == NULL) {
@@ -2375,15 +2383,30 @@ Json CommandApplicationService::HandleAuthCreateSession(const std::string& conne
 }
 
 Json CommandApplicationService::HandleAuthGetContext(const std::string& connection_id, const Request& request) {
-    const AuthorizationService::SessionResult session_result = authorization_service_.GetContext(connection_id);
-    if (!IsOkStatusCode(session_result.code)) {
-        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    SDK_OPEN_LOG_INFO("[command_application] auth.get_context begin connection={} request_id={}",
+                      connection_id,
+                      request.request_id);
+    const AuthorizationService::ContextDataResult context_result = authorization_service_.GetContextData(connection_id);
+    const Json auth_context =
+        context_result.data.value("auth_context", Json::object());
+    SDK_OPEN_LOG_INFO("[command_application] auth.get_context data loaded connection={} request_id={} code={} token_len={} caps={} quotas={}",
+                      connection_id,
+                      request.request_id,
+                      context_result.code,
+                      context_result.data.value("session_token", std::string()).size(),
+                      auth_context.value("capability_count", 0U),
+                      auth_context.value("quota_bucket_count", 0U));
+    if (!IsOkStatusCode(context_result.code)) {
+        return BuildWsResponse(request.request_id, context_result.code, context_result.message);
     }
-    return BuildWsResponse(request.request_id,
-                           SdkStatusCode::Ok,
-                           "ok",
-                           Json{{"session_token", session_result.session_token},
-                                {"auth_context", BuildAuthContextJson(session_result.auth_context)}});
+    Json data = context_result.data;
+    data["session_token"] = "";
+    Json response = BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", data);
+    SDK_OPEN_LOG_INFO("[command_application] auth.get_context response built connection={} request_id={} data_fields={}",
+                      connection_id,
+                      request.request_id,
+                      response["data"].size());
+    return response;
 }
 
 Json CommandApplicationService::HandleAuthRefreshSession(const std::string& connection_id, const Request& request) {
@@ -2519,15 +2542,15 @@ Json CommandApplicationService::HandleDeviceClose(const std::string& connection_
 
     bool stopped_stream = false;
     std::string stopped_stream_id;
-    SdkVideoStopRequest stop_request;
-    stop_request.device_id = close_request.device_id;
-    const SdkVideoStopResult stop_result = device_facade_.StopVideo(session_result.auth_context, stop_request);
-    if (!IsOkStatusCode(stop_result.code)) {
-        return BuildWsResponse(request.request_id, stop_result.code, stop_result.message);
-    }
     const VideoSessionService::StreamResult stream_result =
         video_session_service_.StopStream(connection_id, close_request.device_id);
     if (IsOkStatusCode(stream_result.code)) {
+        SdkVideoStopRequest stop_request;
+        stop_request.device_id = close_request.device_id;
+        const SdkVideoStopResult stop_result = device_facade_.StopVideo(session_result.auth_context, stop_request);
+        if (!IsOkStatusCode(stop_result.code)) {
+            return BuildWsResponse(request.request_id, stop_result.code, stop_result.message);
+        }
         stopped_stream = true;
         stopped_stream_id = stream_result.binding.stream_id;
         if (video_stream_closed_sink_) {
@@ -2573,23 +2596,69 @@ Json CommandApplicationService::HandleCaptureTake(const std::string& connection_
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "profile required");
     }
 
+    const Json pipeline_json = GetOptionalObjectField(request.params, "pipeline");
+    const std::size_t pipeline_steps =
+        pipeline_json.is_object() && pipeline_json.find("steps") != pipeline_json.end() && pipeline_json["steps"].is_array()
+            ? pipeline_json["steps"].size()
+            : 0;
+    SDK_OPEN_LOG_INFO("[command_application] capture.take prepare connection={} request_id={} profile_fields={} pipeline_steps={} include_base64={} timeout_ms={}",
+                      connection_id,
+                      request.request_id,
+                      profile_json.size(),
+                      pipeline_steps,
+                      GetOptionalBoolField(request.params, "include_base64", false),
+                      GetOptionalIntField(request.params, "timeout_ms", 15000));
+
     CaptureTaskStartRequest start_request;
-    start_request.connection_id = connection_id;
-    start_request.session_token = session_result.session_token;
-    start_request.device_id = device_id;
-    start_request.output_dir = GetOptionalStringField(request.params, "output_dir");
-    start_request.include_base64 = GetOptionalBoolField(request.params, "include_base64", false);
-    start_request.timeout_ms = GetOptionalIntField(request.params, "timeout_ms", 15000);
-    start_request.auth_context = session_result.auth_context;
-    start_request.profile = ParseCaptureProfile(request.params, device_id);
-    start_request.pipeline = ParseImageEnhancePipeline(GetOptionalObjectField(request.params, "pipeline"));
-    start_request.online_api_key = session_result.token;
-    start_request.online_base_url = runtime_config_ ? runtime_config_->OnlineImageEnhanceBaseUrl() : "";
-    if (start_request.profile.device_id.empty()) {
-        start_request.profile.device_id = device_id;
+    try {
+        start_request.connection_id = connection_id;
+        start_request.session_token = session_result.session_token;
+        start_request.device_id = device_id;
+        start_request.output_dir = GetOptionalStringField(request.params, "output_dir");
+        start_request.include_base64 = GetOptionalBoolField(request.params, "include_base64", false);
+        start_request.timeout_ms = GetOptionalIntField(request.params, "timeout_ms", 15000);
+        start_request.auth_context = session_result.auth_context;
+        start_request.profile = ParseCaptureProfile(request.params, device_id);
+        start_request.pipeline = ParseImageEnhancePipeline(pipeline_json);
+        start_request.online_api_key = session_result.token;
+        start_request.online_base_url = runtime_config_ ? runtime_config_->OnlineImageEnhanceBaseUrl() : "";
+        if (start_request.profile.device_id.empty()) {
+            start_request.profile.device_id = device_id;
+        }
+    } catch (const std::exception& e) {
+        SDK_OPEN_LOG_ERROR("[command_application] capture.take parse failed connection={} request_id={} err={}",
+                           connection_id,
+                           request.request_id,
+                           e.what());
+        return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, e.what());
+    } catch (...) {
+        SDK_OPEN_LOG_ERROR("[command_application] capture.take parse failed connection={} request_id={} err=<unknown>",
+                           connection_id,
+                           request.request_id);
+        return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "capture.take parse failed");
     }
 
-    const CaptureTaskStartResult result = capture_task_service_.StartTask(start_request);
+    CaptureTaskStartResult result;
+    try {
+        SDK_OPEN_LOG_INFO("[command_application] capture.take start_task connection={} request_id={} profile_revision={} pipeline_steps={} quotas={}",
+                          connection_id,
+                          request.request_id,
+                          start_request.profile.revision,
+                          start_request.pipeline.steps.size(),
+                          start_request.auth_context.quota_buckets.size());
+        result = capture_task_service_.StartTask(start_request);
+    } catch (const std::exception& e) {
+        SDK_OPEN_LOG_ERROR("[command_application] capture.take start_task failed connection={} request_id={} err={}",
+                           connection_id,
+                           request.request_id,
+                           e.what());
+        return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, e.what());
+    } catch (...) {
+        SDK_OPEN_LOG_ERROR("[command_application] capture.take start_task failed connection={} request_id={} err=<unknown>",
+                           connection_id,
+                           request.request_id);
+        return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "capture.take start_task failed");
+    }
     if (!IsOkStatusCode(result.code)) {
         return BuildWsResponse(request.request_id, result.code, result.message);
     }
@@ -2611,10 +2680,24 @@ Json CommandApplicationService::HandleCaptureGet(const std::string& connection_i
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "task_id required");
     }
     const CaptureTaskSnapshot task = capture_task_service_.GetTask(connection_id, task_id);
-    if (!IsOkStatusCode(task.code)) {
+    if (task.status.empty()) {
         return BuildWsResponse(request.request_id, task.code, task.message);
     }
-    return BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", BuildCaptureTaskJson(task));
+    const Json task_json = BuildCaptureTaskJson(task);
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"task", task_json},
+                                {"task_id", task.task_id},
+                                {"status", task.status},
+                                {"code", task.code},
+                                {"message", task.message},
+                                {"device_id", task.device_id},
+                                {"profile_revision", task.profile_revision},
+                                {"stages", task_json.value("stages", Json::array())},
+                                {"assets", task_json.value("assets", Json::array())},
+                                {"warnings", task.warnings},
+                                {"error", task.error}});
 }
 
 Json CommandApplicationService::HandleCaptureSetTurnDetect(const std::string& connection_id, const Request& request) {
@@ -2817,12 +2900,22 @@ Json CommandApplicationService::HandleVideoSetProfile(const std::string& connect
     if (profile_request.device_id.empty()) {
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "device_id required");
     }
-    const Json profile_json = GetOptionalObjectField(request.params, "profile");
+    Json profile_params = request.params;
+    const Json profile_json = GetOptionalObjectField(profile_params, "profile");
     if (profile_json.empty()) {
-        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "profile required");
+        const bool has_inline_profile =
+            profile_params.find("capture") != profile_params.end() ||
+            profile_params.find("device") != profile_params.end() ||
+            profile_params.find("output") != profile_params.end() ||
+            profile_params.find("page_processing") != profile_params.end() ||
+            profile_params.find("single_page") != profile_params.end();
+        if (!has_inline_profile) {
+            return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "profile required");
+        }
+        profile_params = Json{{"profile", request.params}};
     }
 
-    const SdkCaptureProfile profile = ParseCaptureProfile(request.params, profile_request.device_id);
+    const SdkCaptureProfile profile = ParseCaptureProfile(profile_params, profile_request.device_id);
     profile_request.page_processing = profile.page_processing;
     profile_request.single_page_realtime_detect_rects = profile.single_page_realtime_detect_rects;
     profile_request.single_page_multi_target_paging = profile.single_page.multi_target_paging;
@@ -3549,6 +3642,9 @@ Json CommandApplicationService::HandleOcrRecognize(const std::string& connection
     ocr_request.output_path = GetOptionalStringField(request.params, "output_path");
     ocr_request.output_dir = GetOptionalStringField(request.params, "output_dir");
     ocr_request.format = NormalizeLower(GetOptionalStringField(request.params, "format"));
+    if (ocr_request.format.empty()) {
+        ocr_request.format = NormalizeLower(GetOptionalStringField(request.params, "output_format"));
+    }
     if (ocr_request.format.empty() && !ocr_request.output_path.empty()) {
         ocr_request.format = NormalizeLower(InferOutputFormatFromPath(ocr_request.output_path));
     }
@@ -3649,7 +3745,21 @@ Json CommandApplicationService::HandleOcrRecognize(const std::string& connection
         }
     }
 
-    const SdkOcrRecognizeResult result = ocr_facade_.Recognize(ocr_request);
+    SdkOcrRecognizeResult result;
+    try {
+        result = ocr_facade_.Recognize(ocr_request);
+    } catch (const std::exception& e) {
+        SDK_OPEN_LOG_ERROR("[command_application] ocr.recognize provider threw connection={} request_id={} err={}",
+                           connection_id,
+                           request.request_id,
+                           e.what());
+        return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, e.what());
+    } catch (...) {
+        SDK_OPEN_LOG_ERROR("[command_application] ocr.recognize provider threw connection={} request_id={} err=<unknown>",
+                           connection_id,
+                           request.request_id);
+        return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "ocr.recognize provider failed");
+    }
     if (!IsOkStatusCode(result.code)) {
         return BuildWsResponse(request.request_id, result.code, result.message);
     }
@@ -3997,6 +4107,13 @@ Json CommandApplicationService::HandleSaneSetOptions(const std::string& connecti
     const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
     if (!IsOkStatusCode(session_result.code)) {
         return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    const SdkSaneStatusResult status_result = sane_facade_.GetStatus();
+    if (status_result.code == ToCode(SdkStatusCode::SaneNotAvailable)) {
+        return BuildWsResponse(request.request_id,
+                               status_result.code,
+                               status_result.message,
+                               BuildSaneStatusJson(status_result, provider_names_.value("sane", "")));
     }
     SdkSaneSetOptionsRequest set_request;
     set_request.session_id = GetOptionalStringField(request.params, "session_id");
@@ -4695,6 +4812,12 @@ Json CommandApplicationService::BuildAdminSessionJson(const AuthorizationService
 }
 
 Json CommandApplicationService::BuildAuthContextJson(const AuthContext& auth_context) const {
+    SDK_OPEN_LOG_INFO("[command_application] build_auth_context begin valid={} account={} caps={} quotas={} device_scope={}",
+                      auth_context.is_valid,
+                      ToAccountTypeString(auth_context.account_type),
+                      auth_context.capabilities.size(),
+                      auth_context.quota_buckets.size(),
+                      auth_context.device_scope.size());
     Json device_scope = Json::array();
     for (std::vector<SdkDeviceGrant>::const_iterator it = auth_context.device_scope.begin();
          it != auth_context.device_scope.end();
@@ -4705,45 +4828,25 @@ Json CommandApplicationService::BuildAuthContextJson(const AuthContext& auth_con
         });
     }
 
-    Json capabilities = Json::array();
-    for (std::vector<std::string>::const_iterator it = auth_context.capabilities.begin();
-         it != auth_context.capabilities.end();
-         ++it) {
-        capabilities.push_back(*it);
-    }
-
-    Json quota_buckets = Json::array();
-    for (std::vector<AuthQuotaBucket>::const_iterator it = auth_context.quota_buckets.begin();
-         it != auth_context.quota_buckets.end();
-         ++it) {
-        Json methods = Json::array();
-        for (std::vector<std::string>::const_iterator method_it = it->methods.begin(); method_it != it->methods.end();
-             ++method_it) {
-            methods.push_back(*method_it);
-        }
-        quota_buckets.push_back(Json{
-            {"bucket", it->bucket},
-            {"methods", methods},
-            {"limit", it->limit},
-            {"remaining", it->remaining},
-            {"enforcement", it->enforcement},
-        });
-    }
-
-    return Json{
+    Json result = Json{
         {"is_valid", auth_context.is_valid},
         {"account_type", ToAccountTypeString(auth_context.account_type)},
         {"account_type_code", auth_context.account_type_code},
+        {"licensed_account_type", ToAccountTypeString(auth_context.licensed_account_type)},
+        {"licensed_account_type_code", auth_context.licensed_account_type_code},
         {"auth_scene", auth_context.auth_scene},
         {"license_mode", auth_context.license_mode},
+        {"host_auth_mode", auth_context.host_auth_mode},
         {"entitlement_state", auth_context.entitlement_state},
         {"commercial_authorized", auth_context.commercial_authorized},
         {"machine_code", auth_context.machine_code},
         {"device_scope", device_scope},
         {"expires_at", auth_context.expires_at},
-        {"capabilities", capabilities},
-        {"quota_buckets", quota_buckets},
+        {"capability_count", auth_context.capabilities.size()},
+        {"quota_bucket_count", auth_context.quota_buckets.size()},
     };
+    SDK_OPEN_LOG_INFO("[command_application] build_auth_context end fields={}", result.size());
+    return result;
 }
 
 Json CommandApplicationService::BuildDeviceJson(const SdkDeviceDescriptor& device) const {
