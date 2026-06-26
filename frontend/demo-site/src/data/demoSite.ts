@@ -91,8 +91,8 @@ export const globalEvents: TimelineItem[] = [
   },
   {
     id: 'evt-3',
-    title: 'capture.turn_detected',
-    detail: 'sheet=page-2 · angle=6.4deg · confidence=0.91',
+    title: 'capture.hardgrab_detected',
+    detail: 'hard grab detected',
     meta: '18:21:46',
     tone: 'warning',
   },
@@ -425,6 +425,13 @@ export const captureEvents: TimelineItem[] = [
     detail: 'page-2 · angle=6.4deg · confidence=0.91',
     meta: '18:32:04',
     tone: 'warning',
+  },
+  {
+    id: 'capture-event-3',
+    title: 'capture.hardgrab_detected',
+    detail: 'hard grab detected',
+    meta: '18:32:12',
+    tone: 'primary',
   },
 ];
 

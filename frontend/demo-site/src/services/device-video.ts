@@ -3,7 +3,7 @@ import { reactive, readonly } from 'vue';
 import type { ExecutionState } from '../types/demo';
 import { sendBoundCommand } from './auth-session';
 import { buildVideoWsUrl, isOkResponse } from './protocol';
-import { nowTimeLabel, recordAlert, recordRuntimeEvent } from './runtime-records';
+import { nowTimeLabel, recordAlert, recordInternalRuntimeEvent, recordRuntimeEvent } from './runtime-records';
 
 export interface DeviceResolution {
   width: number;
@@ -189,7 +189,7 @@ export async function openSelectedDevice(): Promise<void> {
 
 export async function closeSelectedDevice(): Promise<void> {
   closeVideoSocket();
-  if (!state.selectedDeviceId || (!state.opened && !state.streamId)) {
+  if (!state.selectedDeviceId) {
     resetPreview();
     state.opened = false;
     state.closeState = 'idle';
@@ -300,12 +300,30 @@ export async function stopVideo(): Promise<void> {
     return;
   }
   state.stopState = 'running';
-  const response = await sendBoundCommand('video.stop', {
-    params: { device_id: state.selectedDeviceId },
-  });
+  let response;
+  try {
+    response = await sendBoundCommand('video.stop', {
+      params: { device_id: state.selectedDeviceId },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'video.stop failed';
+    state.stopState = 'error';
+    state.errorMessage = message;
+    recordRuntimeEvent({
+      title: 'video.stop_failed',
+      detail: message,
+      tone: 'danger',
+    });
+    return;
+  }
   if (!isOkResponse(response)) {
     state.stopState = 'error';
     state.errorMessage = response.message;
+    recordRuntimeEvent({
+      title: 'video.stop_failed',
+      detail: response.message || `code=${response.code}`,
+      tone: 'danger',
+    });
     return;
   }
   resetPreview();
@@ -340,6 +358,37 @@ export function resetDeviceVideo(): void {
   state.selectedResolutionKey = '';
   state.opened = false;
   resetPreview();
+}
+
+export function handleDeviceRemoved(deviceId: string, reason = 'hotplug_removed'): boolean {
+  const selectedDeviceId = state.selectedDeviceId;
+  const matched = Boolean(deviceId && selectedDeviceId === deviceId);
+  recordInternalRuntimeEvent({
+    title: 'device.removed.local',
+    detail: matched
+      ? `cleared local preview state (${reason}).`
+      : `ignored removed device ${deviceId || '-'}; current=${selectedDeviceId || '-'}.`,
+    meta: deviceId || selectedDeviceId || '-',
+    tone: matched ? 'warning' : 'info',
+  });
+  if (!matched) {
+    return false;
+  }
+  closeVideoSocket();
+  resetPreview();
+  state.selectedDeviceId = '';
+  state.detailState = 'idle';
+  state.opened = false;
+  state.resolutions = [];
+  state.features = { image_transfer_protocol: false };
+  state.selectedResolutionKey = '';
+  state.openState = 'idle';
+  state.startState = 'idle';
+  state.stopState = 'idle';
+  state.videoState = 'idle';
+  state.closeState = 'success';
+  state.errorMessage = `device removed (${reason})`;
+  return true;
 }
 
 export function attachVideoCanvas(canvas: HTMLCanvasElement | null): void {

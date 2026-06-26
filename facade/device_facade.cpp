@@ -327,6 +327,11 @@ SdkDeviceCloseResult DeviceFacade::CloseDevice(const AuthContext& auth_context, 
     SdkDeviceCloseResult result;
     const DeviceGetResult device_result = LookupDevice(auth_context, request.device_id);
     if (!IsOkStatusCode(device_result.code)) {
+        if (device_result.code == ToCode(SdkStatusCode::DeviceNotFound) &&
+            providers_.device_provider &&
+            providers_.device_provider->IsDeviceRecentlyRemoved(request.device_id)) {
+            return providers_.device_provider->CloseDevice(request);
+        }
         result.code = device_result.code;
         result.message = device_result.message;
         return result;
@@ -367,6 +372,11 @@ SdkVideoStopResult DeviceFacade::StopVideo(const AuthContext& auth_context, cons
     SdkVideoStopResult result;
     const DeviceGetResult device_result = LookupDevice(auth_context, request.device_id);
     if (!IsOkStatusCode(device_result.code)) {
+        if (device_result.code == ToCode(SdkStatusCode::DeviceNotFound) &&
+            providers_.device_provider &&
+            providers_.device_provider->IsDeviceRecentlyRemoved(request.device_id)) {
+            return providers_.device_provider->StopVideo(request);
+        }
         result.code = device_result.code;
         result.message = device_result.message;
         return result;
@@ -396,6 +406,18 @@ SdkVideoProfileResult DeviceFacade::SetVideoProfile(const AuthContext& auth_cont
         return result;
     }
     return providers_.device_provider->SetVideoProfile(request);
+}
+
+SdkTurnDetectResult DeviceFacade::SetTurnDetect(const AuthContext& auth_context,
+                                                const SdkTurnDetectRequest& request) const {
+    SdkTurnDetectResult result;
+    const DeviceGetResult device_result = LookupDevice(auth_context, request.device_id);
+    if (!IsOkStatusCode(device_result.code)) {
+        result.code = device_result.code;
+        result.message = device_result.message;
+        return result;
+    }
+    return providers_.device_provider->SetTurnDetect(request);
 }
 
 } // namespace sdk

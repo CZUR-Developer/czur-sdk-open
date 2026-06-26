@@ -61,6 +61,20 @@ VideoSessionService::StreamResult VideoSessionService::StopStreamById(const std:
     return result;
 }
 
+std::vector<VideoSessionService::StreamBinding> VideoSessionService::ClearDevice(const std::string& device_id) {
+    std::vector<StreamBinding> removed;
+    std::lock_guard<std::mutex> lock(streams_mu_);
+    for (std::map<std::string, StreamBinding>::iterator it = streams_.begin(); it != streams_.end();) {
+        if (it->second.device_id == device_id) {
+            removed.push_back(it->second);
+            it = streams_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    return removed;
+}
+
 VideoSessionService::StreamResult VideoSessionService::UpdateStreamFormat(const std::string& connection_id,
                                                                           const std::string& device_id,
                                                                           const std::string& pixel_format,

@@ -15,6 +15,7 @@
 
 #include "sdk_runtime_paths.h"
 #include "sdk_entitlement_policy.h"
+#include "sdk_logger.h"
 
 namespace editor {
 namespace sdk {
@@ -1411,6 +1412,7 @@ CommandApplicationService::CommandApplicationService(const SdkConfig& config,
     methods_.push_back(MakeMethod("device.close", true, "Close a device and release active preview resources"));
     methods_.push_back(MakeMethod("capture.take", true, "Capture a still image"));
     methods_.push_back(MakeMethod("capture.get", true, "Get one capture task snapshot"));
+    methods_.push_back(MakeMethod("capture.set_turn_detect", true, "Enable or disable page-turn detection events"));
     methods_.push_back(MakeMethod("video.start", true, "Create one video stream session"));
     methods_.push_back(MakeMethod("video.stop", true, "Stop one video stream session"));
     methods_.push_back(MakeMethod("video.set_format", true, "Update one video stream format"));
@@ -1478,6 +1480,14 @@ void CommandApplicationService::SetCommandEventSink(CommandEventSink sink) {
     sane_facade_.SetScanTaskEventSink([this](const SdkSaneScanTaskEvent& event) {
         DispatchSaneScanTaskEvent(event);
     });
+    if (providers_.device_provider) {
+        providers_.device_provider->SetDeviceActionEventSink([this](const SdkDeviceActionEvent& event) {
+            DispatchDeviceActionEvent(event);
+        });
+        providers_.device_provider->SetDeviceEventSink([this](const SdkDeviceEvent& event) {
+            DispatchDeviceEvent(event);
+        });
+    }
 }
 
 Json CommandApplicationService::HandleRequest(const std::string& connection_id, const Json& request_json) {
@@ -1544,6 +1554,9 @@ Json CommandApplicationService::HandleRequest(const std::string& connection_id, 
     }
     if (request.method == "capture.get") {
         return HandleCaptureGet(connection_id, request);
+    }
+    if (request.method == "capture.set_turn_detect") {
+        return HandleCaptureSetTurnDetect(connection_id, request);
     }
     if (request.method == "video.start") {
         return HandleVideoStart(connection_id, request);
@@ -1701,6 +1714,104 @@ void CommandApplicationService::DispatchSaneDeviceEvent(const SdkSaneDeviceEvent
                       BuildSaneDeviceEventJson(event),
                       event.code,
                       event.message));
+}
+
+void CommandApplicationService::DispatchDeviceActionEvent(const SdkDeviceActionEvent& event) {
+    const bool is_hardgrab = event.type == SdkDeviceActionType::HardGrab;
+    const std::string event_name = is_hardgrab ? "capture.hardgrab_detected" : "capture.turn_detected";
+    CommandEventSink sink;
+    {
+        std::lock_guard<std::mutex> lock(command_event_sink_mu_);
+        sink = command_event_sink_;
+    }
+    if (!sink || event.device_id.empty()) {
+        SDK_OPEN_LOG_WARN("[sdk_device_action] drop event={} reason={} device={}",
+                          event_name,
+                          !sink ? "missing_sink" : "missing_device_id",
+                          event.device_id);
+        return;
+    }
+
+    std::vector<std::string> target_connections;
+    {
+        std::lock_guard<std::mutex> lock(opened_devices_mu_);
+        for (std::map<std::string, std::set<std::string> >::const_iterator it = opened_devices_by_connection_.begin();
+             it != opened_devices_by_connection_.end();
+             ++it) {
+            if (it->second.find(event.device_id) != it->second.end()) {
+                target_connections.push_back(it->first);
+            }
+        }
+    }
+    if (target_connections.empty()) {
+        SDK_OPEN_LOG_INFO("[sdk_device_action] drop event={} reason=no_open_connection device={}",
+                          event_name,
+                          event.device_id);
+        return;
+    }
+
+    Json payload = Json{{"device_id", event.device_id},
+                        {"auto_capture", event.auto_capture},
+                        {"ts_ms", event.timestamp_ms}};
+    const Json ws_event = BuildWsEvent(event_name, payload);
+    SDK_OPEN_LOG_INFO("[sdk_device_action] dispatch event={} device={} target_connections={}",
+                      event_name,
+                      event.device_id,
+                      target_connections.size());
+    for (std::vector<std::string>::const_iterator it = target_connections.begin(); it != target_connections.end(); ++it) {
+        sink(*it, ws_event);
+    }
+}
+
+void CommandApplicationService::DispatchDeviceEvent(const SdkDeviceEvent& event) {
+    const std::string event_name = "device.removed";
+    CommandEventSink sink;
+    {
+        std::lock_guard<std::mutex> lock(command_event_sink_mu_);
+        sink = command_event_sink_;
+    }
+    if (!sink || event.device_id.empty()) {
+        SDK_OPEN_LOG_WARN("[sdk_device_event] drop event={} reason={} device={}",
+                          event_name,
+                          !sink ? "missing_sink" : "missing_device_id",
+                          event.device_id);
+        return;
+    }
+
+    std::vector<std::string> target_connections = ForgetOpenedDeviceFromAllConnections(event.device_id);
+    const std::vector<VideoSessionService::StreamBinding> removed_streams =
+        video_session_service_.ClearDevice(event.device_id);
+    for (std::vector<VideoSessionService::StreamBinding>::const_iterator it = removed_streams.begin();
+         it != removed_streams.end();
+         ++it) {
+        if (video_stream_closed_sink_) {
+            video_stream_closed_sink_(it->stream_id);
+        }
+        if (std::find(target_connections.begin(), target_connections.end(), it->connection_id) == target_connections.end()) {
+            target_connections.push_back(it->connection_id);
+        }
+    }
+
+    if (target_connections.empty()) {
+        SDK_OPEN_LOG_INFO("[sdk_device_event] drop event={} reason=no_target_connection device={}",
+                          event_name,
+                          event.device_id);
+        return;
+    }
+
+    Json payload = Json{{"device_id", event.device_id},
+                        {"reason", event.reason},
+                        {"was_opened", event.was_opened},
+                        {"was_streaming", event.was_streaming},
+                        {"ts_ms", event.timestamp_ms}};
+    const Json ws_event = BuildWsEvent(event_name, payload);
+    SDK_OPEN_LOG_INFO("[sdk_device_event] dispatch event={} device={} target_connections={}",
+                      event_name,
+                      event.device_id,
+                      target_connections.size());
+    for (std::vector<std::string>::const_iterator it = target_connections.begin(); it != target_connections.end(); ++it) {
+        sink(*it, ws_event);
+    }
 }
 
 void CommandApplicationService::DispatchSaneScanTaskEvent(const SdkSaneScanTaskEvent& event) {
@@ -2504,6 +2615,40 @@ Json CommandApplicationService::HandleCaptureGet(const std::string& connection_i
         return BuildWsResponse(request.request_id, task.code, task.message);
     }
     return BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", BuildCaptureTaskJson(task));
+}
+
+Json CommandApplicationService::HandleCaptureSetTurnDetect(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+
+    SdkTurnDetectRequest turn_request;
+    turn_request.device_id = GetOptionalStringField(request.params, "device_id");
+    turn_request.enabled = GetOptionalBoolField(request.params, "enabled", false);
+    turn_request.auto_capture = GetOptionalBoolField(request.params, "auto_capture", false);
+    turn_request.scan_device_type = GetOptionalIntField(request.params, "scan_device_type", -1);
+    turn_request.cooldown_ms = GetOptionalIntField(request.params, "cooldown_ms", 1000);
+    if (turn_request.device_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "device_id required");
+    }
+    if (turn_request.cooldown_ms < 0) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "cooldown_ms must be non-negative");
+    }
+
+    const SdkTurnDetectResult turn_result = device_facade_.SetTurnDetect(session_result.auth_context, turn_request);
+    if (!IsOkStatusCode(turn_result.code)) {
+        return BuildWsResponse(request.request_id, turn_result.code, turn_result.message);
+    }
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"device_id", turn_request.device_id},
+                                {"enabled", turn_result.enabled},
+                                {"auto_capture", turn_result.auto_capture},
+                                {"scan_device_type", turn_result.scan_device_type},
+                                {"cooldown_ms", turn_result.cooldown_ms},
+                                {"applied", turn_result.applied}});
 }
 
 Json CommandApplicationService::HandleVideoStart(const std::string& connection_id, const Request& request) {
@@ -4674,6 +4819,27 @@ void CommandApplicationService::ForgetOpenedDevice(const std::string& connection
     if (it->second.empty()) {
         opened_devices_by_connection_.erase(it);
     }
+}
+
+std::vector<std::string> CommandApplicationService::ForgetOpenedDeviceFromAllConnections(const std::string& device_id) {
+    std::vector<std::string> connections;
+    if (device_id.empty()) {
+        return connections;
+    }
+
+    std::lock_guard<std::mutex> lock(opened_devices_mu_);
+    for (std::map<std::string, std::set<std::string> >::iterator it = opened_devices_by_connection_.begin();
+         it != opened_devices_by_connection_.end();) {
+        if (it->second.erase(device_id) > 0) {
+            connections.push_back(it->first);
+        }
+        if (it->second.empty()) {
+            it = opened_devices_by_connection_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    return connections;
 }
 
 std::vector<std::string> CommandApplicationService::ClearOpenedDevices(const std::string& connection_id) {

@@ -30,6 +30,7 @@ void PushAlwaysSupportedCapabilities(std::vector<std::string>* capabilities) {
     capabilities->push_back("device.close");
     capabilities->push_back("capture.take");
     capabilities->push_back("capture.get");
+    capabilities->push_back("capture.set_turn_detect");
     capabilities->push_back("video.start");
     capabilities->push_back("video.stop");
     capabilities->push_back("video.set_format");

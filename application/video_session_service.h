@@ -49,6 +49,7 @@ public:
                                 int fps);
     StreamResult StopStream(const std::string& connection_id, const std::string& device_id);
     StreamResult StopStreamById(const std::string& stream_id);
+    std::vector<StreamBinding> ClearDevice(const std::string& device_id);
     StreamResult UpdateStreamFormat(const std::string& connection_id,
                                     const std::string& device_id,
                                     const std::string& pixel_format,

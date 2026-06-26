@@ -72,6 +72,10 @@ void SdkWsCommandServer::SetCloseHandler(ConnectionHandler handler) {
 
 bool SdkWsCommandServer::SendEvent(const std::string& connection_id, const Json& event) {
     if (!impl_ || connection_id.empty()) {
+        SDK_OPEN_LOG_WARN("[sdk_ws_command_server] send event dropped, reason={} event={} connection={}",
+                          !impl_ ? "server_not_started" : "empty_connection_id",
+                          event.value("event", "event"),
+                          connection_id);
         return false;
     }
     ConnectionHdl target;
@@ -90,11 +94,19 @@ bool SdkWsCommandServer::SendEvent(const std::string& connection_id, const Json&
         }
     }
     if (!found) {
+        SDK_OPEN_LOG_WARN("[sdk_ws_command_server] send event dropped, reason=connection_not_found event={} connection={}",
+                          event.value("event", "event"),
+                          connection_id);
         return false;
     }
     impl_->server.get_io_service().post([this, target, event]() {
         ErrorCode ec;
         impl_->server.send(target, DumpJson(event), websocketpp::frame::opcode::text, ec);
+        if (ec) {
+            SDK_OPEN_LOG_WARN("[sdk_ws_command_server] send event failed, event={} error={}",
+                              event.value("event", "event"),
+                              ec.message());
+        }
     });
     return true;
 }

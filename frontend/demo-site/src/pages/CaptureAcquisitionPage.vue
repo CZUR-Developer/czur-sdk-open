@@ -339,6 +339,17 @@
               </div>
             </div>
 
+            <div class="space-y-2">
+              <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ t('pages.captureAcquisition.turnDetectOptions') }}</p>
+              <label class="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                <span>
+                  <span class="block font-medium">{{ t('pages.captureAcquisition.turnDetect') }}</span>
+                  <span class="block text-xs text-slate-500">{{ t('pages.captureAcquisition.turnDetectDescription') }}</span>
+                </span>
+                <input v-model="captureConfig.turnDetectEnabled" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500" />
+              </label>
+            </div>
+
             <div>
               <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ t('pages.captureAcquisition.colorMode') }}</p>
               <div class="grid gap-2 sm:grid-cols-2">
@@ -436,13 +447,14 @@ import SectionPanel from '../components/blocks/SectionPanel.vue';
 import MetricCard from '../components/cards/MetricCard.vue';
 import StatusPill from '../components/cards/StatusPill.vue';
 import { authSessionState, onCommandEvent, sendBoundCommand } from '../services/auth-session';
-import { deviceInventoryState, loadDeviceInventory, resetDeviceInventory } from '../services/device-inventory';
+import { deviceInventoryState, loadDeviceInventory, removeInventoryDevice, resetDeviceInventory } from '../services/device-inventory';
 import {
   attachVideoCanvas,
   applyCaptureAcquisitionResolution,
   closeSelectedDevice,
   type DeviceResolution,
   deviceVideoState,
+  handleDeviceRemoved,
   loadDeviceDetail,
   openSelectedDevice,
   resetDeviceVideo,
@@ -455,7 +467,7 @@ import {
 } from '../services/device-video';
 import type { EnhancePipeline, EnhanceWorkflow } from '../services/image-enhance-workflows';
 import { openImageViewer } from '../services/image-viewer';
-import { recordRuntimeEvent, runtimeRecordState } from '../services/runtime-records';
+import { recordInternalRuntimeEvent, recordRuntimeEvent, runtimeRecordState } from '../services/runtime-records';
 import type { TableColumn, TableRow, TimelineItem, Tone } from '../types/demo';
 
 type PageProcessingMode = 'single_page' | 'curved_book' | 'selected_area' | 'keep_original';
@@ -617,6 +629,7 @@ const captureConfig = reactive({
   singlePageAutoRotate: false,
   singlePageSmartBlackEdgeOptimize: true,
   singlePageMultiTargetPaging: false,
+  turnDetectEnabled: false,
   curvedBookRemoveFinger: true,
   curvedBookFingerType: 'with_sleeve' as 'with_sleeve' | 'without_sleeve',
   curvedBookSmartPaging: true,
@@ -972,6 +985,7 @@ watch(
     captureConfig.singlePageAutoRotate,
     captureConfig.singlePageSmartBlackEdgeOptimize,
     captureConfig.singlePageMultiTargetPaging,
+    captureConfig.turnDetectEnabled,
     captureConfig.curvedBookRemoveFinger,
     captureConfig.curvedBookFingerType,
     captureConfig.curvedBookSmartPaging,
@@ -1003,6 +1017,16 @@ watch(
       return;
     }
     await setVideoProfile(captureProfile.value);
+  },
+);
+
+watch(
+  () => captureConfig.turnDetectEnabled,
+  async (enabled) => {
+    if (!deviceVideoState.selectedDeviceId || !deviceVideoState.opened || deviceVideoState.closeState === 'running') {
+      return;
+    }
+    await applyTurnDetect(enabled);
   },
 );
 
@@ -1176,9 +1200,6 @@ async function closeCaptureDevice(): Promise<void> {
   suppressAutoOpen.value = true;
   if (deviceVideoState.streamId) {
     await stopVideo();
-    if (deviceVideoState.stopState === 'error') {
-      return;
-    }
   }
   await closeSelectedDevice();
 }
@@ -1191,6 +1212,45 @@ async function openCaptureDevice(): Promise<void> {
 async function startCaptureVideo(): Promise<void> {
   await applyCaptureAcquisitionResolution();
   await startVideo(captureProfile.value);
+}
+
+async function applyTurnDetect(enabled: boolean): Promise<void> {
+  if (!deviceVideoState.selectedDeviceId || (!deviceVideoState.opened && enabled)) {
+    return;
+  }
+  try {
+    const response = await sendBoundCommand('capture.set_turn_detect', {
+      params: {
+        device_id: deviceVideoState.selectedDeviceId,
+        enabled,
+        auto_capture: false,
+        scan_device_type: 0,
+        cooldown_ms: 1000,
+      },
+    });
+    if (response.code !== 0) {
+      recordRuntimeEvent({
+        title: 'capture.set_turn_detect',
+        detail: response.message || 'failed',
+        meta: enabled ? 'enable' : 'disable',
+        tone: 'danger',
+      });
+      return;
+    }
+    recordRuntimeEvent({
+      title: 'capture.set_turn_detect',
+      detail: enabled ? 'page turn detection enabled' : 'page turn detection disabled',
+      meta: deviceVideoState.selectedDeviceId,
+      tone: enabled ? 'success' : 'info',
+    });
+  } catch (error) {
+    recordRuntimeEvent({
+      title: 'capture.set_turn_detect',
+      detail: error instanceof Error ? error.message : 'failed',
+      meta: enabled ? 'enable' : 'disable',
+      tone: 'danger',
+    });
+  }
 }
 
 function handleEnhanceWorkflowSelected(workflow: EnhanceWorkflow | null): void {
@@ -1335,6 +1395,20 @@ async function pollCaptureTask(taskId: string): Promise<void> {
 }
 
 function handleCommandEvent(event: { event: string; payload?: Record<string, unknown> }): void {
+  if (event.event === 'device.removed') {
+    const payload = event.payload ?? {};
+    const deviceId = typeof payload.device_id === 'string' ? payload.device_id : '';
+    const reason = typeof payload.reason === 'string' ? payload.reason : 'hotplug_removed';
+    const localMatched = handleDeviceRemoved(deviceId, reason);
+    const inventoryRemoved = removeInventoryDevice(deviceId);
+    recordInternalRuntimeEvent({
+      title: 'device.removed.handled',
+      detail: `local=${localMatched ? 'cleared' : 'unchanged'}, inventory=${inventoryRemoved ? 'removed' : 'unchanged'} (${reason}).`,
+      meta: deviceId || '-',
+      tone: localMatched || inventoryRemoved ? 'warning' : 'info',
+    });
+    return;
+  }
   if (!event.event.startsWith('capture.')) {
     return;
   }
@@ -1342,6 +1416,9 @@ function handleCommandEvent(event: { event: string; payload?: Record<string, unk
     event: event.event,
     payload: event.payload,
   });
+  if (event.event === 'capture.turn_detected' || event.event === 'capture.hardgrab_detected') {
+    return;
+  }
   const task = asTaskPayload(event.payload);
   if (!task.task_id || !activeCaptureTasks.has(task.task_id)) {
     return;

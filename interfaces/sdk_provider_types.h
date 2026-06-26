@@ -140,6 +140,48 @@ struct SdkVideoFrame {
 
 using SdkVideoFrameCallback = std::function<void(const SdkVideoFrame&)>;
 
+enum class SdkDeviceActionType {
+    PageTurn,
+    HardGrab,
+};
+
+struct SdkDeviceActionEvent {
+    std::string device_id;
+    SdkDeviceActionType type = SdkDeviceActionType::PageTurn;
+    bool auto_capture = false;
+    int64_t timestamp_ms = 0;
+};
+
+using SdkDeviceActionEventCallback = std::function<void(const SdkDeviceActionEvent&)>;
+
+struct SdkDeviceEvent {
+    std::string device_id;
+    std::string reason;
+    bool was_opened = false;
+    bool was_streaming = false;
+    int64_t timestamp_ms = 0;
+};
+
+using SdkDeviceEventCallback = std::function<void(const SdkDeviceEvent&)>;
+
+struct SdkTurnDetectRequest {
+    std::string device_id;
+    bool enabled = false;
+    bool auto_capture = false;
+    int scan_device_type = -1;
+    int cooldown_ms = 1000;
+};
+
+struct SdkTurnDetectResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool applied = false;
+    bool enabled = false;
+    bool auto_capture = false;
+    int scan_device_type = -1;
+    int cooldown_ms = 1000;
+};
+
 struct SdkVideoStopRequest {
     std::string device_id;
 };

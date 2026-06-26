@@ -9,6 +9,7 @@ const MAX_ERRORS = 24;
 const state = reactive({
   requests: [] as RequestHistoryItem[],
   events: [] as TimelineItem[],
+  internalEvents: [] as TimelineItem[],
   errors: [] as ErrorItem[],
 });
 
@@ -48,6 +49,22 @@ export function recordRuntimeEvent(entry: {
     tone: entry.tone,
   });
   state.events.splice(MAX_EVENTS);
+}
+
+export function recordInternalRuntimeEvent(entry: {
+  title: string;
+  detail: string;
+  tone: TimelineItem['tone'];
+  meta?: string;
+}): void {
+  state.internalEvents.unshift({
+    id: `${entry.title}-${Date.now().toString(36)}`,
+    title: entry.title,
+    detail: entry.detail,
+    meta: entry.meta ?? nowTimeLabel(),
+    tone: entry.tone,
+  });
+  state.internalEvents.splice(MAX_EVENTS);
 }
 
 export function recordAlert(entry: {

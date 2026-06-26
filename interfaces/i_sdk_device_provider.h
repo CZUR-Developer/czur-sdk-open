@@ -24,6 +24,15 @@ public:
     virtual SdkVideoStopResult StopVideo(const SdkVideoStopRequest& request) = 0;
     virtual SdkVideoFormatResult SetVideoFormat(const SdkVideoFormatRequest& request) = 0;
     virtual SdkVideoProfileResult SetVideoProfile(const SdkVideoProfileRequest& request) = 0;
+    virtual bool IsDeviceRecentlyRemoved(const std::string&) const { return false; }
+    virtual void SetDeviceActionEventSink(SdkDeviceActionEventCallback) {}
+    virtual void SetDeviceEventSink(SdkDeviceEventCallback) {}
+    virtual SdkTurnDetectResult SetTurnDetect(const SdkTurnDetectRequest&) {
+        SdkTurnDetectResult result;
+        result.code = ToCode(SdkStatusCode::UnsupportedMethod);
+        result.message = "turn detect not supported";
+        return result;
+    }
 };
 
 } // namespace sdk

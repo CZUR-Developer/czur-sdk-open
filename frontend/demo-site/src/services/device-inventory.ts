@@ -108,6 +108,21 @@ export function resetDeviceInventory(): void {
   state.errorMessage = '';
 }
 
+export function removeInventoryDevice(deviceId: string): boolean {
+  if (!deviceId) {
+    return false;
+  }
+  const nextDevices = state.devices.filter((device) => device.device_id !== deviceId);
+  if (nextDevices.length === state.devices.length) {
+    return false;
+  }
+  state.devices = nextDevices;
+  state.rows = state.rows.filter((row) => row.id !== deviceId && row.cells.deviceId !== deviceId);
+  state.count = nextDevices.length;
+  state.lastLoadedAt = nowTimeLabel();
+  return true;
+}
+
 function asDeviceDescriptors(value: unknown): DeviceDescriptorPayload[] {
   if (!Array.isArray(value)) {
     return [];

@@ -415,7 +415,11 @@ SdkApp::SdkApp(const SdkConfig& config, ProviderBundle providers)
                                                         event.value("code", 0),
                                                         event);
         }
-        command_ws_server_.SendEvent(connection_id, event);
+        const bool sent = command_ws_server_.SendEvent(connection_id, event);
+        SDK_OPEN_LOG_INFO("[sdk_command_event] send event={} connection={} sent={}",
+                          event.value("event", "event"),
+                          connection_id,
+                          sent);
     });
     command_ws_server_.SetOpenHandler([this](const std::string& connection_id) {
         if (runtime_record_service_) {

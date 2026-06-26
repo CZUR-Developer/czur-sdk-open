@@ -105,6 +105,7 @@ private:
     Json HandleDeviceClose(const std::string& connection_id, const Request& request);
     Json HandleCaptureTake(const std::string& connection_id, const Request& request);
     Json HandleCaptureGet(const std::string& connection_id, const Request& request);
+    Json HandleCaptureSetTurnDetect(const std::string& connection_id, const Request& request);
     Json HandleVideoStart(const std::string& connection_id, const Request& request);
     Json HandleVideoStop(const std::string& connection_id, const Request& request);
     Json HandleVideoSetFormat(const std::string& connection_id, const Request& request);
@@ -160,10 +161,13 @@ private:
     const MethodDescriptor* FindMethod(const std::string& method) const;
     void DispatchSaneDeviceEvent(const SdkSaneDeviceEvent& event);
     void DispatchSaneScanTaskEvent(const SdkSaneScanTaskEvent& event);
+    void DispatchDeviceActionEvent(const SdkDeviceActionEvent& event);
+    void DispatchDeviceEvent(const SdkDeviceEvent& event);
     void RememberSaneWatchConnection(const std::string& connection_id);
     bool ForgetSaneWatchConnection(const std::string& connection_id);
     void RememberOpenedDevice(const std::string& connection_id, const std::string& device_id);
     void ForgetOpenedDevice(const std::string& connection_id, const std::string& device_id);
+    std::vector<std::string> ForgetOpenedDeviceFromAllConnections(const std::string& device_id);
     std::vector<std::string> ClearOpenedDevices(const std::string& connection_id);
     std::string NextImageTaskId();
     SdkCaptureAsset AttachImageAssetUrls(const std::string& task_id, const SdkCaptureAsset& asset) const;

@@ -394,6 +394,29 @@ function handleCommandEvent(event: CommandEvent<Record<string, unknown>>): void 
     return;
   }
   if (/^(capture|device|video|stream|sane)\./.test(event.event)) {
+    if (event.event === 'capture.turn_detected' || event.event === 'capture.hardgrab_detected') {
+      const payload = event.payload ?? {};
+      const deviceId = typeof payload.device_id === 'string' ? payload.device_id : '-';
+      recordRuntimeEvent({
+        title: event.event,
+        detail: event.event === 'capture.hardgrab_detected' ? 'hard grab detected' : 'page turn detected',
+        meta: deviceId,
+        tone: event.code === 0 ? 'primary' : 'danger',
+      });
+      return;
+    }
+    if (event.event === 'device.removed') {
+      const payload = event.payload ?? {};
+      const deviceId = typeof payload.device_id === 'string' ? payload.device_id : '-';
+      const reason = typeof payload.reason === 'string' ? payload.reason : 'hotplug_removed';
+      recordRuntimeEvent({
+        title: event.event,
+        detail: `device removed (${reason})`,
+        meta: deviceId,
+        tone: event.code === 0 ? 'warning' : 'danger',
+      });
+      return;
+    }
     recordRuntimeEvent({
       title: event.event,
       detail: event.message || event.event,
