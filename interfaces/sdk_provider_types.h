@@ -87,6 +87,10 @@ struct SdkCaptureResult {
     bool captured = false;
     std::string content_type;
     std::string payload;
+    // 内部原图传递字段：provider 只把硬拍原始图交给 capture task，
+    // 对外 websocket 仍通过 task assets 暴露最终路径，避免临时文件协议外泄。
+    std::vector<uint8_t> raw_payload;
+    std::vector<uint8_t> raw_laser_payload;
     std::string output_path;
     std::string original_path;
     std::string laser_path;
@@ -150,12 +154,15 @@ struct SdkDeviceActionEvent {
     SdkDeviceActionType type = SdkDeviceActionType::PageTurn;
     bool auto_capture = false;
     int64_t timestamp_ms = 0;
+    // 硬拍事件携带已采集的原始图；翻页事件不使用该字段。
+    SdkCaptureResult capture;
 };
 
 using SdkDeviceActionEventCallback = std::function<void(const SdkDeviceActionEvent&)>;
 
 struct SdkDeviceEvent {
     std::string device_id;
+    std::string type = "removed";
     std::string reason;
     bool was_opened = false;
     bool was_streaming = false;

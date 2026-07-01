@@ -4,6 +4,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
@@ -50,6 +51,14 @@ public:
         SdkCaptureAsset asset;
     };
 
+    // 设备动作事件需要同时返回 websocket envelope 状态和 payload。
+    // 硬拍会额外提交异步任务，任务拒绝时也要把原因回传给 demo。
+    struct DeviceActionPayloadResult {
+        int code = ToCode(SdkStatusCode::Ok);
+        std::string message = "ok";
+        Json payload = Json::object();
+    };
+
     struct ImageUploadResult {
         int code = ToCode(SdkStatusCode::Ok);
         std::string message = "ok";
@@ -89,6 +98,17 @@ private:
         std::string method;
         Json params = Json::object();
         Json client = Json::object();
+    };
+
+    // 硬拍事件是 provider 异步上抛的，没有当前 command 参数。
+    // 这里缓存当前连接/设备最近一次采集上下文，让硬拍自动拍照复用正常拍照的 profile 和增强 workflow。
+    struct CaptureRuntimeContext {
+        bool has_profile = false;
+        bool has_pipeline = false;
+        SdkCaptureProfile profile;
+        SdkImageEnhancePipeline pipeline;
+        std::string online_api_key;
+        std::string online_base_url;
     };
 
     Json HandleSystemPing(const Request& request) const;
@@ -162,7 +182,26 @@ private:
     void DispatchSaneDeviceEvent(const SdkSaneDeviceEvent& event);
     void DispatchSaneScanTaskEvent(const SdkSaneScanTaskEvent& event);
     void DispatchDeviceActionEvent(const SdkDeviceActionEvent& event);
+    // 将 provider 硬拍事件转换成 capture task，保证后续可通过
+    // capture.get 查询，并继续收到 capture.completed/capture.failed。
+    DeviceActionPayloadResult BuildHardGrabPayload(const std::string& connection_id, const SdkDeviceActionEvent& event);
     void DispatchDeviceEvent(const SdkDeviceEvent& event);
+    void RememberCommandConnection(const std::string& connection_id);
+    void ForgetCommandConnection(const std::string& connection_id);
+    std::vector<std::string> ListCommandConnections() const;
+    void RememberCaptureProfile(const std::string& connection_id,
+                                const std::string& device_id,
+                                const SdkCaptureProfile& profile);
+    void RememberCapturePipeline(const std::string& connection_id,
+                                 const std::string& device_id,
+                                 const SdkImageEnhancePipeline& pipeline,
+                                 const std::string& online_api_key,
+                                 const std::string& online_base_url);
+    bool GetRememberedCaptureContext(const std::string& connection_id,
+                                     const std::string& device_id,
+                                     CaptureRuntimeContext* context) const;
+    void ForgetCaptureProfile(const std::string& connection_id, const std::string& device_id);
+    void ClearCaptureProfiles(const std::string& connection_id);
     void RememberSaneWatchConnection(const std::string& connection_id);
     bool ForgetSaneWatchConnection(const std::string& connection_id);
     void RememberOpenedDevice(const std::string& connection_id, const std::string& device_id);
@@ -193,6 +232,8 @@ private:
     std::shared_ptr<RuntimeConfigService> runtime_config_;
     mutable std::mutex command_event_sink_mu_;
     CommandEventSink command_event_sink_;
+    mutable std::mutex command_connections_mu_;
+    std::set<std::string> command_connections_;
     ProviderBundle providers_;
     Json provider_names_;
     AuthorizationService authorization_service_;
@@ -222,6 +263,8 @@ private:
     std::set<std::string> sane_watch_connections_;
     mutable std::mutex opened_devices_mu_;
     std::map<std::string, std::set<std::string> > opened_devices_by_connection_;
+    mutable std::mutex capture_contexts_mu_;
+    std::map<std::string, std::map<std::string, CaptureRuntimeContext> > capture_contexts_by_connection_;
 };
 
 } // namespace sdk

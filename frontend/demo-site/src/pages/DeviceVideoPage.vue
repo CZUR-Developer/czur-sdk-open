@@ -183,12 +183,14 @@ import SectionPanel from '../components/blocks/SectionPanel.vue';
 import InfoCard from '../components/cards/InfoCard.vue';
 import MetricCard from '../components/cards/MetricCard.vue';
 import StatusPill from '../components/cards/StatusPill.vue';
-import { authSessionState } from '../services/auth-session';
-import { deviceInventoryState, loadDeviceInventory, resetDeviceInventory } from '../services/device-inventory';
+import { authSessionState, onCommandEvent } from '../services/auth-session';
+import { deviceInventoryState, loadDeviceInventory, removeInventoryDevice, resetDeviceInventory } from '../services/device-inventory';
 import {
   attachVideoCanvas,
   closeSelectedDevice,
+  clearSelectionIfDeviceMissing,
   deviceVideoState,
+  handleDeviceRemoved,
   loadDeviceDetail,
   openSelectedDevice,
   resetDeviceVideo,
@@ -199,10 +201,12 @@ import {
   stopVideo,
 } from '../services/device-video';
 import { runtimeRecordState } from '../services/runtime-records';
+import type { CommandEvent } from '../services/protocol';
 import { executionStateLabelKey, executionStateTone, requirementTagLabelKey, requirementTagTone } from '../utils/presentation';
 import type { InfoCardItem } from '../types/demo';
 
 const { t } = useI18n();
+let commandEventUnsubscribe: (() => void) | null = null;
 
 const deviceMetrics = computed(() => [
   {
@@ -532,7 +536,10 @@ function stateTone(state: InfoCardItem['state']): InfoCardItem['tone'] {
 watch(
   () => [authSessionState.commandState, authSessionState.sessionToken] as const,
   async ([commandState, sessionToken]) => {
+    commandEventUnsubscribe?.();
+    commandEventUnsubscribe = null;
     if (commandState === 'success' && sessionToken) {
+      commandEventUnsubscribe = onCommandEvent(handleCommandEvent);
       await loadDeviceInventory();
       return;
     }
@@ -545,6 +552,10 @@ watch(
 watch(
   () => deviceInventoryState.devices,
   async (devices) => {
+    const activeDeviceIds = devices
+      .map((device) => device.device_id)
+      .filter((deviceId): deviceId is string => Boolean(deviceId));
+    clearSelectionIfDeviceMissing(activeDeviceIds);
     if (!deviceVideoState.selectedDeviceId && devices.length > 0 && devices[0].device_id) {
       await selectDevice(devices[0].device_id);
     }
@@ -552,8 +563,29 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  commandEventUnsubscribe?.();
+  commandEventUnsubscribe = null;
   void closeSelectedDevice();
   resetDeviceVideo();
 });
+
+function handleCommandEvent(event: CommandEvent<Record<string, unknown>>): void {
+  if (event.event === 'device.added') {
+    void loadDeviceInventory();
+    return;
+  }
+  if (event.event !== 'device.removed') {
+    return;
+  }
+  const payload = event.payload ?? {};
+  const deviceId = typeof payload.device_id === 'string' ? payload.device_id : '';
+  const reason = typeof payload.reason === 'string' ? payload.reason : 'hotplug_removed';
+  if (!deviceId) {
+    void loadDeviceInventory();
+    return;
+  }
+  handleDeviceRemoved(deviceId, reason);
+  removeInventoryDevice(deviceId);
+}
 
 </script>

@@ -27,6 +27,8 @@ struct CaptureTaskStartRequest {
     int timeout_ms = 15000;
     AuthContext auth_context;
     SdkCaptureProfile profile;
+    // 硬拍异步任务的原始输入；为空时仍按普通 capture.take 调用 provider。
+    SdkCaptureResult raw_capture;
     SdkImageEnhancePipeline pipeline;
     std::string online_api_key;
     std::string online_base_url;

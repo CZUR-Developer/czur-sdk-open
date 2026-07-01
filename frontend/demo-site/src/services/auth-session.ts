@@ -397,23 +397,59 @@ function handleCommandEvent(event: CommandEvent<Record<string, unknown>>): void 
     if (event.event === 'capture.turn_detected' || event.event === 'capture.hardgrab_detected') {
       const payload = event.payload ?? {};
       const deviceId = typeof payload.device_id === 'string' ? payload.device_id : '-';
+      const capture = payload.capture && typeof payload.capture === 'object' ? (payload.capture as Record<string, unknown>) : {};
+      const task = payload.task && typeof payload.task === 'object' ? (payload.task as Record<string, unknown>) : {};
+      const capturePath = typeof capture.original_path === 'string' ? capture.original_path : '';
+      const taskId = typeof task.task_id === 'string' ? task.task_id : '';
+      const taskStatus = typeof task.status === 'string' ? task.status : '';
+      const captureWidth = typeof capture.width === 'number' ? capture.width : 0;
+      const captureHeight = typeof capture.height === 'number' ? capture.height : 0;
+      const hardGrabMessage =
+        typeof payload.error === 'string'
+          ? payload.error
+          : typeof payload.message === 'string'
+            ? payload.message
+            : typeof payload.warning === 'string'
+              ? payload.warning
+              : event.code !== 0
+                ? event.message
+                : '';
+      const hardGrabDetail = taskId
+        ? `hard grab accepted ${taskId} (${taskStatus || 'queued'})`
+        : hardGrabMessage
+          ? `hard grab rejected: ${hardGrabMessage}`
+        : capturePath
+          ? `hard grab raw ${captureWidth}x${captureHeight}, processing unavailable`
+          : 'hard grab detected';
       recordRuntimeEvent({
         title: event.event,
-        detail: event.event === 'capture.hardgrab_detected' ? 'hard grab detected' : 'page turn detected',
-        meta: deviceId,
+        detail: event.event === 'capture.hardgrab_detected' ? hardGrabDetail : 'page turn detected',
+        meta: capturePath || deviceId,
         tone: event.code === 0 ? 'primary' : 'danger',
       });
       return;
     }
-    if (event.event === 'device.removed') {
+    if (event.event === 'device.removed' || event.event === 'device.added') {
       const payload = event.payload ?? {};
-      const deviceId = typeof payload.device_id === 'string' ? payload.device_id : '-';
-      const reason = typeof payload.reason === 'string' ? payload.reason : 'hotplug_removed';
+      const deviceId = typeof payload.device_id === 'string' ? payload.device_id : '';
+      const isInventoryChanged = event.event === 'device.added' || !deviceId;
+      const deviceMeta = isInventoryChanged ? 'inventory' : deviceId;
+      const reason = typeof payload.reason === 'string'
+        ? payload.reason
+        : event.event === 'device.added'
+          ? 'hotplug_added'
+          : 'hotplug_removed';
       recordRuntimeEvent({
         title: event.event,
-        detail: `device removed (${reason})`,
-        meta: deviceId,
-        tone: event.code === 0 ? 'warning' : 'danger',
+        detail: isInventoryChanged ? `device inventory changed (${reason})` : `device removed (${reason})`,
+        meta: deviceMeta,
+        tone: event.code === 0
+          ? event.event === 'device.added'
+            ? 'success'
+            : isInventoryChanged
+              ? 'info'
+              : 'warning'
+          : 'danger',
       });
       return;
     }

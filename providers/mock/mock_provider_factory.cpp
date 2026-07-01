@@ -5,10 +5,12 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <fstream>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <sstream>
 #include <thread>
 #include <utility>
@@ -111,6 +113,7 @@ public:
             "device.close",
             "capture.take",
             "capture.get",
+            "capture.set_turn_detect",
             "video.start",
             "video.stop",
             "video.set_format",
@@ -283,6 +286,16 @@ public:
         second.supports_video = true;
         second.image_transfer_protocol = false;
         devices.push_back(second);
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            for (std::vector<SdkDeviceDescriptor>::iterator it = devices.begin(); it != devices.end();) {
+                if (removed_device_ids_.find(it->device_id) != removed_device_ids_.end()) {
+                    it = devices.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
         return devices;
     }
 
@@ -302,6 +315,11 @@ public:
         return result;
     }
 
+    bool IsDeviceRecentlyRemoved(const std::string& device_id) const override {
+        std::lock_guard<std::mutex> lock(mu_);
+        return removed_device_ids_.find(device_id) != removed_device_ids_.end();
+    }
+
     SdkDeviceOpenResult OpenDevice(const SdkDeviceOpenRequest& request) override {
         SdkDeviceOpenResult result;
         result = GetDevice(request);
@@ -310,6 +328,7 @@ public:
         }
         {
             std::lock_guard<std::mutex> lock(mu_);
+            removed_device_ids_.erase(request.device_id);
             opened_devices_[request.device_id] = PickResolution(request.width, request.height, request.fps);
         }
         result.opened = true;
@@ -322,8 +341,16 @@ public:
         get_request.device_id = request.device_id;
         const SdkDeviceOpenResult device_result = GetDevice(get_request);
         if (!IsOkStatusCode(device_result.code)) {
-            result.code = device_result.code;
-            result.message = device_result.message;
+            if (!IsDeviceRecentlyRemoved(request.device_id)) {
+                result.code = device_result.code;
+                result.message = device_result.message;
+                return result;
+            }
+            SdkVideoStopRequest stop_request;
+            stop_request.device_id = request.device_id;
+            StopVideo(stop_request);
+            result.closed = true;
+            result.message = "device already removed";
             return result;
         }
 
@@ -333,6 +360,7 @@ public:
         {
             std::lock_guard<std::mutex> lock(mu_);
             result.was_opened = opened_devices_.erase(request.device_id) > 0;
+            turn_detect_states_.erase(request.device_id);
         }
         result.closed = true;
         return result;
@@ -375,6 +403,7 @@ public:
     SdkVideoStartResult StartVideo(const SdkVideoStartRequest& request, SdkVideoFrameCallback callback) override {
         SdkVideoStartResult result;
         SdkVideoResolution resolution;
+        JoinStoppedStream(request.device_id);
         {
             std::lock_guard<std::mutex> lock(mu_);
             const std::map<std::string, SdkVideoResolution>::const_iterator it = opened_devices_.find(request.device_id);
@@ -393,7 +422,10 @@ public:
             }
             std::shared_ptr<MockStreamState> state(new MockStreamState());
             state->running.store(true);
-            state->thread = std::thread([request, resolution, callback, state]() {
+            state->emit_hardgrab_on_preview = MockHardGrabOnPreviewEnabled();
+            state->emit_removed_on_preview = MockRemoveOnPreviewEnabled();
+            state->emit_added_after_remove = MockAddAfterRemoveEnabled();
+            state->thread = std::thread([this, request, resolution, callback, state]() {
                 while (state->running.load()) {
                     SdkVideoFrame frame;
                     frame.device_id = request.device_id;
@@ -408,6 +440,12 @@ public:
                                         : TinyJpeg();
                     if (callback) {
                         callback(frame);
+                    }
+                    PublishMockHardGrabIfReady(request.device_id, state.get(), frame.frame_seq);
+                    PublishMockTurnDetectIfReady(request.device_id, frame.frame_seq);
+                    if (PublishMockDeviceRemovedIfReady(request.device_id, state.get(), frame.frame_seq)) {
+                        state->running.store(false);
+                        break;
                     }
                     const int fps = resolution.fps > 0 ? resolution.fps : 15;
                     std::this_thread::sleep_for(std::chrono::milliseconds(1000 / fps));
@@ -467,12 +505,97 @@ public:
         return result;
     }
 
+    void SetDeviceActionEventSink(SdkDeviceActionEventCallback sink) override {
+        std::lock_guard<std::mutex> lock(mu_);
+        action_event_sink_ = std::move(sink);
+    }
+
+    void SetDeviceEventSink(SdkDeviceEventCallback sink) override {
+        std::lock_guard<std::mutex> lock(mu_);
+        device_event_sink_ = std::move(sink);
+    }
+
+    SdkTurnDetectResult SetTurnDetect(const SdkTurnDetectRequest& request) override {
+        SdkTurnDetectResult result;
+        SdkDeviceOpenRequest get_request;
+        get_request.device_id = request.device_id;
+        const SdkDeviceOpenResult device_result = GetDevice(get_request);
+        if (!IsOkStatusCode(device_result.code)) {
+            if (!request.enabled) {
+                std::lock_guard<std::mutex> lock(mu_);
+                turn_detect_states_.erase(request.device_id);
+                result.applied = true;
+                result.enabled = false;
+                result.auto_capture = false;
+                result.scan_device_type = request.scan_device_type;
+                result.cooldown_ms = request.cooldown_ms;
+                return result;
+            }
+            result.code = device_result.code;
+            result.message = device_result.message;
+            return result;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            if (request.enabled) {
+                // mock 翻页检测只模拟“开启后收到一次检测事件”，用于验证 command event 链路。
+                MockTurnDetectState& state = turn_detect_states_[request.device_id];
+                state.enabled = true;
+                state.auto_capture = false;
+                state.scan_device_type = request.scan_device_type;
+                state.cooldown_ms = request.cooldown_ms;
+                state.emitted = false;
+                state.next_frame_seq = 0;
+            } else {
+                turn_detect_states_.erase(request.device_id);
+            }
+        }
+
+        result.applied = true;
+        result.enabled = request.enabled;
+        result.auto_capture = false;
+        result.scan_device_type = request.scan_device_type;
+        result.cooldown_ms = request.cooldown_ms;
+        return result;
+    }
+
 private:
     struct MockStreamState {
         std::atomic<bool> running{false};
+        std::atomic<bool> hardgrab_emitted{false};
+        std::atomic<bool> removed_emitted{false};
+        std::atomic<bool> added_emitted{false};
+        bool emit_hardgrab_on_preview = false;
+        bool emit_removed_on_preview = false;
+        bool emit_added_after_remove = false;
         std::atomic<uint64_t> frame_seq{1};
         std::thread thread;
     };
+
+    struct MockTurnDetectState {
+        bool enabled = false;
+        bool auto_capture = false;
+        int scan_device_type = -1;
+        int cooldown_ms = 1000;
+        bool emitted = false;
+        uint64_t next_frame_seq = 0;
+    };
+
+    static bool MockHardGrabOnPreviewEnabled() {
+        const char* value = std::getenv("SDK_OPEN_MOCK_HARDGRAB_ON_PREVIEW");
+        return value != NULL && std::string(value) == "1";
+    }
+
+    static bool MockRemoveOnPreviewEnabled() {
+        const char* value = std::getenv("SDK_OPEN_MOCK_REMOVE_ON_PREVIEW");
+        return value != NULL && std::string(value) == "1";
+    }
+
+    static bool MockAddAfterRemoveEnabled() {
+        const char* value = std::getenv("SDK_OPEN_MOCK_ADD_AFTER_REMOVE");
+        return value != NULL && std::string(value) == "1";
+    }
 
     static int64_t NowMs() {
         return static_cast<int64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -570,6 +693,139 @@ private:
         return opened_devices_.find(device_id) != opened_devices_.end();
     }
 
+    void PublishDeviceActionEvent(const SdkDeviceActionEvent& event) {
+        SdkDeviceActionEventCallback sink;
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            sink = action_event_sink_;
+        }
+        if (sink) {
+            sink(event);
+        }
+    }
+
+    void PublishDeviceEvent(const SdkDeviceEvent& event) {
+        SdkDeviceEventCallback sink;
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            sink = device_event_sink_;
+        }
+        if (sink) {
+            sink(event);
+        }
+    }
+
+    void PublishMockHardGrabIfReady(const std::string& device_id, MockStreamState* state, uint64_t frame_seq) {
+        if (state == NULL || !state->emit_hardgrab_on_preview || frame_seq < 10) {
+            return;
+        }
+        bool expected = false;
+        if (!state->hardgrab_emitted.compare_exchange_strong(expected, true)) {
+            return;
+        }
+
+        SdkDeviceActionEvent event;
+        event.device_id = device_id;
+        event.type = SdkDeviceActionType::HardGrab;
+        event.auto_capture = true;
+        event.timestamp_ms = NowMs();
+        // mock 硬拍默认不自动触发；设置 SDK_OPEN_MOCK_HARDGRAB_ON_PREVIEW=1 后，
+        // 直接携带 raw JPEG 覆盖 hardgrab -> capture task -> completed 的完整链路。
+        event.capture.captured = true;
+        event.capture.content_type = "image/jpeg";
+        event.capture.raw_payload = TinyJpeg();
+        event.capture.width = 1;
+        event.capture.height = 1;
+        event.capture.dpi = 96;
+        event.capture.size = event.capture.raw_payload.size();
+        PublishDeviceActionEvent(event);
+    }
+
+    bool PublishMockDeviceRemovedIfReady(const std::string& device_id, MockStreamState* state, uint64_t frame_seq) {
+        if (state == NULL || !state->emit_removed_on_preview || frame_seq < 20) {
+            return false;
+        }
+        bool expected = false;
+        if (!state->removed_emitted.compare_exchange_strong(expected, true)) {
+            return false;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            // mock 热拔出只清理 provider 侧设备状态；stream 线程在本次回调后自行退出，
+            // 由 StopVideo 或下次 StartVideo 统一 join，避免在线程内 join 自己。
+            removed_device_ids_.insert(device_id);
+            opened_devices_.erase(device_id);
+            turn_detect_states_.erase(device_id);
+        }
+
+        SdkDeviceEvent event;
+        event.device_id = device_id;
+        event.type = "removed";
+        event.reason = "mock_removed";
+        event.was_opened = true;
+        event.was_streaming = true;
+        event.timestamp_ms = NowMs();
+        PublishDeviceEvent(event);
+        if (state->emit_added_after_remove) {
+            bool expected = false;
+            if (state->added_emitted.compare_exchange_strong(expected, true)) {
+                {
+                    std::lock_guard<std::mutex> lock(mu_);
+                    removed_device_ids_.erase(device_id);
+                }
+                SdkDeviceEvent added_event;
+                added_event.device_id = device_id;
+                added_event.type = "added";
+                added_event.reason = "mock_added";
+                added_event.timestamp_ms = NowMs();
+                PublishDeviceEvent(added_event);
+            }
+        }
+        return true;
+    }
+
+    void PublishMockTurnDetectIfReady(const std::string& device_id, uint64_t frame_seq) {
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            std::map<std::string, MockTurnDetectState>::iterator it = turn_detect_states_.find(device_id);
+            if (it == turn_detect_states_.end() || !it->second.enabled || it->second.emitted) {
+                return;
+            }
+            if (it->second.next_frame_seq == 0) {
+                it->second.next_frame_seq = frame_seq + 5;
+                return;
+            }
+            if (frame_seq < it->second.next_frame_seq) {
+                return;
+            }
+            it->second.emitted = true;
+        }
+
+        SdkDeviceActionEvent event;
+        event.device_id = device_id;
+        event.type = SdkDeviceActionType::PageTurn;
+        event.auto_capture = false;
+        event.timestamp_ms = NowMs();
+        PublishDeviceActionEvent(event);
+    }
+
+    void JoinStoppedStream(const std::string& device_id) {
+        std::shared_ptr<MockStreamState> state;
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            std::map<std::string, std::shared_ptr<MockStreamState>>::iterator it = streams_.find(device_id);
+            if (it == streams_.end() || it->second->running.load()) {
+                return;
+            }
+            state = it->second;
+            streams_.erase(it);
+        }
+        if (state && state->thread.joinable()) {
+            state->thread.join();
+        }
+    }
+
     void StopAllStreams() {
         std::map<std::string, std::shared_ptr<MockStreamState>> streams;
         {
@@ -587,6 +843,10 @@ private:
     mutable std::mutex mu_;
     std::map<std::string, SdkVideoResolution> opened_devices_;
     std::map<std::string, std::shared_ptr<MockStreamState>> streams_;
+    std::map<std::string, MockTurnDetectState> turn_detect_states_;
+    std::set<std::string> removed_device_ids_;
+    SdkDeviceActionEventCallback action_event_sink_;
+    SdkDeviceEventCallback device_event_sink_;
 };
 
 class MockGraphicProvider : public ISdkGraphicProvider {
@@ -947,7 +1207,7 @@ public:
     }
 };
 
-class MockSaneProvider : public ISdkSaneProvider {
+class MockSaneProviderDuplicate : public ISdkSaneProvider {
 public:
     std::string ProviderName() const override { return "mock-sane-provider"; }
 

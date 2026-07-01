@@ -84,6 +84,14 @@ std::string BuildDefaultAssetBaseUrl(const SdkConfig& config) {
     return "http://" + host + ":" + std::to_string(config.asset_http_port);
 }
 
+// 硬拍没有前端 request_id，使用设备和触发时间生成配额幂等 key；
+// 同一次硬拍事件重复分发时不应重复扣减 capture.take 配额。
+std::string BuildHardGrabQuotaRequestId(const SdkDeviceActionEvent& event) {
+    std::ostringstream oss;
+    oss << "hardgrab:" << event.device_id << ":" << event.timestamp_ms;
+    return oss.str();
+}
+
 std::string NormalizeLower(std::string value) {
     for (std::string::iterator it = value.begin(); it != value.end(); ++it) {
         *it = static_cast<char>(std::tolower(static_cast<unsigned char>(*it)));
@@ -680,6 +688,24 @@ Json BuildAssetJson(const SdkCaptureAsset& asset) {
                 {"width", asset.width},
                 {"height", asset.height},
                 {"size", asset.size}};
+}
+
+// 仅用于 websocket 事件回传 provider 原始采集状态。
+// 最终对外可下载路径仍以 capture task assets 为准。
+Json BuildCaptureResultJson(const SdkCaptureResult& result) {
+    return Json{{"captured", result.captured},
+                {"code", result.code},
+                {"message", result.message},
+                {"content_type", result.content_type},
+                {"path", result.output_path},
+                {"output_path", result.output_path},
+                {"original_path", result.original_path},
+                {"laser_path", result.laser_path},
+                {"width", result.width},
+                {"height", result.height},
+                {"dpi", result.dpi},
+                {"size", result.size},
+                {"scan_device_type", result.scan_device_type}};
 }
 
 Json BuildStageJson(const SdkCaptureStageResult& stage) {
@@ -1494,6 +1520,7 @@ void CommandApplicationService::SetCommandEventSink(CommandEventSink sink) {
 }
 
 Json CommandApplicationService::HandleRequest(const std::string& connection_id, const Json& request_json) {
+    RememberCommandConnection(connection_id);
     if (!request_json.is_object()) {
         return BuildWsResponse("", SdkStatusCode::InvalidRequest, "invalid request");
     }
@@ -1679,6 +1706,7 @@ Json CommandApplicationService::HandleRequest(const std::string& connection_id, 
 }
 
 void CommandApplicationService::OnConnectionClosed(const std::string& connection_id) {
+    ForgetCommandConnection(connection_id);
     if (ForgetSaneWatchConnection(connection_id)) {
         SdkSaneWatchRequest sane_watch_request;
         sane_watch_request.connection_id = connection_id;
@@ -1758,27 +1786,146 @@ void CommandApplicationService::DispatchDeviceActionEvent(const SdkDeviceActionE
         return;
     }
 
-    Json payload = Json{{"device_id", event.device_id},
-                        {"auto_capture", event.auto_capture},
-                        {"ts_ms", event.timestamp_ms}};
-    const Json ws_event = BuildWsEvent(event_name, payload);
     SDK_OPEN_LOG_INFO("[sdk_device_action] dispatch event={} device={} target_connections={}",
                       event_name,
                       event.device_id,
                       target_connections.size());
     for (std::vector<std::string>::const_iterator it = target_connections.begin(); it != target_connections.end(); ++it) {
+        DeviceActionPayloadResult payload_result;
+        if (is_hardgrab) {
+            payload_result = BuildHardGrabPayload(*it, event);
+        } else {
+            payload_result.payload = Json{{"device_id", event.device_id},
+                                          {"auto_capture", event.auto_capture},
+                                          {"ts_ms", event.timestamp_ms}};
+        }
+        const Json ws_event = BuildWsEvent(event_name,
+                                           payload_result.payload,
+                                           payload_result.code,
+                                           payload_result.message);
         sink(*it, ws_event);
     }
 }
 
+CommandApplicationService::DeviceActionPayloadResult
+CommandApplicationService::BuildHardGrabPayload(const std::string& connection_id, const SdkDeviceActionEvent& event) {
+    DeviceActionPayloadResult payload_result;
+    Json& payload = payload_result.payload;
+    payload = Json{{"device_id", event.device_id},
+                   {"auto_capture", event.auto_capture},
+                   {"ts_ms", event.timestamp_ms}};
+    if (!event.capture.captured) {
+        if (event.auto_capture) {
+            payload["capture"] = BuildCaptureResultJson(event.capture);
+        }
+        payload_result.code = event.capture.code;
+        payload_result.message = event.capture.message.empty() ? "hardgrab image was not captured" : event.capture.message;
+        return payload_result;
+    }
+
+    CaptureRuntimeContext capture_context;
+    SdkCaptureProfile profile;
+    if (GetRememberedCaptureContext(connection_id, event.device_id, &capture_context) && capture_context.has_profile) {
+        profile = capture_context.profile;
+    } else {
+        profile = SdkCaptureProfile();
+        profile.device_id = event.device_id;
+    }
+    if (profile.device_id.empty()) {
+        profile.device_id = event.device_id;
+    }
+
+    // 硬拍自动采集在语义上等价于 capture.take，任务创建前先复用
+    // capture.take 的鉴权和配额检查；失败时不创建 task，直接在事件中回传原因。
+    AuthorizationService::SessionResult session_result = RequireCapability(connection_id, "capture.take");
+    if (!IsOkStatusCode(session_result.code)) {
+        payload["capture"] = BuildCaptureResultJson(event.capture);
+        payload["accepted"] = false;
+        payload["code"] = session_result.code;
+        payload["message"] = session_result.message;
+        payload["error"] = session_result.message;
+        payload["warning"] = "hardgrab image was not processed: " + session_result.message;
+        payload_result.code = session_result.code;
+        payload_result.message = session_result.message;
+        return payload_result;
+    }
+    // 硬拍等价于一次 capture.take，必须同步扣减 capture 配额；
+    // 使用硬拍事件时间戳作为幂等 key，避免同一次事件重发时重复扣减。
+    session_result = ConsumeQuota(connection_id, "capture.take", BuildHardGrabQuotaRequestId(event));
+    if (!IsOkStatusCode(session_result.code)) {
+        payload["capture"] = BuildCaptureResultJson(event.capture);
+        payload["accepted"] = false;
+        payload["code"] = session_result.code;
+        payload["message"] = session_result.message;
+        payload["error"] = session_result.message;
+        payload["warning"] = "hardgrab image was not processed: " + session_result.message;
+        payload_result.code = session_result.code;
+        payload_result.message = session_result.message;
+        return payload_result;
+    }
+
+    CaptureTaskStartRequest start_request;
+    start_request.connection_id = connection_id;
+    start_request.session_token = session_result.session_token;
+    start_request.device_id = event.device_id;
+    start_request.timeout_ms = 15000;
+    start_request.auth_context = session_result.auth_context;
+    start_request.profile = profile;
+    if (capture_context.has_pipeline) {
+        // 硬拍自动拍照与手动 capture.take 共用同一增强 workflow，避免按键触发时只输出基础处理结果。
+        start_request.pipeline = capture_context.pipeline;
+        start_request.online_api_key = capture_context.online_api_key;
+        start_request.online_base_url = capture_context.online_base_url;
+    }
+    // raw_capture 只在 C++ 内部传递，最终文件由 capture task 写入自己的输出目录。
+    start_request.raw_capture = event.capture;
+
+    SDK_OPEN_LOG_INFO("[sdk_device_action] hardgrab task submit begin connection={} device={} profile_revision={} pipeline_steps={}",
+                      connection_id,
+                      event.device_id,
+                      profile.revision,
+                      start_request.pipeline.steps.size());
+    const CaptureTaskStartResult result = capture_task_service_.StartTask(start_request);
+    payload["capture"] = BuildCaptureResultJson(event.capture);
+    payload["accepted"] = result.accepted;
+    payload["code"] = result.code;
+    payload["message"] = result.message;
+    payload_result.code = result.code;
+    payload_result.message = result.message;
+    if (result.accepted || !result.task.task_id.empty()) {
+        payload["task"] = BuildCaptureTaskJson(result.task);
+        payload["task_id"] = result.task.task_id;
+        payload["status"] = result.task.status;
+    }
+    if (!IsOkStatusCode(result.code)) {
+        payload["error"] = result.message;
+    }
+    SDK_OPEN_LOG_INFO("[sdk_device_action] hardgrab task submit end connection={} device={} task_id={} accepted={} code={} message={}",
+                      connection_id,
+                      event.device_id,
+                      result.task.task_id,
+                      result.accepted,
+                      result.code,
+                      result.message);
+    return payload_result;
+}
+
 void CommandApplicationService::DispatchDeviceEvent(const SdkDeviceEvent& event) {
-    const std::string event_name = "device.removed";
+    const bool is_added = event.type == "added";
+    const bool is_removed = event.type == "removed";
+    if (!is_added && !is_removed) {
+        SDK_OPEN_LOG_WARN("[sdk_device_event] drop event reason=unknown_type type={} device={}",
+                          event.type,
+                          event.device_id);
+        return;
+    }
+    const std::string event_name = is_added ? "device.added" : "device.removed";
     CommandEventSink sink;
     {
         std::lock_guard<std::mutex> lock(command_event_sink_mu_);
         sink = command_event_sink_;
     }
-    if (!sink || event.device_id.empty()) {
+    if (!sink || (!is_added && event.device_id.empty())) {
         SDK_OPEN_LOG_WARN("[sdk_device_event] drop event={} reason={} device={}",
                           event_name,
                           !sink ? "missing_sink" : "missing_device_id",
@@ -1786,17 +1933,33 @@ void CommandApplicationService::DispatchDeviceEvent(const SdkDeviceEvent& event)
         return;
     }
 
-    std::vector<std::string> target_connections = ForgetOpenedDeviceFromAllConnections(event.device_id);
-    const std::vector<VideoSessionService::StreamBinding> removed_streams =
-        video_session_service_.ClearDevice(event.device_id);
-    for (std::vector<VideoSessionService::StreamBinding>::const_iterator it = removed_streams.begin();
-         it != removed_streams.end();
-         ++it) {
-        if (video_stream_closed_sink_) {
-            video_stream_closed_sink_(it->stream_id);
+    std::vector<std::string> target_connections;
+    // true 表示这是 inventory 变化通知，不携带具体 device_id；false 表示已打开/预览设备的精确移除通知。
+    bool inventory_changed_payload = is_added;
+    if (is_added) {
+        // 新增设备没有已打开会话可反查，必须广播给当前 command 连接，初次无设备页面才能收到并刷新 device.list。
+        target_connections = ListCommandConnections();
+    } else {
+        target_connections = ForgetOpenedDeviceFromAllConnections(event.device_id);
+        const std::vector<VideoSessionService::StreamBinding> removed_streams =
+            video_session_service_.ClearDevice(event.device_id);
+        for (std::vector<VideoSessionService::StreamBinding>::const_iterator it = removed_streams.begin();
+             it != removed_streams.end();
+             ++it) {
+            if (video_stream_closed_sink_) {
+                video_stream_closed_sink_(it->stream_id);
+            }
+            if (std::find(target_connections.begin(), target_connections.end(), it->connection_id) == target_connections.end()) {
+                target_connections.push_back(it->connection_id);
+            }
         }
-        if (std::find(target_connections.begin(), target_connections.end(), it->connection_id) == target_connections.end()) {
-            target_connections.push_back(it->connection_id);
+        for (std::vector<std::string>::const_iterator it = target_connections.begin(); it != target_connections.end(); ++it) {
+            ForgetCaptureProfile(*it, event.device_id);
+        }
+        if (target_connections.empty()) {
+            // 未打开设备没有精确会话归属，只广播 inventory 变化；payload 不携带 device_id，避免把未授权/未打开设备信息透给 demo。
+            target_connections = ListCommandConnections();
+            inventory_changed_payload = true;
         }
     }
 
@@ -1807,14 +1970,19 @@ void CommandApplicationService::DispatchDeviceEvent(const SdkDeviceEvent& event)
         return;
     }
 
-    Json payload = Json{{"device_id", event.device_id},
-                        {"reason", event.reason},
-                        {"was_opened", event.was_opened},
-                        {"was_streaming", event.was_streaming},
-                        {"ts_ms", event.timestamp_ms}};
+    Json payload = inventory_changed_payload
+        // inventory 变化只提示客户端重新 device.list，不透出具体 device_id。
+        ? Json{{"reason", event.reason},
+               {"ts_ms", event.timestamp_ms}}
+        : Json{{"device_id", event.device_id},
+               {"reason", event.reason},
+               {"was_opened", event.was_opened},
+               {"was_streaming", event.was_streaming},
+               {"ts_ms", event.timestamp_ms}};
     const Json ws_event = BuildWsEvent(event_name, payload);
-    SDK_OPEN_LOG_INFO("[sdk_device_event] dispatch event={} device={} target_connections={}",
+    SDK_OPEN_LOG_INFO("[sdk_device_event] dispatch event={} mode={} device={} target_connections={}",
                       event_name,
+                      inventory_changed_payload ? "inventory_changed" : "exact_device",
                       event.device_id,
                       target_connections.size());
     for (std::vector<std::string>::const_iterator it = target_connections.begin(); it != target_connections.end(); ++it) {
@@ -2662,6 +2830,12 @@ Json CommandApplicationService::HandleCaptureTake(const std::string& connection_
     if (!IsOkStatusCode(result.code)) {
         return BuildWsResponse(request.request_id, result.code, result.message);
     }
+    RememberCaptureProfile(connection_id, start_request.device_id, start_request.profile);
+    RememberCapturePipeline(connection_id,
+                            start_request.device_id,
+                            start_request.pipeline,
+                            start_request.online_api_key,
+                            start_request.online_base_url);
     return BuildWsResponse(request.request_id,
                            SdkStatusCode::Ok,
                            "ok",
@@ -2756,13 +2930,21 @@ Json CommandApplicationService::HandleVideoStart(const std::string& connection_i
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "unsupported pixel_format");
     }
     start_request.pixel_format = NormalizeVideoPixelFormat(start_request.pixel_format);
+    SdkCaptureProfile remembered_profile;
+    remembered_profile.device_id = start_request.device_id;
     const Json profile_json = GetOptionalObjectField(request.params, "profile");
     if (!profile_json.empty()) {
-        const SdkCaptureProfile profile = ParseCaptureProfile(request.params, start_request.device_id);
-        start_request.page_processing = profile.page_processing;
-        start_request.single_page_realtime_detect_rects = profile.single_page_realtime_detect_rects;
-        start_request.single_page_multi_target_paging = profile.single_page.multi_target_paging;
+        remembered_profile = ParseCaptureProfile(request.params, start_request.device_id);
+        if (remembered_profile.device_id.empty()) {
+            remembered_profile.device_id = start_request.device_id;
+        }
+        start_request.page_processing = remembered_profile.page_processing;
+        start_request.single_page_realtime_detect_rects = remembered_profile.single_page_realtime_detect_rects;
+        start_request.single_page_multi_target_paging = remembered_profile.single_page.multi_target_paging;
     }
+    const bool has_pipeline_param = request.params.find("pipeline") != request.params.end();
+    const SdkImageEnhancePipeline remembered_pipeline =
+        has_pipeline_param ? ParseImageEnhancePipeline(GetOptionalObjectField(request.params, "pipeline")) : SdkImageEnhancePipeline();
 
     const VideoSessionService::StreamResult stream_result =
         video_session_service_.RegisterStream(connection_id,
@@ -2796,6 +2978,15 @@ Json CommandApplicationService::HandleVideoStart(const std::string& connection_i
                                                   start_result.fps);
     if (!IsOkStatusCode(updated_stream_result.code)) {
         return BuildWsResponse(request.request_id, updated_stream_result.code, updated_stream_result.message);
+    }
+    RememberCaptureProfile(connection_id, start_request.device_id, remembered_profile);
+    if (has_pipeline_param) {
+        // demo 可在开启预览时同步增强 workflow；旧客户端不传 pipeline 时不改变既有缓存语义。
+        RememberCapturePipeline(connection_id,
+                                start_request.device_id,
+                                remembered_pipeline,
+                                session_result.token,
+                                runtime_config_ ? runtime_config_->OnlineImageEnhanceBaseUrl() : "");
     }
     return BuildWsResponse(request.request_id,
                            SdkStatusCode::Ok,
@@ -2832,6 +3023,7 @@ Json CommandApplicationService::HandleVideoStop(const std::string& connection_id
     if (video_stream_closed_sink_) {
         video_stream_closed_sink_(stream_result.binding.stream_id);
     }
+    ForgetCaptureProfile(connection_id, stop_request.device_id);
     return BuildWsResponse(request.request_id,
                            SdkStatusCode::Ok,
                            "ok",
@@ -2916,6 +3108,9 @@ Json CommandApplicationService::HandleVideoSetProfile(const std::string& connect
     }
 
     const SdkCaptureProfile profile = ParseCaptureProfile(profile_params, profile_request.device_id);
+    const bool has_pipeline_param = request.params.find("pipeline") != request.params.end();
+    const SdkImageEnhancePipeline pipeline =
+        has_pipeline_param ? ParseImageEnhancePipeline(GetOptionalObjectField(request.params, "pipeline")) : SdkImageEnhancePipeline();
     profile_request.page_processing = profile.page_processing;
     profile_request.single_page_realtime_detect_rects = profile.single_page_realtime_detect_rects;
     profile_request.single_page_multi_target_paging = profile.single_page.multi_target_paging;
@@ -2923,6 +3118,15 @@ Json CommandApplicationService::HandleVideoSetProfile(const std::string& connect
     const SdkVideoProfileResult profile_result = device_facade_.SetVideoProfile(session_result.auth_context, profile_request);
     if (!IsOkStatusCode(profile_result.code)) {
         return BuildWsResponse(request.request_id, profile_result.code, profile_result.message);
+    }
+    RememberCaptureProfile(connection_id, profile_request.device_id, profile);
+    if (has_pipeline_param) {
+        // profile 更新和增强 workflow 选择都属于采集上下文；硬拍按键触发时复用这里的最新值。
+        RememberCapturePipeline(connection_id,
+                                profile_request.device_id,
+                                pipeline,
+                                session_result.token,
+                                runtime_config_ ? runtime_config_->OnlineImageEnhanceBaseUrl() : "");
     }
 
     return BuildWsResponse(request.request_id,
@@ -4904,6 +5108,27 @@ bool CommandApplicationService::ForgetSaneWatchConnection(const std::string& con
     return sane_watch_connections_.erase(connection_id) > 0;
 }
 
+void CommandApplicationService::RememberCommandConnection(const std::string& connection_id) {
+    if (connection_id.empty()) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(command_connections_mu_);
+    command_connections_.insert(connection_id);
+}
+
+void CommandApplicationService::ForgetCommandConnection(const std::string& connection_id) {
+    if (connection_id.empty()) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(command_connections_mu_);
+    command_connections_.erase(connection_id);
+}
+
+std::vector<std::string> CommandApplicationService::ListCommandConnections() const {
+    std::lock_guard<std::mutex> lock(command_connections_mu_);
+    return std::vector<std::string>(command_connections_.begin(), command_connections_.end());
+}
+
 void CommandApplicationService::RememberOpenedDevice(const std::string& connection_id, const std::string& device_id) {
     if (connection_id.empty() || device_id.empty()) {
         return;
@@ -4913,15 +5138,19 @@ void CommandApplicationService::RememberOpenedDevice(const std::string& connecti
 }
 
 void CommandApplicationService::ForgetOpenedDevice(const std::string& connection_id, const std::string& device_id) {
-    std::lock_guard<std::mutex> lock(opened_devices_mu_);
-    std::map<std::string, std::set<std::string> >::iterator it = opened_devices_by_connection_.find(connection_id);
-    if (it == opened_devices_by_connection_.end()) {
-        return;
+    {
+        std::lock_guard<std::mutex> lock(opened_devices_mu_);
+        std::map<std::string, std::set<std::string> >::iterator it = opened_devices_by_connection_.find(connection_id);
+        if (it == opened_devices_by_connection_.end()) {
+            ForgetCaptureProfile(connection_id, device_id);
+            return;
+        }
+        it->second.erase(device_id);
+        if (it->second.empty()) {
+            opened_devices_by_connection_.erase(it);
+        }
     }
-    it->second.erase(device_id);
-    if (it->second.empty()) {
-        opened_devices_by_connection_.erase(it);
-    }
+    ForgetCaptureProfile(connection_id, device_id);
 }
 
 std::vector<std::string> CommandApplicationService::ForgetOpenedDeviceFromAllConnections(const std::string& device_id) {
@@ -4956,7 +5185,78 @@ std::vector<std::string> CommandApplicationService::ClearOpenedDevices(const std
         devices.push_back(*device_it);
     }
     opened_devices_by_connection_.erase(it);
+    ClearCaptureProfiles(connection_id);
     return devices;
+}
+
+void CommandApplicationService::RememberCaptureProfile(const std::string& connection_id,
+                                                       const std::string& device_id,
+                                                       const SdkCaptureProfile& profile) {
+    if (connection_id.empty() || device_id.empty()) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(capture_contexts_mu_);
+    CaptureRuntimeContext& context = capture_contexts_by_connection_[connection_id][device_id];
+    context.profile = profile;
+    context.has_profile = true;
+}
+
+void CommandApplicationService::RememberCapturePipeline(const std::string& connection_id,
+                                                        const std::string& device_id,
+                                                        const SdkImageEnhancePipeline& pipeline,
+                                                        const std::string& online_api_key,
+                                                        const std::string& online_base_url) {
+    if (connection_id.empty() || device_id.empty()) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(capture_contexts_mu_);
+    CaptureRuntimeContext& context = capture_contexts_by_connection_[connection_id][device_id];
+    context.pipeline = pipeline;
+    context.has_pipeline = !pipeline.steps.empty();
+    context.online_api_key = context.has_pipeline ? online_api_key : "";
+    context.online_base_url = context.has_pipeline ? online_base_url : "";
+}
+
+// 硬拍事件来自 provider 异步回调，没有当前请求参数；
+// 因此使用最近一次 video.start/video.set_profile/capture.take 缓存的采集上下文。
+bool CommandApplicationService::GetRememberedCaptureContext(const std::string& connection_id,
+                                                            const std::string& device_id,
+                                                            CaptureRuntimeContext* context) const {
+    if (context == NULL || connection_id.empty() || device_id.empty()) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(capture_contexts_mu_);
+    const std::map<std::string, std::map<std::string, CaptureRuntimeContext> >::const_iterator connection_it =
+        capture_contexts_by_connection_.find(connection_id);
+    if (connection_it == capture_contexts_by_connection_.end()) {
+        return false;
+    }
+    const std::map<std::string, CaptureRuntimeContext>::const_iterator context_it = connection_it->second.find(device_id);
+    if (context_it == connection_it->second.end()) {
+        return false;
+    }
+    *context = context_it->second;
+    return true;
+}
+
+// 设备关闭、视频停止或热拔出后必须清理采集上下文缓存，
+// 避免后续同 connection 下误用旧设备的采集参数。
+void CommandApplicationService::ForgetCaptureProfile(const std::string& connection_id, const std::string& device_id) {
+    std::lock_guard<std::mutex> lock(capture_contexts_mu_);
+    std::map<std::string, std::map<std::string, CaptureRuntimeContext> >::iterator connection_it =
+        capture_contexts_by_connection_.find(connection_id);
+    if (connection_it == capture_contexts_by_connection_.end()) {
+        return;
+    }
+    connection_it->second.erase(device_id);
+    if (connection_it->second.empty()) {
+        capture_contexts_by_connection_.erase(connection_it);
+    }
+}
+
+void CommandApplicationService::ClearCaptureProfiles(const std::string& connection_id) {
+    std::lock_guard<std::mutex> lock(capture_contexts_mu_);
+    capture_contexts_by_connection_.erase(connection_id);
 }
 
 } // namespace sdk

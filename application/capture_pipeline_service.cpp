@@ -77,6 +77,20 @@ bool CopyFileBinary(const std::string& input_path, const std::string& output_pat
     return output.good();
 }
 
+// 硬拍 raw_capture 已经在 provider 层拿到 JPEG 字节，这里只负责写入当前
+// capture task 输出目录，避免引入额外临时文件生命周期。
+bool WriteBytes(const std::string& output_path, const std::vector<uint8_t>& bytes) {
+    if (output_path.empty() || bytes.empty()) {
+        return false;
+    }
+    std::ofstream output(output_path.c_str(), std::ios::binary | std::ios::trunc);
+    if (!output.is_open()) {
+        return false;
+    }
+    output.write(reinterpret_cast<const char*>(&bytes[0]), static_cast<std::streamsize>(bytes.size()));
+    return output.good();
+}
+
 std::string SanitizeAssetToken(const std::string& value, const std::string& fallback) {
     std::string token;
     for (std::string::const_iterator it = value.begin(); it != value.end(); ++it) {
@@ -162,6 +176,51 @@ public:
 
     CStatus CaptureRaw() {
         StartStage("capture_raw");
+        if (request_.raw_capture.captured) {
+            // 硬拍分支不再经过 provider 二次拍照；直接把事件携带的原始图
+            // 写入当前 task 目录，后续处理流程与普通 capture.take 保持一致。
+            const SdkCaptureResult& result = request_.raw_capture;
+            if (result.raw_payload.empty()) {
+                FinishStage("capture_raw", "failed", ProviderName(providers_device), "missing hardgrab original", {}, {});
+                pipeline_result_.code = ToCode(SdkStatusCode::CaptureFailed);
+                pipeline_result_.message = "missing hardgrab original";
+                pipeline_result_.status = "failed";
+                return CStatus(pipeline_result_.message);
+            }
+            original_path_ = JoinPath(output_dir_, "original.jpg");
+            if (!WriteBytes(original_path_, result.raw_payload)) {
+                FinishStage("capture_raw", "failed", ProviderName(providers_device), "failed to write hardgrab original", {}, {});
+                pipeline_result_.code = ToCode(SdkStatusCode::ProviderCallFailed);
+                pipeline_result_.message = "failed to write hardgrab original";
+                pipeline_result_.status = "failed";
+                return CStatus(pipeline_result_.message);
+            }
+            laser_path_.clear();
+            if (!result.raw_laser_payload.empty()) {
+                laser_path_ = JoinPath(output_dir_, "laser.jpg");
+                if (!WriteBytes(laser_path_, result.raw_laser_payload)) {
+                    FinishStage("capture_raw", "failed", ProviderName(providers_device), "failed to write hardgrab laser", {}, {});
+                    pipeline_result_.code = ToCode(SdkStatusCode::ProviderCallFailed);
+                    pipeline_result_.message = "failed to write hardgrab laser";
+                    pipeline_result_.status = "failed";
+                    return CStatus(pipeline_result_.message);
+                }
+            }
+            original_width_ = result.width;
+            original_height_ = result.height;
+            original_dpi_ = result.dpi;
+            detected_rects_ = result.detected_rects;
+            detected_rects_source_width_ = result.detected_rects_source_width;
+            detected_rects_source_height_ = result.detected_rects_source_height;
+            scan_device_type_ = result.scan_device_type;
+            AddAsset(MakeAsset("asset-original", "original", original_path_, result.content_type.empty() ? "image/jpeg" : result.content_type, original_width_, original_height_, FileSize(original_path_)));
+            if (!laser_path_.empty()) {
+                AddAsset(MakeAsset("asset-laser", "laser", laser_path_, "image/jpeg", 0, 0, FileSize(laser_path_)));
+            }
+            FinishStage("capture_raw", "succeeded", ProviderName(providers_device), "ok", {}, {"asset-original"});
+            return CStatus();
+        }
+
         SdkCaptureRequest capture_request;
         capture_request.device_id = request_.device_id;
         capture_request.output_dir = output_dir_;

@@ -210,6 +210,7 @@ void CaptureTaskService::RunTaskImpl(const std::string& task_id, CaptureTaskStar
     pipeline_request.timeout_ms = request.timeout_ms;
     pipeline_request.auth_context = request.auth_context;
     pipeline_request.profile = request.profile;
+    pipeline_request.raw_capture = request.raw_capture;
 
     const CapturePipelineResult pipeline_result =
         pipeline_service_.Run(pipeline_request, [this, task_id, request](const SdkCaptureStageResult& stage) {

@@ -452,6 +452,7 @@ import {
   attachVideoCanvas,
   applyCaptureAcquisitionResolution,
   closeSelectedDevice,
+  clearSelectionIfDeviceMissing,
   type DeviceResolution,
   deviceVideoState,
   handleDeviceRemoved,
@@ -467,7 +468,7 @@ import {
 } from '../services/device-video';
 import type { EnhancePipeline, EnhanceWorkflow } from '../services/image-enhance-workflows';
 import { openImageViewer } from '../services/image-viewer';
-import { buildAssetApiUrl } from '../services/protocol';
+import { buildAssetApiUrl, type CommandEvent } from '../services/protocol';
 import { recordInternalRuntimeEvent, recordRuntimeEvent, runtimeRecordState } from '../services/runtime-records';
 
 import type { TableColumn, TableRow, TimelineItem, Tone } from '../types/demo';
@@ -969,6 +970,10 @@ watch(
 watch(
   () => deviceInventoryState.devices.map((device) => device.device_id).join('|'),
   () => {
+    const activeDeviceIds = deviceInventoryState.devices
+      .map((device) => device.device_id)
+      .filter((deviceId): deviceId is string => Boolean(deviceId));
+    clearSelectionIfDeviceMissing(activeDeviceIds);
     if (!suppressAutoOpen.value && !deviceVideoState.selectedDeviceId && deviceInventoryState.devices.length > 0) {
       void openDefaultCaptureDevice();
     }
@@ -987,7 +992,6 @@ watch(
     captureConfig.singlePageAutoRotate,
     captureConfig.singlePageSmartBlackEdgeOptimize,
     captureConfig.singlePageMultiTargetPaging,
-    captureConfig.turnDetectEnabled,
     captureConfig.curvedBookRemoveFinger,
     captureConfig.curvedBookFingerType,
     captureConfig.curvedBookSmartPaging,
@@ -1013,12 +1017,12 @@ watch(
 );
 
 watch(
-  () => [captureConfig.pageProcessing, captureConfig.singlePageRealtimeDetectRects, captureConfig.singlePageMultiTargetPaging] as const,
+  () => profilePayload.value,
   async () => {
     if (!deviceVideoState.streamId || deviceVideoState.startState === 'running' || deviceVideoState.stopState === 'running') {
       return;
     }
-    await setVideoProfile(captureProfile.value);
+    await setVideoProfile(captureProfile.value, buildCaptureEnhancePipeline());
   },
 );
 
@@ -1213,7 +1217,7 @@ async function openCaptureDevice(): Promise<void> {
 
 async function startCaptureVideo(): Promise<void> {
   await applyCaptureAcquisitionResolution();
-  await startVideo(captureProfile.value);
+  await startVideo(captureProfile.value, buildCaptureEnhancePipeline());
 }
 
 async function applyTurnDetect(enabled: boolean): Promise<void> {
@@ -1257,11 +1261,23 @@ async function applyTurnDetect(enabled: boolean): Promise<void> {
 
 function handleEnhanceWorkflowSelected(workflow: EnhanceWorkflow | null): void {
   selectedEnhanceWorkflow.value = workflow;
+  if (deviceVideoState.streamId) {
+    void setVideoProfile(captureProfile.value, buildCaptureEnhancePipeline());
+  }
 }
 
 function buildCaptureEnhancePipeline(): EnhancePipeline | undefined {
   if (!selectedEnhanceWorkflow.value?.pipeline?.steps?.length) {
-    return undefined;
+    // 显式同步空 workflow，避免取消选择后硬拍继续复用后端缓存的旧增强流程。
+    return {
+      version: 'image.enhance.pipeline.v1',
+      steps: [],
+      target: {
+        type: 'images',
+        format: captureConfig.outputFormat,
+        export_type: 'single-page',
+      },
+    };
   }
   return {
     ...selectedEnhanceWorkflow.value.pipeline,
@@ -1313,7 +1329,7 @@ async function handleCapture(): Promise<void> {
         device_id: deviceVideoState.selectedDeviceId,
         profile: captureProfile.value,
         timeout_ms: 20000,
-        ...(enhancePipeline ? { pipeline: enhancePipeline } : {}),
+        pipeline: enhancePipeline,
       },
     });
     logCaptureDebug('capture.take response', {
@@ -1396,11 +1412,25 @@ async function pollCaptureTask(taskId: string): Promise<void> {
   }
 }
 
-function handleCommandEvent(event: { event: string; payload?: Record<string, unknown> }): void {
+function handleCommandEvent(event: CommandEvent<Record<string, unknown>>): void {
+  if (event.event === 'device.added') {
+    void loadDeviceInventory();
+    return;
+  }
   if (event.event === 'device.removed') {
     const payload = event.payload ?? {};
     const deviceId = typeof payload.device_id === 'string' ? payload.device_id : '';
     const reason = typeof payload.reason === 'string' ? payload.reason : 'hotplug_removed';
+    if (!deviceId) {
+      void loadDeviceInventory();
+      recordInternalRuntimeEvent({
+        title: 'device.removed.handled',
+        detail: `inventory changed (${reason}).`,
+        meta: 'inventory',
+        tone: 'info',
+      });
+      return;
+    }
     const localMatched = handleDeviceRemoved(deviceId, reason);
     const inventoryRemoved = removeInventoryDevice(deviceId);
     recordInternalRuntimeEvent({
@@ -1419,6 +1449,33 @@ function handleCommandEvent(event: { event: string; payload?: Record<string, unk
     payload: event.payload,
   });
   if (event.event === 'capture.turn_detected' || event.event === 'capture.hardgrab_detected') {
+    if (event.event === 'capture.hardgrab_detected') {
+      const payload = event.payload ?? {};
+      const capture = payload.capture && typeof payload.capture === 'object' ? (payload.capture as Record<string, unknown>) : {};
+      const originalPath = asString(capture.original_path);
+      const hardGrabMessage = asString(payload.error) || asString(payload.message) || asString(payload.warning) || (event.code !== 0 ? event.message : '');
+      const task = asTaskPayload(payload.task && typeof payload.task === 'object' ? payload.task : payload);
+      if (task.task_id) {
+        // 硬拍 accepted 只代表异步任务已创建；最终路径等 capture.completed / capture.get 返回。
+        ensureHardGrabResultRow(task);
+        applyCaptureTask(task);
+        activeCaptureTasks.add(task.task_id);
+        void pollCaptureTask(task.task_id);
+        recordInternalRuntimeEvent({
+          title: 'capture.hardgrab.accepted',
+          detail: `accepted ${task.task_id} (${task.status || 'queued'})`,
+          meta: originalPath,
+          tone: 'primary',
+        });
+      } else if (hardGrabMessage || originalPath) {
+        recordInternalRuntimeEvent({
+          title: 'capture.hardgrab.rejected',
+          detail: hardGrabMessage || `raw capture ${asNumber(capture.width)}x${asNumber(capture.height)}, processing unavailable`,
+          meta: originalPath,
+          tone: 'warning',
+        });
+      }
+    }
     return;
   }
   const task = asTaskPayload(event.payload);
@@ -1429,6 +1486,37 @@ function handleCommandEvent(event: { event: string; payload?: Record<string, unk
   if (event.event === 'capture.completed' || event.event === 'capture.failed' || task.status === 'succeeded' || task.status === 'failed') {
     activeCaptureTasks.delete(task.task_id);
   }
+}
+
+function ensureHardGrabResultRow(task: CaptureTaskPayload): void {
+  if (!task.task_id || captureResults.value.some((item) => item.taskId === task.task_id)) {
+    return;
+  }
+  const index = captureResults.value.length + 1;
+  const row: CaptureResult = {
+    id: `hardgrab-${Date.now()}-${index}`,
+    taskId: task.task_id,
+    filename: `hardgrab-${String(index).padStart(3, '0')}.${captureConfig.outputFormat}`,
+    format: captureConfig.outputFormat,
+    pageProcessing: activePageProcessing.value?.label ?? captureConfig.pageProcessing,
+    colorMode: activeColorMode.value?.label ?? captureConfig.colorMode,
+    thumbnails: enabledThumbnailLabels.value.length > 0 ? enabledThumbnailLabels.value.join(', ') : t('pages.captureAcquisition.none'),
+    resolution: selectedResolutionLabel.value,
+    createdAt: timeLabel(),
+    status: task.status || 'succeeded',
+    path: '',
+    assetUrl: '',
+    downloadUrl: '',
+    assets: [],
+    previews: [],
+    thumbnailAssetId: '',
+    thumbnailAssetKind: '',
+    thumbnailUrl: '',
+    thumbnailObjectUrl: '',
+    thumbnailState: 'idle',
+    thumbnailError: '',
+  };
+  captureResults.value = [row, ...captureResults.value];
 }
 
 function applyCaptureTask(task: CaptureTaskPayload): void {

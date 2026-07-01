@@ -232,7 +232,7 @@ export async function closeSelectedDevice(): Promise<void> {
   });
 }
 
-export async function startVideo(profile?: unknown): Promise<void> {
+export async function startVideo(profile?: unknown, pipeline?: unknown): Promise<void> {
   const resolution = selectedResolution();
   if (!state.selectedDeviceId || !state.opened || !resolution) {
     state.startState = 'blocked';
@@ -246,6 +246,9 @@ export async function startVideo(profile?: unknown): Promise<void> {
   const params = buildVideoParams(resolution);
   if (profile && typeof profile === 'object') {
     params.profile = profile;
+  }
+  if (pipeline && typeof pipeline === 'object') {
+    params.pipeline = pipeline;
   }
   state.showDetectedRects = shouldShowDetectedRects(profile);
   const response = await sendBoundCommand('video.start', { params });
@@ -261,7 +264,7 @@ export async function startVideo(profile?: unknown): Promise<void> {
   connectVideoSocket();
 }
 
-export async function setVideoProfile(profile: unknown): Promise<void> {
+export async function setVideoProfile(profile: unknown, pipeline?: unknown): Promise<void> {
   if (!state.selectedDeviceId || !state.streamId) {
     return;
   }
@@ -269,6 +272,7 @@ export async function setVideoProfile(profile: unknown): Promise<void> {
     params: {
       device_id: state.selectedDeviceId,
       profile,
+      ...(pipeline && typeof pipeline === 'object' ? { pipeline } : {}),
     },
   });
   if (!isOkResponse(response)) {
@@ -388,6 +392,35 @@ export function handleDeviceRemoved(deviceId: string, reason = 'hotplug_removed'
   state.videoState = 'idle';
   state.closeState = 'success';
   state.errorMessage = `device removed (${reason})`;
+  return true;
+}
+
+export function clearSelectionIfDeviceMissing(activeDeviceIds: string[], reason = 'device_inventory_changed'): boolean {
+  if (!state.selectedDeviceId || activeDeviceIds.includes(state.selectedDeviceId)) {
+    return false;
+  }
+  const removedDeviceId = state.selectedDeviceId;
+  closeVideoSocket();
+  resetPreview();
+  // 热插拔后不同页面共享同一份预览状态；列表刷新发现旧设备不存在时，先清掉旧 device_id，避免后续 device.get/open 继续请求已移除设备。
+  state.selectedDeviceId = '';
+  state.detailState = 'idle';
+  state.openState = 'idle';
+  state.closeState = 'success';
+  state.startState = 'idle';
+  state.stopState = 'idle';
+  state.videoState = 'idle';
+  state.errorMessage = `device unavailable (${reason})`;
+  state.resolutions = [];
+  state.features = { image_transfer_protocol: false };
+  state.selectedResolutionKey = '';
+  state.opened = false;
+  recordInternalRuntimeEvent({
+    title: 'device.selection_cleared',
+    detail: `cleared stale selected device (${reason}).`,
+    meta: removedDeviceId,
+    tone: 'warning',
+  });
   return true;
 }
 
