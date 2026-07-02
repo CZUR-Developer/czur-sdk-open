@@ -77,6 +77,7 @@ public:
     void SetCommandEventSink(CommandEventSink sink);
     Json HandleRequest(const std::string& connection_id, const Json& request_json);
     void OnConnectionClosed(const std::string& connection_id);
+    void ShutdownActiveSessions();
     Json BuildCapabilitiesJson() const;
     VideoSessionService::ValidationResult ValidateVideoStream(const std::string& session_token,
                                                               const std::string& stream_id) const;
@@ -189,6 +190,7 @@ private:
     void RememberCommandConnection(const std::string& connection_id);
     void ForgetCommandConnection(const std::string& connection_id);
     std::vector<std::string> ListCommandConnections() const;
+    std::vector<std::string> ClearCommandConnections();
     void RememberCaptureProfile(const std::string& connection_id,
                                 const std::string& device_id,
                                 const SdkCaptureProfile& profile);
@@ -208,6 +210,7 @@ private:
     void ForgetOpenedDevice(const std::string& connection_id, const std::string& device_id);
     std::vector<std::string> ForgetOpenedDeviceFromAllConnections(const std::string& device_id);
     std::vector<std::string> ClearOpenedDevices(const std::string& connection_id);
+    std::vector<std::string> ClearAllOpenedDevices();
     std::string NextImageTaskId();
     SdkCaptureAsset AttachImageAssetUrls(const std::string& task_id, const SdkCaptureAsset& asset) const;
     void RegisterImageAsset(const std::string& connection_id, const std::string& task_id, const SdkCaptureAsset& asset);

@@ -9,6 +9,7 @@
 #include <asio/ip/address.hpp>
 
 #include <exception>
+#include <future>
 #include <map>
 #include <mutex>
 #include <set>
@@ -109,6 +110,36 @@ bool SdkWsCommandServer::SendEvent(const std::string& connection_id, const Json&
         }
     });
     return true;
+}
+
+void SdkWsCommandServer::RunOnIoThreadSync(const std::function<void()>& task) {
+    if (!task) {
+        return;
+    }
+    // 服务已经停止或尚未启动时，调用方只能在当前线程执行清理任务。
+    if (!impl_ || !running_.load() || !impl_->io_thread.joinable()) {
+        SDK_OPEN_LOG_INFO("[sdk_ws_command_server] RunOnIoThreadSync direct reason=not_running");
+        task();
+        return;
+    }
+    if (impl_->io_thread.get_id() == std::this_thread::get_id()) {
+        SDK_OPEN_LOG_INFO("[sdk_ws_command_server] RunOnIoThreadSync direct reason=already_io_thread");
+        task();
+        return;
+    }
+
+    // 停机清理要投递到 command WS 的 IO 线程执行，避免连接表和 command service 状态并发收口。
+    std::shared_ptr<std::promise<void> > done(new std::promise<void>());
+    std::future<void> future = done->get_future();
+    impl_->server.get_io_service().post([task, done]() {
+        try {
+            task();
+            done->set_value();
+        } catch (...) {
+            done->set_exception(std::current_exception());
+        }
+    });
+    future.get();
 }
 
 bool SdkWsCommandServer::Start() {

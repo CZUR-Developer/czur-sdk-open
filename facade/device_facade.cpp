@@ -37,6 +37,7 @@ struct PrivateDeviceCApi {
     PrivateDeviceJsonFn stop_video = NULL;
     PrivateDeviceJsonFn set_video_format = NULL;
     PrivateDeviceJsonFn set_video_profile = NULL;
+    PrivateDeviceJsonFn set_turn_detect = NULL;
     PrivateDeviceFreeStringFn free_string = NULL;
 };
 
@@ -98,6 +99,8 @@ PrivateDeviceCApi& GetPrivateDeviceCApi() {
         ::GetProcAddress(api.module, "czur_sdk_private_video_format_json"));
     api.set_video_profile = reinterpret_cast<PrivateDeviceJsonFn>(
         ::GetProcAddress(api.module, "czur_sdk_private_video_profile_json"));
+    api.set_turn_detect = reinterpret_cast<PrivateDeviceJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_capture_turn_detect_json"));
     api.free_string = reinterpret_cast<PrivateDeviceFreeStringFn>(
         ::GetProcAddress(api.module, "czur_sdk_private_providers_free_string"));
     return api;
@@ -564,6 +567,34 @@ SdkVideoProfileResult SetProviderVideoProfileWithCApi(const SdkVideoProfileReque
     return result;
 }
 
+SdkTurnDetectResult SetProviderTurnDetectWithCApi(const SdkTurnDetectRequest& request) {
+    SdkTurnDetectResult result;
+    PrivateDeviceCApi& api = GetPrivateDeviceCApi();
+    Json response;
+    std::string error;
+    Json request_json{{"device_id", request.device_id},
+                      {"enabled", request.enabled},
+                      {"auto_capture", request.auto_capture},
+                      {"scan_device_type", request.scan_device_type},
+                      {"cooldown_ms", request.cooldown_ms}};
+    if (!InvokePrivateDeviceCApi(api.set_turn_detect, request_json, &response, &error)) {
+        result.code = ToCode(SdkStatusCode::ProviderNotReady);
+        result.message = error;
+        return result;
+    }
+    result.code = IntField(response, "code");
+    result.message = StringField(response, "message");
+    if (result.message.empty()) {
+        result.message = IsOkStatusCode(result.code) ? "ok" : "private device failed";
+    }
+    result.applied = BoolField(response, "applied");
+    result.enabled = BoolField(response, "enabled");
+    result.auto_capture = BoolField(response, "auto_capture");
+    result.scan_device_type = IntField(response, "scan_device_type", result.scan_device_type);
+    result.cooldown_ms = IntField(response, "cooldown_ms", result.cooldown_ms);
+    return result;
+}
+
 #endif
 
 } // namespace
@@ -831,6 +862,10 @@ SdkVideoProfileResult DeviceFacade::SetVideoProfile(const AuthContext& auth_cont
 SdkTurnDetectResult DeviceFacade::SetTurnDetect(const AuthContext& auth_context,
                                                 const SdkTurnDetectRequest& request) const {
     SdkTurnDetectResult result;
+#if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
+    (void)auth_context;
+    return SetProviderTurnDetectWithCApi(request);
+#else
     const DeviceGetResult device_result = LookupDevice(auth_context, request.device_id);
     if (!IsOkStatusCode(device_result.code)) {
         result.code = device_result.code;
@@ -838,6 +873,7 @@ SdkTurnDetectResult DeviceFacade::SetTurnDetect(const AuthContext& auth_context,
         return result;
     }
     return providers_.device_provider->SetTurnDetect(request);
+#endif
 }
 
 } // namespace sdk

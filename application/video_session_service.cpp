@@ -141,6 +141,16 @@ std::vector<VideoSessionService::StreamBinding> VideoSessionService::ClearConnec
     return removed;
 }
 
+std::vector<VideoSessionService::StreamBinding> VideoSessionService::ClearAll() {
+    std::vector<StreamBinding> removed;
+    std::lock_guard<std::mutex> lock(streams_mu_);
+    for (std::map<std::string, StreamBinding>::const_iterator it = streams_.begin(); it != streams_.end(); ++it) {
+        removed.push_back(it->second);
+    }
+    streams_.clear();
+    return removed;
+}
+
 std::size_t VideoSessionService::ActiveStreamCount() const {
     std::lock_guard<std::mutex> lock(streams_mu_);
     return streams_.size();

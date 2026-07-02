@@ -4,6 +4,8 @@
 #include "private_windows_provider_factory.h"
 
 #include <memory>
+#include <mutex>
+#include <vector>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -21,6 +23,10 @@ namespace {
 
 typedef const char* (*PrivateProviderJsonFn)(const char*);
 typedef void (*PrivateProviderFreeStringFn)(const char*);
+typedef void (*PrivateProviderDeviceActionEventCallback)(const char*, void*);
+typedef void (*PrivateProviderDeviceEventCallback)(const char*, void*);
+typedef void (*PrivateProviderSetDeviceActionEventCallbackFn)(PrivateProviderDeviceActionEventCallback, void*);
+typedef void (*PrivateProviderSetDeviceEventCallbackFn)(PrivateProviderDeviceEventCallback, void*);
 
 struct PrivateProvidersCApi {
     HMODULE module = NULL;
@@ -30,6 +36,8 @@ struct PrivateProvidersCApi {
     PrivateProviderJsonFn ocr_get = NULL;
     PrivateProviderJsonFn ocr_cancel = NULL;
     PrivateProviderJsonFn ocr_extract_text = NULL;
+    PrivateProviderSetDeviceActionEventCallbackFn set_device_action_event_callback = NULL;
+    PrivateProviderSetDeviceEventCallbackFn set_device_event_callback = NULL;
     PrivateProviderFreeStringFn free_string = NULL;
 };
 
@@ -56,6 +64,10 @@ PrivateProvidersCApi& GetPrivateProvidersCApi() {
         ::GetProcAddress(api.module, "czur_sdk_private_ocr_cancel_json"));
     api.ocr_extract_text = reinterpret_cast<PrivateProviderJsonFn>(
         ::GetProcAddress(api.module, "czur_sdk_private_ocr_extract_text_json"));
+    api.set_device_action_event_callback = reinterpret_cast<PrivateProviderSetDeviceActionEventCallbackFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_device_action_event_set_callback"));
+    api.set_device_event_callback = reinterpret_cast<PrivateProviderSetDeviceEventCallbackFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_device_event_set_callback"));
     api.free_string = reinterpret_cast<PrivateProviderFreeStringFn>(
         ::GetProcAddress(api.module, "czur_sdk_private_providers_free_string"));
     return api;
@@ -85,6 +97,14 @@ bool BoolField(const Json& object, const char* key, bool fallback = false) {
     return it != object.end() && it->is_boolean() ? it->get<bool>() : fallback;
 }
 
+int64_t Int64Field(const Json& object, const char* key, int64_t fallback = 0) {
+    if (!object.is_object()) {
+        return fallback;
+    }
+    Json::const_iterator it = object.find(key);
+    return it != object.end() && it->is_number_integer() ? it->get<int64_t>() : fallback;
+}
+
 std::vector<std::string> StringArrayField(const Json& object, const char* key) {
     std::vector<std::string> values;
     if (!object.is_object()) {
@@ -100,6 +120,52 @@ std::vector<std::string> StringArrayField(const Json& object, const char* key) {
         }
     }
     return values;
+}
+
+int Base64DecodeValue(char ch) {
+    if (ch >= 'A' && ch <= 'Z') {
+        return ch - 'A';
+    }
+    if (ch >= 'a' && ch <= 'z') {
+        return ch - 'a' + 26;
+    }
+    if (ch >= '0' && ch <= '9') {
+        return ch - '0' + 52;
+    }
+    if (ch == '+') {
+        return 62;
+    }
+    if (ch == '/') {
+        return 63;
+    }
+    return -1;
+}
+
+std::vector<uint8_t> Base64Decode(const std::string& input) {
+    std::vector<uint8_t> output;
+    int value = 0;
+    int bits = -8;
+    for (std::string::const_iterator it = input.begin(); it != input.end(); ++it) {
+        const char ch = *it;
+        if (ch == '=') {
+            break;
+        }
+        if (ch == '\r' || ch == '\n' || ch == '\t' || ch == ' ') {
+            continue;
+        }
+        const int decoded = Base64DecodeValue(ch);
+        if (decoded < 0) {
+            output.clear();
+            return output;
+        }
+        value = (value << 6) | decoded;
+        bits += 6;
+        if (bits >= 0) {
+            output.push_back(static_cast<uint8_t>((value >> bits) & 0xFF));
+            bits -= 8;
+        }
+    }
+    return output;
 }
 
 Json ImageEnhancePageToJson(const SdkImageEnhancePage& page) {
@@ -118,6 +184,59 @@ SdkImageEnhancePage ImageEnhancePageFromJson(const Json& value) {
     page.dropped = BoolField(value, "dropped");
     page.metadata_json = StringField(value, "metadata_json", "{}");
     return page;
+}
+
+SdkCaptureResult CaptureResultFromJson(const Json& value) {
+    SdkCaptureResult result;
+    if (!value.is_object()) {
+        return result;
+    }
+    result.code = IntField(value, "code");
+    result.message = StringField(value, "message", result.message);
+    result.captured = BoolField(value, "captured");
+    result.output_path = StringField(value, "output_path");
+    result.original_path = StringField(value, "original_path");
+    result.laser_path = StringField(value, "laser_path");
+    result.content_type = StringField(value, "content_type");
+    result.payload = StringField(value, "payload");
+    result.width = IntField(value, "width");
+    result.height = IntField(value, "height");
+    result.dpi = IntField(value, "dpi");
+    Json::const_iterator size_it = value.find("size");
+    if (size_it != value.end() && size_it->is_number_unsigned()) {
+        result.size = size_it->get<uint64_t>();
+    }
+    result.detected_rects_source_width = IntField(value, "detected_rects_source_width");
+    result.detected_rects_source_height = IntField(value, "detected_rects_source_height");
+    result.scan_device_type = IntField(value, "scan_device_type");
+    result.raw_payload = Base64Decode(StringField(value, "raw_payload_base64"));
+    result.raw_laser_payload = Base64Decode(StringField(value, "raw_laser_payload_base64"));
+    return result;
+}
+
+SdkDeviceActionEvent DeviceActionEventFromJson(const Json& value) {
+    SdkDeviceActionEvent event;
+    event.device_id = StringField(value, "device_id");
+    const std::string type = StringField(value, "type", "turn_detect");
+    event.type = type == "hardgrab" ? SdkDeviceActionType::HardGrab : SdkDeviceActionType::PageTurn;
+    event.auto_capture = BoolField(value, "auto_capture");
+    event.timestamp_ms = Int64Field(value, "timestamp_ms");
+    Json::const_iterator capture_it = value.find("capture");
+    if (capture_it != value.end()) {
+        event.capture = CaptureResultFromJson(*capture_it);
+    }
+    return event;
+}
+
+SdkDeviceEvent DeviceEventFromJson(const Json& value) {
+    SdkDeviceEvent event;
+    event.device_id = StringField(value, "device_id");
+    event.type = StringField(value, "type", event.type);
+    event.reason = StringField(value, "reason");
+    event.was_opened = BoolField(value, "was_opened");
+    event.was_streaming = BoolField(value, "was_streaming");
+    event.timestamp_ms = Int64Field(value, "timestamp_ms");
+    return event;
 }
 
 Json OcrRecognizeRequestToJson(const SdkOcrRecognizeRequest& request) {
@@ -389,6 +508,179 @@ public:
     }
 };
 
+// Windows private 分支的设备命令已经由 DeviceFacade 直接桥接 private C API。
+// 这个 provider 只挂到 ProviderBundle 上，用于承接 private 层异步上报的设备动作和插拔事件。
+class WindowsPrivateDeviceProvider : public ISdkDeviceProvider {
+public:
+    ~WindowsPrivateDeviceProvider() override {
+        RegisterDeviceActionEventCallback(false);
+        RegisterDeviceEventCallback(false);
+    }
+
+    std::string ProviderName() const override { return "czur-private-windows-device-provider"; }
+
+    std::vector<SdkDeviceDescriptor> ListDevices() const override {
+        return std::vector<SdkDeviceDescriptor>();
+    }
+
+    SdkDeviceOpenResult GetDevice(const SdkDeviceOpenRequest&) override {
+        SdkDeviceOpenResult result;
+        result.code = ToCode(SdkStatusCode::ProviderNotReady);
+        result.message = "private windows device commands are handled by DeviceFacade C API";
+        return result;
+    }
+
+    SdkDeviceOpenResult OpenDevice(const SdkDeviceOpenRequest&) override {
+        SdkDeviceOpenResult result;
+        result.code = ToCode(SdkStatusCode::ProviderNotReady);
+        result.message = "private windows device commands are handled by DeviceFacade C API";
+        return result;
+    }
+
+    SdkDeviceCloseResult CloseDevice(const SdkDeviceCloseRequest&) override {
+        // Windows private 的命令型设备操作统一由 DeviceFacade 走 private C API。
+        // 这里的 provider 只承担事件桥接职责，避免 close/stop 出现两套调用入口。
+        SdkDeviceCloseResult result;
+        result.code = ToCode(SdkStatusCode::ProviderNotReady);
+        result.message = "private windows device commands are handled by DeviceFacade C API";
+        return result;
+    }
+
+    void CaptureStill(const SdkCaptureRequest&, SdkCaptureCallback callback) override {
+        SdkCaptureResult result;
+        result.code = ToCode(SdkStatusCode::ProviderNotReady);
+        result.message = "private windows capture commands are handled by DeviceFacade C API";
+        if (callback) {
+            callback(result);
+        }
+    }
+
+    SdkVideoStartResult StartVideo(const SdkVideoStartRequest&, SdkVideoFrameCallback) override {
+        SdkVideoStartResult result;
+        result.code = ToCode(SdkStatusCode::ProviderNotReady);
+        result.message = "private windows video commands are handled by DeviceFacade C API";
+        return result;
+    }
+
+    SdkVideoStopResult StopVideo(const SdkVideoStopRequest&) override {
+        // stop/video 生命周期同样收口在 DeviceFacade，避免 provider adapter 重复转发 private C API。
+        SdkVideoStopResult result;
+        result.code = ToCode(SdkStatusCode::ProviderNotReady);
+        result.message = "private windows video commands are handled by DeviceFacade C API";
+        return result;
+    }
+
+    SdkVideoFormatResult SetVideoFormat(const SdkVideoFormatRequest&) override {
+        SdkVideoFormatResult result;
+        result.code = ToCode(SdkStatusCode::UnsupportedMethod);
+        result.message = "private windows video format commands are handled by DeviceFacade C API";
+        return result;
+    }
+
+    SdkVideoProfileResult SetVideoProfile(const SdkVideoProfileRequest&) override {
+        SdkVideoProfileResult result;
+        result.code = ToCode(SdkStatusCode::UnsupportedMethod);
+        result.message = "private windows video profile commands are handled by DeviceFacade C API";
+        return result;
+    }
+
+    void SetDeviceActionEventSink(SdkDeviceActionEventCallback sink) override {
+        // 翻页/硬拍事件由 private 层产生，这里只做 JSON 事件桥接并转发给 sdk_open command event。
+        {
+            std::lock_guard<std::mutex> lock(action_event_sink_mu_);
+            action_event_sink_ = sink;
+        }
+        RegisterDeviceActionEventCallback(static_cast<bool>(sink));
+    }
+
+    void SetDeviceEventSink(SdkDeviceEventCallback sink) override {
+        // 设备插拔生命周期事件也来自 private 层；Windows 分支必须显式桥接，否则接口默认空实现会吞掉 device.removed。
+        {
+            std::lock_guard<std::mutex> lock(device_event_sink_mu_);
+            device_event_sink_ = sink;
+        }
+        RegisterDeviceEventCallback(static_cast<bool>(sink));
+    }
+
+private:
+    static void DeviceActionEventThunk(const char* event_json, void* user_data) {
+        WindowsPrivateDeviceProvider* provider = reinterpret_cast<WindowsPrivateDeviceProvider*>(user_data);
+        if (provider == NULL || event_json == NULL) {
+            return;
+        }
+        Json event_value;
+        std::string parse_error;
+        if (!TryParseJson(std::string(event_json), &event_value, &parse_error) || !event_value.is_object()) {
+            return;
+        }
+        provider->PublishDeviceActionEvent(DeviceActionEventFromJson(event_value));
+    }
+
+    static void DeviceEventThunk(const char* event_json, void* user_data) {
+        WindowsPrivateDeviceProvider* provider = reinterpret_cast<WindowsPrivateDeviceProvider*>(user_data);
+        if (provider == NULL || event_json == NULL) {
+            return;
+        }
+        Json event_value;
+        std::string parse_error;
+        if (!TryParseJson(std::string(event_json), &event_value, &parse_error) || !event_value.is_object()) {
+            return;
+        }
+        provider->PublishDeviceEvent(DeviceEventFromJson(event_value));
+    }
+
+    void RegisterDeviceActionEventCallback(bool enabled) {
+        PrivateProvidersCApi& api = GetPrivateProvidersCApi();
+        if (api.set_device_action_event_callback == NULL) {
+            return;
+        }
+        if (enabled) {
+            api.set_device_action_event_callback(DeviceActionEventThunk, this);
+        } else {
+            api.set_device_action_event_callback(NULL, NULL);
+        }
+    }
+
+    void RegisterDeviceEventCallback(bool enabled) {
+        PrivateProvidersCApi& api = GetPrivateProvidersCApi();
+        if (api.set_device_event_callback == NULL) {
+            return;
+        }
+        if (enabled) {
+            api.set_device_event_callback(DeviceEventThunk, this);
+        } else {
+            api.set_device_event_callback(NULL, NULL);
+        }
+    }
+
+    void PublishDeviceActionEvent(const SdkDeviceActionEvent& event) {
+        SdkDeviceActionEventCallback sink;
+        {
+            std::lock_guard<std::mutex> lock(action_event_sink_mu_);
+            sink = action_event_sink_;
+        }
+        if (sink) {
+            sink(event);
+        }
+    }
+
+    void PublishDeviceEvent(const SdkDeviceEvent& event) {
+        SdkDeviceEventCallback sink;
+        {
+            std::lock_guard<std::mutex> lock(device_event_sink_mu_);
+            sink = device_event_sink_;
+        }
+        if (sink) {
+            sink(event);
+        }
+    }
+
+    std::mutex action_event_sink_mu_;
+    std::mutex device_event_sink_mu_;
+    SdkDeviceActionEventCallback action_event_sink_;
+    SdkDeviceEventCallback device_event_sink_;
+};
+
 #endif
 
 } // namespace
@@ -396,6 +688,7 @@ public:
 ProviderBundle CreateProviderBundle() {
     ProviderBundle bundle;
 #if defined(_WIN32)
+    bundle.device_provider = std::make_shared<WindowsPrivateDeviceProvider>();
     bundle.image_enhance_provider = std::make_shared<WindowsPrivateImageEnhanceProvider>();
     bundle.ocr_provider = std::make_shared<WindowsPrivateOcrProvider>();
 #endif

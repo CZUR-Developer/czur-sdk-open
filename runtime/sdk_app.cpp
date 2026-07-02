@@ -521,11 +521,19 @@ bool SdkApp::Start() {
 }
 
 void SdkApp::Stop() {
-    if (!running_.load()) {
+    // Stop 可能来自控制台信号、Windows service 控制或对象析构，必须保证关闭流程只执行一次。
+    if (!running_.exchange(false)) {
         return;
     }
 
     SDK_OPEN_LOG_INFO("[sdk_app] stopping...");
+    if (command_application_service_) {
+        // 先收口 sdk_open 自己登记的视频流和设备，再停止 WS/HTTP 服务。
+        // 否则设备会残留到 private 层/DeviceManager release 阶段才兜底关闭。
+        command_ws_server_.RunOnIoThreadSync([this]() {
+            command_application_service_->ShutdownActiveSessions();
+        });
+    }
     video_ws_server_.Stop();
     command_ws_server_.Stop();
     if (kSdkOpenHttpServerEnabled) {
@@ -533,7 +541,6 @@ void SdkApp::Stop() {
         demo_http_server_.Stop();
         admin_http_server_.Stop();
     }
-    running_.store(false);
     SDK_OPEN_LOG_INFO("[sdk_app] stopped");
 }
 

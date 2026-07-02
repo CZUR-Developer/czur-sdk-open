@@ -10,6 +10,7 @@
 #include <exception>
 #include <fstream>
 #include <iomanip>
+#include <set>
 #include <sstream>
 #include <sys/stat.h>
 #include <utility>
@@ -1719,11 +1720,11 @@ void CommandApplicationService::OnConnectionClosed(const std::string& connection
     for (std::vector<VideoSessionService::StreamBinding>::const_iterator it = removed.begin();
          it != removed.end();
          ++it) {
-        if (providers_.device_provider) {
-            SdkVideoStopRequest stop_request;
-            stop_request.device_id = it->device_id;
-            providers_.device_provider->StopVideo(stop_request);
-        }
+        // Windows private provider 的设备能力通过 DeviceFacade 转到 private C API。
+        // 连接关闭时不能直接依赖 providers_.device_provider，否则 private 模式可能漏停预览。
+        SdkVideoStopRequest stop_request;
+        stop_request.device_id = it->device_id;
+        device_facade_.StopVideo(AuthContext(), stop_request);
         if (video_stream_closed_sink_) {
             video_stream_closed_sink_(it->stream_id);
         }
@@ -1733,6 +1734,51 @@ void CommandApplicationService::OnConnectionClosed(const std::string& connection
         SdkDeviceCloseRequest close_request;
         close_request.device_id = *it;
         device_facade_.CloseDevice(AuthContext(), close_request);
+    }
+}
+
+void CommandApplicationService::ShutdownActiveSessions() {
+    // sdk_open 进程退出前的主动清理入口：先停所有预览流，再关闭所有已打开设备。
+    // 这样设备不会等到底层 DeviceManager::release 兜底关闭。
+    const std::vector<VideoSessionService::StreamBinding> streams = video_session_service_.ClearAll();
+    SDK_OPEN_LOG_INFO("[command_application] shutdown cleanup streams={}", streams.size());
+    for (std::vector<VideoSessionService::StreamBinding>::const_iterator it = streams.begin();
+         it != streams.end();
+         ++it) {
+        SdkVideoStopRequest stop_request;
+        stop_request.device_id = it->device_id;
+        const SdkVideoStopResult stop_result = device_facade_.StopVideo(AuthContext(), stop_request);
+        SDK_OPEN_LOG_INFO("[command_application] shutdown video.stop device={} code={} stopped={}",
+                          stop_request.device_id,
+                          stop_result.code,
+                          stop_result.stopped);
+        if (video_stream_closed_sink_) {
+            video_stream_closed_sink_(it->stream_id);
+        }
+    }
+
+    const std::vector<std::string> devices = ClearAllOpenedDevices();
+    SDK_OPEN_LOG_INFO("[command_application] shutdown cleanup opened_devices={}", devices.size());
+    for (std::vector<std::string>::const_iterator it = devices.begin(); it != devices.end(); ++it) {
+        SdkDeviceCloseRequest close_request;
+        close_request.device_id = *it;
+        const SdkDeviceCloseResult close_result = device_facade_.CloseDevice(AuthContext(), close_request);
+        SDK_OPEN_LOG_INFO("[command_application] shutdown device.close device={} code={} closed={}",
+                          close_request.device_id,
+                          close_result.code,
+                          close_result.closed);
+    }
+
+    const std::vector<std::string> connections = ClearCommandConnections();
+    for (std::vector<std::string>::const_iterator it = connections.begin(); it != connections.end(); ++it) {
+        // 连接表和采集上下文已经整体清空；这里只释放连接绑定的授权和 SANE watch 状态。
+        authorization_service_.ClearConnection(*it);
+        if (ForgetSaneWatchConnection(*it)) {
+            SdkSaneWatchRequest sane_watch_request;
+            sane_watch_request.connection_id = *it;
+            sane_watch_request.enabled = false;
+            sane_facade_.WatchStop(sane_watch_request);
+        }
     }
 }
 
@@ -2604,11 +2650,9 @@ Json CommandApplicationService::HandleAuthDestroySession(const std::string& conn
     for (std::vector<VideoSessionService::StreamBinding>::const_iterator it = removed.begin();
          it != removed.end();
          ++it) {
-        if (providers_.device_provider) {
-            SdkVideoStopRequest stop_request;
-            stop_request.device_id = it->device_id;
-            providers_.device_provider->StopVideo(stop_request);
-        }
+        SdkVideoStopRequest stop_request;
+        stop_request.device_id = it->device_id;
+        device_facade_.StopVideo(AuthContext(), stop_request);
         if (video_stream_closed_sink_) {
             video_stream_closed_sink_(it->stream_id);
         }
@@ -5129,6 +5173,13 @@ std::vector<std::string> CommandApplicationService::ListCommandConnections() con
     return std::vector<std::string>(command_connections_.begin(), command_connections_.end());
 }
 
+std::vector<std::string> CommandApplicationService::ClearCommandConnections() {
+    std::lock_guard<std::mutex> lock(command_connections_mu_);
+    std::vector<std::string> connections(command_connections_.begin(), command_connections_.end());
+    command_connections_.clear();
+    return connections;
+}
+
 void CommandApplicationService::RememberOpenedDevice(const std::string& connection_id, const std::string& device_id) {
     if (connection_id.empty() || device_id.empty()) {
         return;
@@ -5187,6 +5238,24 @@ std::vector<std::string> CommandApplicationService::ClearOpenedDevices(const std
     opened_devices_by_connection_.erase(it);
     ClearCaptureProfiles(connection_id);
     return devices;
+}
+
+std::vector<std::string> CommandApplicationService::ClearAllOpenedDevices() {
+    std::set<std::string> unique_devices;
+    {
+        std::lock_guard<std::mutex> lock(opened_devices_mu_);
+        for (std::map<std::string, std::set<std::string> >::const_iterator it = opened_devices_by_connection_.begin();
+             it != opened_devices_by_connection_.end();
+             ++it) {
+            unique_devices.insert(it->second.begin(), it->second.end());
+        }
+        opened_devices_by_connection_.clear();
+    }
+    {
+        std::lock_guard<std::mutex> lock(capture_contexts_mu_);
+        capture_contexts_by_connection_.clear();
+    }
+    return std::vector<std::string>(unique_devices.begin(), unique_devices.end());
 }
 
 void CommandApplicationService::RememberCaptureProfile(const std::string& connection_id,

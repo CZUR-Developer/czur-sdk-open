@@ -32,6 +32,7 @@ public:
     void SetOpenHandler(ConnectionHandler handler);
     void SetCloseHandler(ConnectionHandler handler);
     bool SendEvent(const std::string& connection_id, const Json& event);
+    void RunOnIoThreadSync(const std::function<void()>& task);
     bool Start();
     void Stop();
     Stats GetStats() const;

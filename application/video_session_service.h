@@ -58,6 +58,7 @@ public:
                                     int fps);
     ValidationResult Validate(const std::string& session_token, const std::string& stream_id) const;
     std::vector<StreamBinding> ClearConnection(const std::string& connection_id);
+    std::vector<StreamBinding> ClearAll();
     std::size_t ActiveStreamCount() const;
 
 private:
