@@ -345,6 +345,8 @@ ws://127.0.0.1:17090
 
 JPG/PNG 目标只支持 `export_type: "single-page"`。PDF/OFD/TIFF 文档来源本轮每次请求只接受一个输入文档。跨文档格式转换按页面视觉结果转换，不承诺保留文本、矢量和语义结构。
 
+`file.convert.options.quality` 继续使用现有整数参数，不新增对外压缩参数。它用于控制转换输出的图片/JPEG 质量；当目标为 PDF/OFD/TIFF 或图片格式时，SDK 会在生成目标页图像或嵌入图片层前按该质量参数处理输出图像。
+
 文档拆分页示例：
 
 ```json
@@ -377,7 +379,7 @@ Demo 站点通过资源服务的 `POST /api/uploads/files` 上传浏览器选择
 OCR 与识别方法：
 
 - `ocr.extract_text`：对单张图片做轻量 OCR，返回文字块和图片坐标系下的矩形。
-- `ocr.recognize`：提交异步 OCR 导出任务。支持 `input_upload_ids` 或 `input_files`、可选 `output_path` 或 `output_dir`、`format`，以及 `encoding`、`paperSize`、`exportType`、`ocrPreference`、`quality`、`exportFormat` 等导出参数。导出格式支持 `txt`、`pdf`、`docx`、`xlsx`、`ofd`、`json`。
+- `ocr.recognize`：提交异步 OCR 导出任务。支持 `input_upload_ids` 或 `input_files`、可选 `output_path` 或 `output_dir`、`format`，以及 `encoding`、`paperSize`、`exportType`、`ocrPreference`、`quality`、`exportFormat` 等导出参数。导出格式支持 `txt`、`pdf`、`docx`、`xlsx`、`ofd`、`json`。其中 `quality` 继续作为现有公开参数使用；在 Linux 版 PDF/OFD OCR 导出中，它控制双层 PDF/OFD 图片层的导出压缩质量。OCR 识别阶段仍使用原始上传/输入图片，不会先压缩后识别，避免降低识别率。
 - `ocr.get`：查询 OCR 任务状态。
 - `ocr.cancel`：请求取消 OCR 任务。
 - `recognition.barcode_detect`：对静态图片做条码/二维码识别。实时条码识别归属采集/视频流，不由该方法启动。
