@@ -277,7 +277,7 @@ endif()
 if(SDK_OPEN_USE_PRIVATE_PROVIDER)
     target_compile_definitions(sdk_open_app PRIVATE SDK_USE_PRIVATE_PROVIDER)
     if(WIN32)
-        add_dependencies(sdk_open_app sdk_private_providers)
+        add_dependencies(sdk_open_app sdk_private_auth_c_api sdk_private_providers)
     else()
         target_link_libraries(sdk_open_app PRIVATE sdk_private_providers)
     endif()
@@ -346,8 +346,21 @@ if(BUILD_SDK_PRIVATE)
     )
 
     if(WIN32)
+        set(SDK_OPEN_PRIVATE_PROVIDER_DLL_COPY_COMMANDS)
+        if(SDK_OPEN_USE_PRIVATE_PROVIDER)
+            list(APPEND SDK_OPEN_PRIVATE_PROVIDER_DLL_COPY_COMMANDS
+                COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                    "$<TARGET_FILE:sdk_private_auth_c_api>"
+                    "$<TARGET_FILE_DIR:sdk_open_app>/$<TARGET_FILE_NAME:sdk_private_auth_c_api>"
+                COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                    "$<TARGET_FILE:sdk_private_providers>"
+                    "$<TARGET_FILE_DIR:sdk_open_app>/$<TARGET_FILE_NAME:sdk_private_providers>"
+            )
+        endif()
+
         add_custom_command(TARGET sdk_open_app POST_BUILD
             COMMAND "${CMAKE_COMMAND}" -E echo "Copying sdk_open_app dependency DLLs..."
+            ${SDK_OPEN_PRIVATE_PROVIDER_DLL_COPY_COMMANDS}
             COMMAND "${CMAKE_COMMAND}" -E copy_directory
                 "${SDK_OPEN_CZCV_MODEL_DIR}"
                 "$<TARGET_FILE_DIR:sdk_open_app>/czcv_model"
