@@ -12,6 +12,7 @@
 #include <windows.h>
 
 #include "sdk_json_utils.h"
+#include "sdk_logger.h"
 #endif
 
 namespace editor {
@@ -32,6 +33,65 @@ struct PrivateAuthCApi {
     PrivateAuthFreeStringFn free_string = NULL;
 };
 
+const char kPrivateAuthCApiDllName[] = "sdk_private_auth_c_api.dll";
+
+std::string CurrentExecutableDir() {
+    char buffer[MAX_PATH] = {0};
+    const DWORD length = ::GetModuleFileNameA(NULL, buffer, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH) {
+        SDK_OPEN_LOG_WARN("[authorization_service] resolve executable path failed, length={}, error={}",
+                          static_cast<unsigned long>(length),
+                          static_cast<unsigned long>(::GetLastError()));
+        return "";
+    }
+    const std::string exe_path(buffer, length);
+    const std::size_t pos = exe_path.find_last_of("/\\");
+    return pos == std::string::npos ? std::string() : exe_path.substr(0, pos);
+}
+
+std::string JoinWindowsPath(const std::string& base, const std::string& leaf) {
+    if (base.empty()) {
+        return leaf;
+    }
+    const char tail = base[base.size() - 1];
+    if (tail == '\\' || tail == '/') {
+        return base + leaf;
+    }
+    return base + "\\" + leaf;
+}
+
+HMODULE LoadPrivateAuthModule() {
+    const std::string executable_dir = CurrentExecutableDir();
+    if (!executable_dir.empty()) {
+        const std::string dll_path = JoinWindowsPath(executable_dir, kPrivateAuthCApiDllName);
+        HMODULE module = ::LoadLibraryA(dll_path.c_str());
+        if (module != NULL) {
+            return module;
+        }
+        SDK_OPEN_LOG_WARN("[authorization_service] load private auth c api failed, path={}, error={}",
+                          dll_path,
+                          static_cast<unsigned long>(::GetLastError()));
+    }
+
+    HMODULE module = ::LoadLibraryA(kPrivateAuthCApiDllName);
+    if (module == NULL) {
+        SDK_OPEN_LOG_ERROR("[authorization_service] load private auth c api fallback failed, dll={}, error={}",
+                           kPrivateAuthCApiDllName,
+                           static_cast<unsigned long>(::GetLastError()));
+    }
+    return module;
+}
+
+FARPROC ResolvePrivateAuthProc(HMODULE module, const char* proc_name) {
+    FARPROC proc = ::GetProcAddress(module, proc_name);
+    if (proc == NULL) {
+        SDK_OPEN_LOG_ERROR("[authorization_service] resolve private auth c api proc failed, proc={}, error={}",
+                           proc_name,
+                           static_cast<unsigned long>(::GetLastError()));
+    }
+    return proc;
+}
+
 PrivateAuthCApi& GetPrivateAuthCApi() {
     static PrivateAuthCApi api;
     static bool loaded = false;
@@ -39,18 +99,18 @@ PrivateAuthCApi& GetPrivateAuthCApi() {
         return api;
     }
     loaded = true;
-    api.module = ::LoadLibraryA("sdk_private_auth_c_api.dll");
+    api.module = LoadPrivateAuthModule();
     if (api.module == NULL) {
         return api;
     }
     api.create_session = reinterpret_cast<PrivateAuthJsonFn>(
-        ::GetProcAddress(api.module, "czur_sdk_private_create_session_json"));
+        ResolvePrivateAuthProc(api.module, "czur_sdk_private_create_session_json"));
     api.activate_offline = reinterpret_cast<PrivateAuthJsonFn>(
-        ::GetProcAddress(api.module, "czur_sdk_private_activate_offline_json"));
+        ResolvePrivateAuthProc(api.module, "czur_sdk_private_activate_offline_json"));
     api.consume_quota = reinterpret_cast<PrivateAuthJsonFn>(
-        ::GetProcAddress(api.module, "czur_sdk_private_consume_quota_json"));
+        ResolvePrivateAuthProc(api.module, "czur_sdk_private_consume_quota_json"));
     api.free_string = reinterpret_cast<PrivateAuthFreeStringFn>(
-        ::GetProcAddress(api.module, "czur_sdk_private_free_string"));
+        ResolvePrivateAuthProc(api.module, "czur_sdk_private_free_string"));
     return api;
 }
 
