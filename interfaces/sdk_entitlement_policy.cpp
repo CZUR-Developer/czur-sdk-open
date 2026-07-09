@@ -158,8 +158,10 @@ EntitlementCheckResult CheckFeatureEntitlement(const AuthContext& auth_context,
     }
     if (IsTrialEntitlementState(auth_context) &&
         IsEntitlementAtLeast(auth_context.licensed_account_type, required_account_type)) {
-        result.requires_trial_quota = true;
-        return result;
+        if (required_account_type != SdkAccountType::SvipPlus || auth_context.commercial_authorized) {
+            result.requires_trial_quota = true;
+            return result;
+        }
     }
     result.code = ToCode(SdkStatusCode::CapabilityNotAllowed);
     std::ostringstream oss;

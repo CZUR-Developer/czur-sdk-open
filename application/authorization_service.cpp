@@ -228,22 +228,55 @@ void RebuildLocalCapabilities(AuthContext* auth_context) {
 #endif
 
 Json AuthContextDataToJson(const AuthContext& auth_context) {
+    Json device_scope = Json::array();
+    for (std::vector<SdkDeviceGrant>::const_iterator it = auth_context.device_scope.begin();
+         it != auth_context.device_scope.end();
+         ++it) {
+        device_scope.push_back(Json{{"vid", it->vid}, {"pid", it->pid}});
+    }
+
+    Json capabilities = Json::array();
+    for (std::vector<std::string>::const_iterator it = auth_context.capabilities.begin();
+         it != auth_context.capabilities.end();
+         ++it) {
+        capabilities.push_back(*it);
+    }
+
+    Json quota_buckets = Json::array();
+    for (std::vector<AuthQuotaBucket>::const_iterator it = auth_context.quota_buckets.begin();
+         it != auth_context.quota_buckets.end();
+         ++it) {
+        Json methods = Json::array();
+        for (std::vector<std::string>::const_iterator method_it = it->methods.begin();
+             method_it != it->methods.end();
+             ++method_it) {
+            methods.push_back(*method_it);
+        }
+        quota_buckets.push_back(Json{{"bucket", it->bucket},
+                                     {"limit", it->limit},
+                                     {"remaining", it->remaining},
+                                     {"enforcement", it->enforcement},
+                                     {"methods", methods}});
+    }
+
     return Json{
         {"is_valid", auth_context.is_valid},
         {"account_type", ToAccountTypeString(auth_context.account_type)},
         {"account_type_code", auth_context.account_type_code},
         {"licensed_account_type", ToAccountTypeString(auth_context.licensed_account_type)},
         {"licensed_account_type_code", auth_context.licensed_account_type_code},
-        {"auth_scene", "plugin"},
-        {"license_mode", "offline_api_key"},
-        {"host_auth_mode", "activation_required"},
-        {"entitlement_state", "offline_trial"},
+        {"auth_scene", auth_context.auth_scene},
+        {"license_mode", auth_context.license_mode},
+        {"host_auth_mode", auth_context.host_auth_mode},
+        {"entitlement_state", auth_context.entitlement_state},
         {"commercial_authorized", auth_context.commercial_authorized},
-        {"machine_code", ""},
-        {"device_scope", Json::array()},
+        {"machine_code", auth_context.machine_code},
+        {"device_scope", device_scope},
         {"expires_at", auth_context.expires_at},
-        {"capability_count", auth_context.capabilities.size()},
-        {"quota_bucket_count", auth_context.quota_buckets.size()},
+        {"capabilities", capabilities},
+        {"quota_buckets", quota_buckets},
+        {"capability_count", capabilities.size()},
+        {"quota_bucket_count", quota_buckets.size()},
     };
 }
 
@@ -273,7 +306,7 @@ AuthContext AuthContextFromJson(const Json& value) {
     context.license_mode = StringField(value, "license_mode");
     context.host_auth_mode = StringField(value, "host_auth_mode");
     context.entitlement_state = StringField(value, "entitlement_state");
-    context.commercial_authorized = BoolField(value, "commercial_authorized", true);
+    context.commercial_authorized = BoolField(value, "commercial_authorized", false);
     context.machine_code = StringField(value, "machine_code");
     context.expires_at = Int64Field(value, "expires_at");
 
