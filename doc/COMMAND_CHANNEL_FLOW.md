@@ -345,6 +345,8 @@ Supported targets are `jpg`, `jpeg`, `png`, `tiff`, `pdf`, and `ofd`. JPG/PNG ta
 
 JPG and PNG targets only support `export_type: "single-page"`. PDF/OFD/TIFF document sources currently accept one input document per request. Cross-format document conversion is page-visual conversion; it does not preserve text or vector semantics.
 
+`file.convert.options.quality` keeps the existing public integer parameter; no new external compression parameter is required. It controls output image/JPEG quality for conversion outputs, including PDF/OFD/TIFF or image targets where pages are rendered or embedded as images.
+
 Document split example:
 
 ```json
@@ -377,7 +379,7 @@ For `selected_area`, pass frontend-scaled points in `params.selected_area.points
 OCR and recognition methods:
 
 - `ocr.extract_text`: runs lightweight OCR on one image and returns text blocks with image-space rectangles.
-- `ocr.recognize`: starts an asynchronous OCR export task. It accepts `input_upload_ids` or `input_files`, optional `output_path` or `output_dir`, `format`, and optional export parameters such as `encoding`, `paperSize`, `exportType`, `ocrPreference`, `quality`, and `exportFormat`. Supported export formats are `txt`, `pdf`, `docx`, `xlsx`, `ofd`, and `json`.
+- `ocr.recognize`: starts an asynchronous OCR export task. It accepts `input_upload_ids` or `input_files`, optional `output_path` or `output_dir`, `format`, and optional export parameters such as `encoding`, `paperSize`, `exportType`, `ocrPreference`, `quality`, and `exportFormat`. Supported export formats are `txt`, `pdf`, `docx`, `xlsx`, `ofd`, and `json`. `quality` remains the existing public parameter; for Linux PDF/OFD OCR export it controls image-layer export compression quality. OCR recognition still runs on the original uploaded/input images, not on compressed temporary export images, to avoid reducing recognition accuracy.
 - `ocr.get`: returns the current OCR task snapshot.
 - `ocr.cancel`: requests cancellation of one OCR task.
 - `recognition.barcode_detect`: detects barcode/QR content from one static image. Realtime barcode recognition belongs to the capture/video flow and is not started by this method.

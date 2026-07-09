@@ -4943,7 +4943,6 @@ Json CommandApplicationService::HandleOcrRecognize(const std::string& connection
     }
     ext_params["format"] = ocr_request.format;
     ext_params["exportType"] = ocr_request.export_type;
-    ocr_request.ext_params_json = ext_params.dump();
 
     for (std::vector<std::string>::const_iterator it = ocr_request.input_upload_ids.begin();
          it != ocr_request.input_upload_ids.end();
@@ -4984,6 +4983,14 @@ Json CommandApplicationService::HandleOcrRecognize(const std::string& connection
             ocr_request.output_path = ocr_request.output_dir;
         }
     }
+    if ((ocr_request.format == "pdf" || ocr_request.format == "ofd") && ext_params.contains("quality")) {
+        const std::string ocr_tmp_dir = GetSdkOpenTaskAssetDir("ocr", ocr_asset_task_id, "tmp");
+        if (!EnsureDirectoryRecursive(ocr_tmp_dir)) {
+            return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "failed to create ocr temp directory");
+        }
+        ext_params["tmp_dir"] = ocr_tmp_dir;
+    }
+    ocr_request.ext_params_json = ext_params.dump();
     for (std::vector<std::string>::const_iterator it = ocr_request.input_files.begin();
          it != ocr_request.input_files.end();
          ++it) {
