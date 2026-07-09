@@ -774,6 +774,245 @@ struct SdkSaneScanCancelRequest {
     std::string task_id;
 };
 
+struct SdkTwainStatusResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool available = false;
+    std::string platform;
+    std::vector<std::string> supported_platforms;
+    bool dsm_loaded = false;
+    std::string dsm_path;
+    std::string twain_version;
+    std::string reason;
+};
+
+struct SdkTwainSource {
+    std::string source_id;
+    std::string source_name;
+    std::string manufacturer;
+    std::string product_family;
+    std::string product_name;
+    int protocol_major = 0;
+    int protocol_minor = 0;
+    std::string status = "online";
+    bool openable = true;
+};
+
+struct SdkTwainListRequest {
+    bool refresh = true;
+};
+
+struct SdkTwainListResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    int generation = 0;
+    std::vector<SdkTwainSource> sources;
+};
+
+struct SdkTwainWatchRequest {
+    std::string connection_id;
+    bool enabled = true;
+};
+
+struct SdkTwainWatchResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool watching = false;
+    int generation = 0;
+};
+
+struct SdkTwainSourceEvent {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    std::string connection_id;
+    std::string event_name = "twain.source_snapshot";
+    int generation = 0;
+    std::vector<SdkTwainSource> sources;
+    std::vector<SdkTwainSource> added_sources;
+    std::vector<SdkTwainSource> removed_sources;
+};
+
+using SdkTwainSourceEventCallback = std::function<void(const SdkTwainSourceEvent&)>;
+
+struct SdkTwainOpenRequest {
+    std::string source_id;
+};
+
+struct SdkTwainOpenResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool opened = false;
+    std::string session_id;
+    SdkTwainSource source;
+};
+
+struct SdkTwainCloseRequest {
+    std::string session_id;
+};
+
+struct SdkTwainCloseResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool closed = false;
+    bool was_opened = false;
+};
+
+struct SdkTwainCapabilityConstraint {
+    std::string type = "none";
+    double min = 0.0;
+    double max = 0.0;
+    double quant = 0.0;
+    std::vector<std::string> values_json;
+};
+
+struct SdkTwainCapability {
+    std::string cap;
+    int cap_id = 0;
+    std::string name;
+    std::string title;
+    std::string type;
+    std::string value_json;
+    SdkTwainCapabilityConstraint constraint;
+    bool readonly = false;
+    bool settable = true;
+    bool advanced = false;
+};
+
+struct SdkTwainGetCapabilitiesRequest {
+    std::string session_id;
+};
+
+struct SdkTwainGetCapabilitiesResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    std::vector<SdkTwainCapability> capabilities;
+};
+
+struct SdkTwainCapabilitySetItem {
+    std::string cap;
+    std::string name;
+    std::string value_json;
+};
+
+struct SdkTwainSetCapabilitiesRequest {
+    std::string session_id;
+    std::vector<SdkTwainCapabilitySetItem> capabilities;
+};
+
+struct SdkTwainCapabilitySetResultItem {
+    std::string cap;
+    std::string name;
+    std::string status;
+    std::string message;
+    std::string value_json;
+};
+
+struct SdkTwainSetCapabilitiesResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool applied = false;
+    bool requires_reload = false;
+    std::vector<SdkTwainCapabilitySetResultItem> results;
+};
+
+struct SdkTwainProfile {
+    std::string profile_id;
+    std::string source_key;
+    std::string name;
+    std::vector<SdkTwainCapabilitySetItem> capabilities;
+    std::string created_at;
+    std::string updated_at;
+};
+
+struct SdkTwainProfileRequest {
+    std::string session_id;
+    std::string source_id;
+    std::string source_key;
+    std::string profile_id;
+    std::string name;
+    std::vector<SdkTwainCapabilitySetItem> capabilities;
+};
+
+struct SdkTwainProfileListResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    std::vector<SdkTwainProfile> profiles;
+};
+
+struct SdkTwainProfileResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool applied = false;
+    bool saved = false;
+    bool deleted = false;
+    SdkTwainProfile profile;
+};
+
+struct SdkTwainScanRequest {
+    std::string connection_id;
+    std::string session_id;
+    bool show_ui = false;
+    std::string transfer_mechanism = "native";
+    std::vector<SdkTwainCapabilitySetItem> capabilities;
+    std::string output_type = "images";
+    std::string output_format;
+    std::string output_path;
+    std::string output_dir;
+    std::string export_type = "multi-page";
+};
+
+struct SdkTwainScanTask {
+    std::string task_id;
+    std::string connection_id;
+    std::string session_id;
+    std::string status = "queued";
+    std::string phase = "queued";
+    int progress = 0;
+    int page_count = 0;
+    int current_page = 0;
+    std::string output_type = "images";
+    std::string output_format;
+    std::string output_dir;
+    std::string export_type = "multi-page";
+    std::string output_path;
+    std::vector<std::string> output_paths;
+    std::string last_page_path;
+    std::vector<SdkCaptureAsset> assets;
+    std::string message = "queued";
+    std::string error;
+    std::string started_at;
+    std::string updated_at;
+    bool cancel_requested = false;
+    bool ui_required = false;
+    std::string transfer_mechanism = "native";
+};
+
+struct SdkTwainScanResult {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    bool accepted = false;
+    std::string task_id;
+    SdkTwainScanTask task;
+};
+
+struct SdkTwainScanTaskEvent {
+    int code = ToCode(SdkStatusCode::Ok);
+    std::string message = "ok";
+    std::string connection_id;
+    std::string event_name = "twain.scan_changed";
+    SdkTwainScanTask task;
+};
+
+using SdkTwainScanTaskEventCallback = std::function<void(const SdkTwainScanTaskEvent&)>;
+
+struct SdkTwainScanGetRequest {
+    std::string task_id;
+};
+
+struct SdkTwainScanCancelRequest {
+    std::string task_id;
+};
+
 struct SdkImageEnhanceCapability {
     std::string type;
     std::string title;

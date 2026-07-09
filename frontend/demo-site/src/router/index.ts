@@ -9,6 +9,7 @@ import ImageProcessingPage from '../pages/ImageProcessingPage.vue';
 import OcrRecognitionPage from '../pages/OcrRecognitionPage.vue';
 import QuickStartPage from '../pages/QuickStartPage.vue';
 import SaneScanningPage from '../pages/SaneScanningPage.vue';
+import TwainScanningPage from '../pages/TwainScanningPage.vue';
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -105,6 +106,16 @@ export const router = createRouter({
         navKey: 'sane-scanning',
         titleKey: 'pages.saneScanning.title',
         subtitleKey: 'pages.saneScanning.subtitle',
+      },
+    },
+    {
+      path: '/twain-scanning',
+      name: 'twain-scanning',
+      component: TwainScanningPage,
+      meta: {
+        navKey: 'twain-scanning',
+        titleKey: 'pages.twainScanning.title',
+        subtitleKey: 'pages.twainScanning.subtitle',
       },
     },
   ],

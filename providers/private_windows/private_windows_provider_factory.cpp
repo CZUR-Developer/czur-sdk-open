@@ -25,8 +25,12 @@ typedef const char* (*PrivateProviderJsonFn)(const char*);
 typedef void (*PrivateProviderFreeStringFn)(const char*);
 typedef void (*PrivateProviderDeviceActionEventCallback)(const char*, void*);
 typedef void (*PrivateProviderDeviceEventCallback)(const char*, void*);
+typedef void (*PrivateProviderTwainSourceEventCallback)(const char*, void*);
+typedef void (*PrivateProviderTwainScanEventCallback)(const char*, void*);
 typedef void (*PrivateProviderSetDeviceActionEventCallbackFn)(PrivateProviderDeviceActionEventCallback, void*);
 typedef void (*PrivateProviderSetDeviceEventCallbackFn)(PrivateProviderDeviceEventCallback, void*);
+typedef void (*PrivateProviderSetTwainSourceEventCallbackFn)(PrivateProviderTwainSourceEventCallback, void*);
+typedef void (*PrivateProviderSetTwainScanEventCallbackFn)(PrivateProviderTwainScanEventCallback, void*);
 
 struct PrivateProvidersCApi {
     HMODULE module = NULL;
@@ -36,8 +40,25 @@ struct PrivateProvidersCApi {
     PrivateProviderJsonFn ocr_get = NULL;
     PrivateProviderJsonFn ocr_cancel = NULL;
     PrivateProviderJsonFn ocr_extract_text = NULL;
+    PrivateProviderJsonFn twain_status = NULL;
+    PrivateProviderJsonFn twain_list = NULL;
+    PrivateProviderJsonFn twain_watch_start = NULL;
+    PrivateProviderJsonFn twain_watch_stop = NULL;
+    PrivateProviderJsonFn twain_open = NULL;
+    PrivateProviderJsonFn twain_close = NULL;
+    PrivateProviderJsonFn twain_get_capabilities = NULL;
+    PrivateProviderJsonFn twain_set_capabilities = NULL;
+    PrivateProviderJsonFn twain_profile_list = NULL;
+    PrivateProviderJsonFn twain_profile_save = NULL;
+    PrivateProviderJsonFn twain_profile_apply = NULL;
+    PrivateProviderJsonFn twain_profile_delete = NULL;
+    PrivateProviderJsonFn twain_scan = NULL;
+    PrivateProviderJsonFn twain_scan_get = NULL;
+    PrivateProviderJsonFn twain_scan_cancel = NULL;
     PrivateProviderSetDeviceActionEventCallbackFn set_device_action_event_callback = NULL;
     PrivateProviderSetDeviceEventCallbackFn set_device_event_callback = NULL;
+    PrivateProviderSetTwainSourceEventCallbackFn set_twain_source_event_callback = NULL;
+    PrivateProviderSetTwainScanEventCallbackFn set_twain_scan_event_callback = NULL;
     PrivateProviderFreeStringFn free_string = NULL;
 };
 
@@ -64,10 +85,44 @@ PrivateProvidersCApi& GetPrivateProvidersCApi() {
         ::GetProcAddress(api.module, "czur_sdk_private_ocr_cancel_json"));
     api.ocr_extract_text = reinterpret_cast<PrivateProviderJsonFn>(
         ::GetProcAddress(api.module, "czur_sdk_private_ocr_extract_text_json"));
+    api.twain_status = reinterpret_cast<PrivateProviderJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_twain_status_json"));
+    api.twain_list = reinterpret_cast<PrivateProviderJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_twain_list_json"));
+    api.twain_watch_start = reinterpret_cast<PrivateProviderJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_twain_watch_start_json"));
+    api.twain_watch_stop = reinterpret_cast<PrivateProviderJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_twain_watch_stop_json"));
+    api.twain_open = reinterpret_cast<PrivateProviderJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_twain_open_json"));
+    api.twain_close = reinterpret_cast<PrivateProviderJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_twain_close_json"));
+    api.twain_get_capabilities = reinterpret_cast<PrivateProviderJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_twain_get_capabilities_json"));
+    api.twain_set_capabilities = reinterpret_cast<PrivateProviderJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_twain_set_capabilities_json"));
+    api.twain_profile_list = reinterpret_cast<PrivateProviderJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_twain_profile_list_json"));
+    api.twain_profile_save = reinterpret_cast<PrivateProviderJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_twain_profile_save_json"));
+    api.twain_profile_apply = reinterpret_cast<PrivateProviderJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_twain_profile_apply_json"));
+    api.twain_profile_delete = reinterpret_cast<PrivateProviderJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_twain_profile_delete_json"));
+    api.twain_scan = reinterpret_cast<PrivateProviderJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_twain_scan_json"));
+    api.twain_scan_get = reinterpret_cast<PrivateProviderJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_twain_scan_get_json"));
+    api.twain_scan_cancel = reinterpret_cast<PrivateProviderJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_twain_scan_cancel_json"));
     api.set_device_action_event_callback = reinterpret_cast<PrivateProviderSetDeviceActionEventCallbackFn>(
         ::GetProcAddress(api.module, "czur_sdk_private_device_action_event_set_callback"));
     api.set_device_event_callback = reinterpret_cast<PrivateProviderSetDeviceEventCallbackFn>(
         ::GetProcAddress(api.module, "czur_sdk_private_device_event_set_callback"));
+    api.set_twain_source_event_callback = reinterpret_cast<PrivateProviderSetTwainSourceEventCallbackFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_twain_source_event_set_callback"));
+    api.set_twain_scan_event_callback = reinterpret_cast<PrivateProviderSetTwainScanEventCallbackFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_twain_scan_event_set_callback"));
     api.free_string = reinterpret_cast<PrivateProviderFreeStringFn>(
         ::GetProcAddress(api.module, "czur_sdk_private_providers_free_string"));
     return api;
@@ -103,6 +158,22 @@ int64_t Int64Field(const Json& object, const char* key, int64_t fallback = 0) {
     }
     Json::const_iterator it = object.find(key);
     return it != object.end() && it->is_number_integer() ? it->get<int64_t>() : fallback;
+}
+
+uint64_t UInt64Field(const Json& object, const char* key, uint64_t fallback = 0) {
+    if (!object.is_object()) {
+        return fallback;
+    }
+    Json::const_iterator it = object.find(key);
+    return it != object.end() && it->is_number_unsigned() ? it->get<uint64_t>() : fallback;
+}
+
+double DoubleField(const Json& object, const char* key, double fallback = 0.0) {
+    if (!object.is_object()) {
+        return fallback;
+    }
+    Json::const_iterator it = object.find(key);
+    return it != object.end() && it->is_number() ? it->get<double>() : fallback;
 }
 
 std::vector<std::string> StringArrayField(const Json& object, const char* key) {
@@ -279,6 +350,177 @@ SdkOcrTextBlock OcrTextBlockFromJson(const Json& value) {
     block.confidence = confidence_it != value.end() && confidence_it->is_number() ? confidence_it->get<float>() : 0.0f;
     block.font_size = font_size_it != value.end() && font_size_it->is_number() ? font_size_it->get<float>() : 0.0f;
     return block;
+}
+
+Json TwainCapabilitySetItemToJson(const SdkTwainCapabilitySetItem& item) {
+    return Json{{"cap", item.cap}, {"name", item.name}, {"value_json", item.value_json}};
+}
+
+Json TwainCapabilitiesSetItemsToJson(const std::vector<SdkTwainCapabilitySetItem>& items) {
+    Json values = Json::array();
+    for (std::vector<SdkTwainCapabilitySetItem>::const_iterator it = items.begin(); it != items.end(); ++it) {
+        values.push_back(TwainCapabilitySetItemToJson(*it));
+    }
+    return values;
+}
+
+SdkCaptureAsset TwainAssetFromJson(const Json& value) {
+    SdkCaptureAsset asset;
+    asset.asset_id = StringField(value, "asset_id");
+    asset.kind = StringField(value, "kind");
+    asset.path = StringField(value, "path");
+    asset.url = StringField(value, "url");
+    asset.download_url = StringField(value, "download_url");
+    asset.content_type = StringField(value, "content_type");
+    asset.width = IntField(value, "width");
+    asset.height = IntField(value, "height");
+    asset.size = UInt64Field(value, "size");
+    return asset;
+}
+
+SdkTwainSource TwainSourceFromJson(const Json& value) {
+    SdkTwainSource source;
+    source.source_id = StringField(value, "source_id");
+    source.source_name = StringField(value, "source_name");
+    source.manufacturer = StringField(value, "manufacturer");
+    source.product_family = StringField(value, "product_family");
+    source.product_name = StringField(value, "product_name");
+    source.protocol_major = IntField(value, "protocol_major");
+    source.protocol_minor = IntField(value, "protocol_minor");
+    source.status = StringField(value, "status", source.status);
+    source.openable = BoolField(value, "openable", source.openable);
+    return source;
+}
+
+std::vector<SdkTwainSource> TwainSourcesFromJson(const Json& value) {
+    std::vector<SdkTwainSource> sources;
+    if (!value.is_array()) {
+        return sources;
+    }
+    for (Json::const_iterator it = value.begin(); it != value.end(); ++it) {
+        if (it->is_object()) {
+            sources.push_back(TwainSourceFromJson(*it));
+        }
+    }
+    return sources;
+}
+
+SdkTwainCapabilityConstraint TwainCapabilityConstraintFromJson(const Json& value) {
+    SdkTwainCapabilityConstraint constraint;
+    constraint.type = StringField(value, "type", constraint.type);
+    constraint.min = DoubleField(value, "min");
+    constraint.max = DoubleField(value, "max");
+    constraint.quant = DoubleField(value, "quant");
+    constraint.values_json = StringArrayField(value, "values_json");
+    return constraint;
+}
+
+SdkTwainCapability TwainCapabilityFromJson(const Json& value) {
+    SdkTwainCapability capability;
+    capability.cap = StringField(value, "cap");
+    capability.cap_id = IntField(value, "cap_id");
+    capability.name = StringField(value, "name");
+    capability.title = StringField(value, "title");
+    capability.type = StringField(value, "type");
+    capability.value_json = StringField(value, "value_json");
+    capability.constraint = TwainCapabilityConstraintFromJson(value.value("constraint", Json::object()));
+    capability.readonly = BoolField(value, "readonly");
+    capability.settable = BoolField(value, "settable", capability.settable);
+    capability.advanced = BoolField(value, "advanced");
+    return capability;
+}
+
+SdkTwainCapabilitySetItem TwainCapabilitySetItemFromJson(const Json& value) {
+    SdkTwainCapabilitySetItem item;
+    item.cap = StringField(value, "cap");
+    item.name = StringField(value, "name");
+    item.value_json = StringField(value, "value_json");
+    return item;
+}
+
+SdkTwainCapabilitySetResultItem TwainCapabilitySetResultItemFromJson(const Json& value) {
+    SdkTwainCapabilitySetResultItem item;
+    item.cap = StringField(value, "cap");
+    item.name = StringField(value, "name");
+    item.status = StringField(value, "status");
+    item.message = StringField(value, "message");
+    item.value_json = StringField(value, "value_json");
+    return item;
+}
+
+SdkTwainProfile TwainProfileFromJson(const Json& value) {
+    SdkTwainProfile profile;
+    profile.profile_id = StringField(value, "profile_id");
+    profile.source_key = StringField(value, "source_key");
+    profile.name = StringField(value, "name");
+    profile.created_at = StringField(value, "created_at");
+    profile.updated_at = StringField(value, "updated_at");
+    Json::const_iterator capabilities_it = value.find("capabilities");
+    if (capabilities_it != value.end() && capabilities_it->is_array()) {
+        for (Json::const_iterator it = capabilities_it->begin(); it != capabilities_it->end(); ++it) {
+            if (it->is_object()) {
+                profile.capabilities.push_back(TwainCapabilitySetItemFromJson(*it));
+            }
+        }
+    }
+    return profile;
+}
+
+SdkTwainScanTask TwainScanTaskFromJson(const Json& value) {
+    SdkTwainScanTask task;
+    task.task_id = StringField(value, "task_id");
+    task.connection_id = StringField(value, "connection_id");
+    task.session_id = StringField(value, "session_id");
+    task.status = StringField(value, "status", task.status);
+    task.phase = StringField(value, "phase", task.phase);
+    task.progress = IntField(value, "progress");
+    task.page_count = IntField(value, "page_count");
+    task.current_page = IntField(value, "current_page");
+    task.output_type = StringField(value, "output_type", task.output_type);
+    task.output_format = StringField(value, "output_format");
+    task.output_dir = StringField(value, "output_dir");
+    task.export_type = StringField(value, "export_type", task.export_type);
+    task.output_path = StringField(value, "output_path");
+    task.output_paths = StringArrayField(value, "output_paths");
+    task.last_page_path = StringField(value, "last_page_path");
+    task.message = StringField(value, "message", task.message);
+    task.error = StringField(value, "error");
+    task.started_at = StringField(value, "started_at");
+    task.updated_at = StringField(value, "updated_at");
+    task.cancel_requested = BoolField(value, "cancel_requested");
+    task.ui_required = BoolField(value, "ui_required");
+    task.transfer_mechanism = StringField(value, "transfer_mechanism", task.transfer_mechanism);
+    Json::const_iterator assets_it = value.find("assets");
+    if (assets_it != value.end() && assets_it->is_array()) {
+        for (Json::const_iterator it = assets_it->begin(); it != assets_it->end(); ++it) {
+            if (it->is_object()) {
+                task.assets.push_back(TwainAssetFromJson(*it));
+            }
+        }
+    }
+    return task;
+}
+
+Json TwainProfileRequestToJson(const SdkTwainProfileRequest& request) {
+    return Json{{"session_id", request.session_id},
+                {"source_id", request.source_id},
+                {"source_key", request.source_key},
+                {"profile_id", request.profile_id},
+                {"name", request.name},
+                {"capabilities", TwainCapabilitiesSetItemsToJson(request.capabilities)}};
+}
+
+Json TwainScanRequestToJson(const SdkTwainScanRequest& request) {
+    return Json{{"connection_id", request.connection_id},
+                {"session_id", request.session_id},
+                {"show_ui", request.show_ui},
+                {"transfer_mechanism", request.transfer_mechanism},
+                {"capabilities", TwainCapabilitiesSetItemsToJson(request.capabilities)},
+                {"output_type", request.output_type},
+                {"output_format", request.output_format},
+                {"output_path", request.output_path},
+                {"output_dir", request.output_dir},
+                {"export_type", request.export_type}};
 }
 
 Json ImageEnhanceStepToJson(const SdkImageEnhanceStep& step) {
@@ -681,6 +923,366 @@ private:
     SdkDeviceEventCallback device_event_sink_;
 };
 
+// SDK Open 的 Windows TWAIN provider 只跨过 private DLL 边界：
+// 这里不 include/link module/twain，避免把真实 TWAIN 状态机带回开源层。
+class WindowsPrivateTwainProvider : public ISdkTwainProvider {
+public:
+    ~WindowsPrivateTwainProvider() override {
+        RegisterSourceEventCallback(false);
+        RegisterScanEventCallback(false);
+    }
+
+    std::string ProviderName() const override { return "czur-private-windows-twain-provider"; }
+
+    void SetSourceEventSink(SdkTwainSourceEventCallback sink) override {
+        {
+            std::lock_guard<std::mutex> lock(source_event_sink_mu_);
+            source_event_sink_ = sink;
+        }
+        RegisterSourceEventCallback(static_cast<bool>(sink));
+    }
+
+    void SetScanTaskEventSink(SdkTwainScanTaskEventCallback sink) override {
+        {
+            std::lock_guard<std::mutex> lock(scan_event_sink_mu_);
+            scan_event_sink_ = sink;
+        }
+        RegisterScanEventCallback(static_cast<bool>(sink));
+    }
+
+    SdkTwainStatusResult GetStatus() override {
+        SdkTwainStatusResult result;
+        Json response;
+        std::string error;
+        if (!InvokePrivateProviderCApi(GetPrivateProvidersCApi().twain_status, Json::object(), &response, &error)) {
+            result.code = ToCode(SdkStatusCode::ProviderNotReady);
+            result.message = error;
+            return result;
+        }
+        result.code = IntField(response, "code");
+        result.message = StringField(response, "message");
+        result.available = BoolField(response, "available");
+        result.platform = StringField(response, "platform");
+        result.supported_platforms = StringArrayField(response, "supported_platforms");
+        result.dsm_loaded = BoolField(response, "dsm_loaded");
+        result.dsm_path = StringField(response, "dsm_path");
+        result.twain_version = StringField(response, "twain_version");
+        result.reason = StringField(response, "reason");
+        return result;
+    }
+
+    SdkTwainListResult ListSources(const SdkTwainListRequest& request) override {
+        SdkTwainListResult result;
+        Json response;
+        std::string error;
+        if (!InvokePrivateProviderCApi(GetPrivateProvidersCApi().twain_list,
+                                       Json{{"refresh", request.refresh}},
+                                       &response,
+                                       &error)) {
+            result.code = ToCode(SdkStatusCode::ProviderNotReady);
+            result.message = error;
+            return result;
+        }
+        result.code = IntField(response, "code");
+        result.message = StringField(response, "message");
+        result.generation = IntField(response, "generation");
+        result.sources = TwainSourcesFromJson(response.value("sources", Json::array()));
+        return result;
+    }
+
+    SdkTwainWatchResult WatchStart(const SdkTwainWatchRequest& request) override {
+        return Watch(GetPrivateProvidersCApi().twain_watch_start, request);
+    }
+
+    SdkTwainWatchResult WatchStop(const SdkTwainWatchRequest& request) override {
+        return Watch(GetPrivateProvidersCApi().twain_watch_stop, request);
+    }
+
+    SdkTwainOpenResult OpenSource(const SdkTwainOpenRequest& request) override {
+        SdkTwainOpenResult result;
+        Json response;
+        std::string error;
+        if (!InvokePrivateProviderCApi(GetPrivateProvidersCApi().twain_open,
+                                       Json{{"source_id", request.source_id}},
+                                       &response,
+                                       &error)) {
+            result.code = ToCode(SdkStatusCode::ProviderNotReady);
+            result.message = error;
+            return result;
+        }
+        result.code = IntField(response, "code");
+        result.message = StringField(response, "message");
+        result.opened = BoolField(response, "opened");
+        result.session_id = StringField(response, "session_id");
+        result.source = TwainSourceFromJson(response.value("source", Json::object()));
+        return result;
+    }
+
+    SdkTwainCloseResult CloseSource(const SdkTwainCloseRequest& request) override {
+        SdkTwainCloseResult result;
+        Json response;
+        std::string error;
+        if (!InvokePrivateProviderCApi(GetPrivateProvidersCApi().twain_close,
+                                       Json{{"session_id", request.session_id}},
+                                       &response,
+                                       &error)) {
+            result.code = ToCode(SdkStatusCode::ProviderNotReady);
+            result.message = error;
+            return result;
+        }
+        result.code = IntField(response, "code");
+        result.message = StringField(response, "message");
+        result.closed = BoolField(response, "closed");
+        result.was_opened = BoolField(response, "was_opened");
+        return result;
+    }
+
+    SdkTwainGetCapabilitiesResult GetCapabilities(const SdkTwainGetCapabilitiesRequest& request) override {
+        SdkTwainGetCapabilitiesResult result;
+        Json response;
+        std::string error;
+        if (!InvokePrivateProviderCApi(GetPrivateProvidersCApi().twain_get_capabilities,
+                                       Json{{"session_id", request.session_id}},
+                                       &response,
+                                       &error)) {
+            result.code = ToCode(SdkStatusCode::ProviderNotReady);
+            result.message = error;
+            return result;
+        }
+        result.code = IntField(response, "code");
+        result.message = StringField(response, "message");
+        Json::const_iterator capabilities_it = response.find("capabilities");
+        if (capabilities_it != response.end() && capabilities_it->is_array()) {
+            for (Json::const_iterator it = capabilities_it->begin(); it != capabilities_it->end(); ++it) {
+                if (it->is_object()) {
+                    result.capabilities.push_back(TwainCapabilityFromJson(*it));
+                }
+            }
+        }
+        return result;
+    }
+
+    SdkTwainSetCapabilitiesResult SetCapabilities(const SdkTwainSetCapabilitiesRequest& request) override {
+        SdkTwainSetCapabilitiesResult result;
+        Json response;
+        std::string error;
+        Json body{{"session_id", request.session_id},
+                  {"capabilities", TwainCapabilitiesSetItemsToJson(request.capabilities)}};
+        if (!InvokePrivateProviderCApi(GetPrivateProvidersCApi().twain_set_capabilities, body, &response, &error)) {
+            result.code = ToCode(SdkStatusCode::ProviderNotReady);
+            result.message = error;
+            return result;
+        }
+        result.code = IntField(response, "code");
+        result.message = StringField(response, "message");
+        result.applied = BoolField(response, "applied");
+        result.requires_reload = BoolField(response, "requires_reload");
+        Json::const_iterator results_it = response.find("results");
+        if (results_it != response.end() && results_it->is_array()) {
+            for (Json::const_iterator it = results_it->begin(); it != results_it->end(); ++it) {
+                if (it->is_object()) {
+                    result.results.push_back(TwainCapabilitySetResultItemFromJson(*it));
+                }
+            }
+        }
+        return result;
+    }
+
+    SdkTwainProfileListResult ListProfiles(const SdkTwainProfileRequest& request) override {
+        SdkTwainProfileListResult result;
+        Json response;
+        std::string error;
+        if (!InvokePrivateProviderCApi(GetPrivateProvidersCApi().twain_profile_list,
+                                       TwainProfileRequestToJson(request),
+                                       &response,
+                                       &error)) {
+            result.code = ToCode(SdkStatusCode::ProviderNotReady);
+            result.message = error;
+            return result;
+        }
+        result.code = IntField(response, "code");
+        result.message = StringField(response, "message");
+        Json::const_iterator profiles_it = response.find("profiles");
+        if (profiles_it != response.end() && profiles_it->is_array()) {
+            for (Json::const_iterator it = profiles_it->begin(); it != profiles_it->end(); ++it) {
+                if (it->is_object()) {
+                    result.profiles.push_back(TwainProfileFromJson(*it));
+                }
+            }
+        }
+        return result;
+    }
+
+    SdkTwainProfileResult SaveProfile(const SdkTwainProfileRequest& request) override {
+        return ProfileMutation(GetPrivateProvidersCApi().twain_profile_save, request);
+    }
+
+    SdkTwainProfileResult ApplyProfile(const SdkTwainProfileRequest& request) override {
+        return ProfileMutation(GetPrivateProvidersCApi().twain_profile_apply, request);
+    }
+
+    SdkTwainProfileResult DeleteProfile(const SdkTwainProfileRequest& request) override {
+        return ProfileMutation(GetPrivateProvidersCApi().twain_profile_delete, request);
+    }
+
+    SdkTwainScanResult Scan(const SdkTwainScanRequest& request) override {
+        return ScanMutation(GetPrivateProvidersCApi().twain_scan, TwainScanRequestToJson(request));
+    }
+
+    SdkTwainScanResult GetScan(const SdkTwainScanGetRequest& request) override {
+        return ScanMutation(GetPrivateProvidersCApi().twain_scan_get, Json{{"task_id", request.task_id}});
+    }
+
+    SdkTwainScanResult CancelScan(const SdkTwainScanCancelRequest& request) override {
+        return ScanMutation(GetPrivateProvidersCApi().twain_scan_cancel, Json{{"task_id", request.task_id}});
+    }
+
+private:
+    SdkTwainWatchResult Watch(PrivateProviderJsonFn fn, const SdkTwainWatchRequest& request) {
+        SdkTwainWatchResult result;
+        Json response;
+        std::string error;
+        Json body{{"connection_id", request.connection_id}, {"enabled", request.enabled}};
+        if (!InvokePrivateProviderCApi(fn, body, &response, &error)) {
+            result.code = ToCode(SdkStatusCode::ProviderNotReady);
+            result.message = error;
+            return result;
+        }
+        result.code = IntField(response, "code");
+        result.message = StringField(response, "message");
+        result.watching = BoolField(response, "watching");
+        result.generation = IntField(response, "generation");
+        return result;
+    }
+
+    SdkTwainProfileResult ProfileMutation(PrivateProviderJsonFn fn, const SdkTwainProfileRequest& request) {
+        SdkTwainProfileResult result;
+        Json response;
+        std::string error;
+        if (!InvokePrivateProviderCApi(fn, TwainProfileRequestToJson(request), &response, &error)) {
+            result.code = ToCode(SdkStatusCode::ProviderNotReady);
+            result.message = error;
+            return result;
+        }
+        result.code = IntField(response, "code");
+        result.message = StringField(response, "message");
+        result.applied = BoolField(response, "applied");
+        result.saved = BoolField(response, "saved");
+        result.deleted = BoolField(response, "deleted");
+        result.profile = TwainProfileFromJson(response.value("profile", Json::object()));
+        return result;
+    }
+
+    SdkTwainScanResult ScanMutation(PrivateProviderJsonFn fn, const Json& body) {
+        SdkTwainScanResult result;
+        Json response;
+        std::string error;
+        if (!InvokePrivateProviderCApi(fn, body, &response, &error)) {
+            result.code = ToCode(SdkStatusCode::ProviderNotReady);
+            result.message = error;
+            return result;
+        }
+        result.code = IntField(response, "code");
+        result.message = StringField(response, "message");
+        result.accepted = BoolField(response, "accepted");
+        result.task_id = StringField(response, "task_id");
+        result.task = TwainScanTaskFromJson(response.value("task", Json::object()));
+        return result;
+    }
+
+    static void SourceEventThunk(const char* event_json, void* user_data) {
+        WindowsPrivateTwainProvider* provider = reinterpret_cast<WindowsPrivateTwainProvider*>(user_data);
+        if (provider == NULL || event_json == NULL) {
+            return;
+        }
+        Json event_value;
+        std::string parse_error;
+        if (!TryParseJson(std::string(event_json), &event_value, &parse_error) || !event_value.is_object()) {
+            return;
+        }
+        SdkTwainSourceEvent event;
+        event.code = IntField(event_value, "code");
+        event.message = StringField(event_value, "message");
+        event.connection_id = StringField(event_value, "connection_id");
+        event.event_name = StringField(event_value, "event_name", event.event_name);
+        event.generation = IntField(event_value, "generation");
+        event.sources = TwainSourcesFromJson(event_value.value("sources", Json::array()));
+        event.added_sources = TwainSourcesFromJson(event_value.value("added_sources", Json::array()));
+        event.removed_sources = TwainSourcesFromJson(event_value.value("removed_sources", Json::array()));
+        provider->PublishSourceEvent(event);
+    }
+
+    static void ScanEventThunk(const char* event_json, void* user_data) {
+        WindowsPrivateTwainProvider* provider = reinterpret_cast<WindowsPrivateTwainProvider*>(user_data);
+        if (provider == NULL || event_json == NULL) {
+            return;
+        }
+        Json event_value;
+        std::string parse_error;
+        if (!TryParseJson(std::string(event_json), &event_value, &parse_error) || !event_value.is_object()) {
+            return;
+        }
+        SdkTwainScanTaskEvent event;
+        event.code = IntField(event_value, "code");
+        event.message = StringField(event_value, "message");
+        event.connection_id = StringField(event_value, "connection_id");
+        event.event_name = StringField(event_value, "event_name", event.event_name);
+        event.task = TwainScanTaskFromJson(event_value.value("task", Json::object()));
+        provider->PublishScanEvent(event);
+    }
+
+    void RegisterSourceEventCallback(bool enabled) {
+        PrivateProvidersCApi& api = GetPrivateProvidersCApi();
+        if (api.set_twain_source_event_callback == NULL) {
+            return;
+        }
+        if (enabled) {
+            api.set_twain_source_event_callback(SourceEventThunk, this);
+        } else {
+            api.set_twain_source_event_callback(NULL, NULL);
+        }
+    }
+
+    void RegisterScanEventCallback(bool enabled) {
+        PrivateProvidersCApi& api = GetPrivateProvidersCApi();
+        if (api.set_twain_scan_event_callback == NULL) {
+            return;
+        }
+        if (enabled) {
+            api.set_twain_scan_event_callback(ScanEventThunk, this);
+        } else {
+            api.set_twain_scan_event_callback(NULL, NULL);
+        }
+    }
+
+    void PublishSourceEvent(const SdkTwainSourceEvent& event) {
+        SdkTwainSourceEventCallback sink;
+        {
+            std::lock_guard<std::mutex> lock(source_event_sink_mu_);
+            sink = source_event_sink_;
+        }
+        if (sink) {
+            sink(event);
+        }
+    }
+
+    void PublishScanEvent(const SdkTwainScanTaskEvent& event) {
+        SdkTwainScanTaskEventCallback sink;
+        {
+            std::lock_guard<std::mutex> lock(scan_event_sink_mu_);
+            sink = scan_event_sink_;
+        }
+        if (sink) {
+            sink(event);
+        }
+    }
+
+    std::mutex source_event_sink_mu_;
+    std::mutex scan_event_sink_mu_;
+    SdkTwainSourceEventCallback source_event_sink_;
+    SdkTwainScanTaskEventCallback scan_event_sink_;
+};
+
 #endif
 
 } // namespace
@@ -691,6 +1293,7 @@ ProviderBundle CreateProviderBundle() {
     bundle.device_provider = std::make_shared<WindowsPrivateDeviceProvider>();
     bundle.image_enhance_provider = std::make_shared<WindowsPrivateImageEnhanceProvider>();
     bundle.ocr_provider = std::make_shared<WindowsPrivateOcrProvider>();
+    bundle.twain_provider = std::make_shared<WindowsPrivateTwainProvider>();
 #endif
     return bundle;
 }

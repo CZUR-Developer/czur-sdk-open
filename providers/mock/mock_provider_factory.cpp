@@ -4,7 +4,9 @@
 #include "mock_provider_factory.h"
 
 #include <atomic>
+#include <cctype>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <map>
@@ -14,6 +16,7 @@
 #include <sstream>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "sdk_logger.h"
 #include "sdk_runtime_paths.h"
@@ -48,6 +51,160 @@ std::string BaseNameWithoutExtension(const std::string& path) {
 
 std::string ExtensionForOcrFormat(const std::string& format) {
     return format.empty() ? "docx" : format;
+}
+
+std::string NormalizeMockImageFormat(std::string format) {
+    for (std::string::iterator it = format.begin(); it != format.end(); ++it) {
+        *it = static_cast<char>(std::tolower(static_cast<unsigned char>(*it)));
+    }
+    if (format == "jpeg" || format == "jfif") {
+        return "jpg";
+    }
+    if (format == "tif") {
+        return "tiff";
+    }
+    if (format == "bmp" || format == "jpg" || format == "png" || format == "tiff") {
+        return format;
+    }
+    return "jpg";
+}
+
+void PushLe16(std::vector<uint8_t>* bytes, uint16_t value) {
+    bytes->push_back(static_cast<uint8_t>(value & 0xff));
+    bytes->push_back(static_cast<uint8_t>((value >> 8) & 0xff));
+}
+
+void PushLe32(std::vector<uint8_t>* bytes, uint32_t value) {
+    bytes->push_back(static_cast<uint8_t>(value & 0xff));
+    bytes->push_back(static_cast<uint8_t>((value >> 8) & 0xff));
+    bytes->push_back(static_cast<uint8_t>((value >> 16) & 0xff));
+    bytes->push_back(static_cast<uint8_t>((value >> 24) & 0xff));
+}
+
+struct MockRgb {
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+};
+
+void PaintRect(std::vector<MockRgb>* pixels,
+               int width,
+               int height,
+               int x,
+               int y,
+               int rect_width,
+               int rect_height,
+               const MockRgb& color) {
+    for (int row = y; row < y + rect_height; ++row) {
+        if (row < 0 || row >= height) {
+            continue;
+        }
+        for (int col = x; col < x + rect_width; ++col) {
+            if (col < 0 || col >= width) {
+                continue;
+            }
+            (*pixels)[static_cast<std::size_t>(row * width + col)] = color;
+        }
+    }
+}
+
+void PaintSevenSegmentDigit(std::vector<MockRgb>* pixels,
+                            int width,
+                            int height,
+                            int x,
+                            int y,
+                            int scale,
+                            int digit,
+                            const MockRgb& color) {
+    static const bool kSegments[10][7] = {
+        {true, true, true, true, true, true, false},
+        {false, true, true, false, false, false, false},
+        {true, true, false, true, true, false, true},
+        {true, true, true, true, false, false, true},
+        {false, true, true, false, false, true, true},
+        {true, false, true, true, false, true, true},
+        {true, false, true, true, true, true, true},
+        {true, true, true, false, false, false, false},
+        {true, true, true, true, true, true, true},
+        {true, true, true, true, false, true, true},
+    };
+    const int thickness = scale;
+    const int digit_width = scale * 7;
+    const int digit_height = scale * 12;
+    const bool* seg = kSegments[digit % 10];
+    if (seg[0]) PaintRect(pixels, width, height, x + thickness, y, digit_width - 2 * thickness, thickness, color);
+    if (seg[1]) PaintRect(pixels, width, height, x + digit_width - thickness, y + thickness, thickness, digit_height / 2 - thickness, color);
+    if (seg[2]) PaintRect(pixels, width, height, x + digit_width - thickness, y + digit_height / 2, thickness, digit_height / 2 - thickness, color);
+    if (seg[3]) PaintRect(pixels, width, height, x + thickness, y + digit_height - thickness, digit_width - 2 * thickness, thickness, color);
+    if (seg[4]) PaintRect(pixels, width, height, x, y + digit_height / 2, thickness, digit_height / 2 - thickness, color);
+    if (seg[5]) PaintRect(pixels, width, height, x, y + thickness, thickness, digit_height / 2 - thickness, color);
+    if (seg[6]) PaintRect(pixels, width, height, x + thickness, y + digit_height / 2 - thickness / 2, digit_width - 2 * thickness, thickness, color);
+}
+
+std::vector<uint8_t> MockTwainBmp(int page_number) {
+    const int width = 320;
+    const int height = 200;
+    const int row_stride = ((width * 3 + 3) / 4) * 4;
+    const uint32_t pixel_bytes = static_cast<uint32_t>(row_stride * height);
+    const uint32_t file_bytes = 54 + pixel_bytes;
+    std::vector<MockRgb> pixels(static_cast<std::size_t>(width * height));
+    const MockRgb page_color = page_number % 2 == 0 ? MockRgb{36, 129, 196} : MockRgb{245, 127, 39};
+    const MockRgb page_color_dark = page_number % 2 == 0 ? MockRgb{20, 78, 122} : MockRgb{160, 70, 20};
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            MockRgb color;
+            color.r = static_cast<uint8_t>(240 - y / 4);
+            color.g = static_cast<uint8_t>(245 - y / 5);
+            color.b = static_cast<uint8_t>(250);
+            if (((x / 24) + (y / 24)) % 2 == 0) {
+                color.g = static_cast<uint8_t>(color.g - 18);
+            }
+            pixels[static_cast<std::size_t>(y * width + x)] = color;
+        }
+    }
+    PaintRect(&pixels, width, height, 0, 0, width, 18, page_color);
+    PaintRect(&pixels, width, height, 0, height - 18, width, 18, page_color_dark);
+    PaintRect(&pixels, width, height, 26, 42, 268, 116, MockRgb{255, 255, 255});
+    PaintRect(&pixels, width, height, 34, 50, 252, 100, MockRgb{232, 238, 246});
+    PaintRect(&pixels, width, height, 48, 66, 66, 66, page_color);
+    PaintRect(&pixels, width, height, 128, 68, 142, 12, MockRgb{80, 88, 98});
+    PaintRect(&pixels, width, height, 128, 93, 120, 10, MockRgb{116, 124, 136});
+    PaintRect(&pixels, width, height, 128, 116, 96, 10, MockRgb{148, 156, 168});
+    // mock 图像需要肉眼可识别，页码用七段数码块绘制，避免依赖字体或图片库。
+    PaintSevenSegmentDigit(&pixels, width, height, 66, 76, 5, page_number, MockRgb{255, 255, 255});
+
+    std::vector<uint8_t> bytes;
+    bytes.reserve(file_bytes);
+    bytes.push_back('B');
+    bytes.push_back('M');
+    PushLe32(&bytes, file_bytes);
+    PushLe16(&bytes, 0);
+    PushLe16(&bytes, 0);
+    PushLe32(&bytes, 54);
+    PushLe32(&bytes, 40);
+    PushLe32(&bytes, static_cast<uint32_t>(width));
+    PushLe32(&bytes, static_cast<uint32_t>(height));
+    PushLe16(&bytes, 1);
+    PushLe16(&bytes, 24);
+    PushLe32(&bytes, 0);
+    PushLe32(&bytes, pixel_bytes);
+    PushLe32(&bytes, 2835);
+    PushLe32(&bytes, 2835);
+    PushLe32(&bytes, 0);
+    PushLe32(&bytes, 0);
+    for (int y = height - 1; y >= 0; --y) {
+        const std::size_t row_start = bytes.size();
+        for (int x = 0; x < width; ++x) {
+            const MockRgb& color = pixels[static_cast<std::size_t>(y * width + x)];
+            bytes.push_back(color.b);
+            bytes.push_back(color.g);
+            bytes.push_back(color.r);
+        }
+        while (bytes.size() - row_start < static_cast<std::size_t>(row_stride)) {
+            bytes.push_back(0);
+        }
+    }
+    return bytes;
 }
 
 void CopyFile(const std::string& input_path, const std::string& output_path) {
@@ -150,6 +307,21 @@ public:
             "sane.scan",
             "sane.scan_get",
             "sane.scan_cancel",
+            "twain.status",
+            "twain.list",
+            "twain.watch_start",
+            "twain.watch_stop",
+            "twain.open",
+            "twain.close",
+            "twain.get_capabilities",
+            "twain.set_capabilities",
+            "twain.profile_list",
+            "twain.profile_save",
+            "twain.profile_apply",
+            "twain.profile_delete",
+            "twain.scan",
+            "twain.scan_get",
+            "twain.scan_cancel",
         };
         SDK_OPEN_LOG_INFO("[mock_auth_provider] ValidateToken success, account_type={}, auth_scene={}, device_scope_count={}",
                           ToAccountTypeString(result.auth_context.account_type),
@@ -1915,6 +2087,431 @@ private:
     int next_task_id_ = 1;
 };
 
+class MockTwainProvider : public ISdkTwainProvider {
+public:
+    std::string ProviderName() const override { return "mock-twain-provider"; }
+
+    void SetSourceEventSink(SdkTwainSourceEventCallback sink) override {
+        source_event_sink_ = std::move(sink);
+    }
+
+    void SetScanTaskEventSink(SdkTwainScanTaskEventCallback sink) override {
+        scan_task_event_sink_ = std::move(sink);
+    }
+
+    SdkTwainStatusResult GetStatus() override {
+        SdkTwainStatusResult result;
+        result.available = true;
+        result.platform = "mock";
+        result.supported_platforms.push_back("windows");
+        result.dsm_loaded = true;
+        result.twain_version = "2.4 mock";
+        result.reason = "mock provider; real TWAIN is Windows-only";
+        return result;
+    }
+
+    SdkTwainListResult ListSources(const SdkTwainListRequest&) override {
+        SdkTwainListResult result;
+        result.generation = generation_;
+        result.sources.push_back(DefaultSource());
+        return result;
+    }
+
+    SdkTwainWatchResult WatchStart(const SdkTwainWatchRequest& request) override {
+        SdkTwainWatchResult result;
+        result.watching = true;
+        result.generation = generation_;
+        if (source_event_sink_ && !request.connection_id.empty()) {
+            SdkTwainSourceEvent event;
+            event.connection_id = request.connection_id;
+            event.event_name = "twain.source_snapshot";
+            event.generation = generation_;
+            event.sources.push_back(DefaultSource());
+            event.added_sources.push_back(DefaultSource());
+            source_event_sink_(event);
+        }
+        return result;
+    }
+
+    SdkTwainWatchResult WatchStop(const SdkTwainWatchRequest&) override {
+        SdkTwainWatchResult result;
+        result.watching = false;
+        result.generation = generation_;
+        return result;
+    }
+
+    SdkTwainOpenResult OpenSource(const SdkTwainOpenRequest& request) override {
+        SdkTwainOpenResult result;
+        const SdkTwainSource source = DefaultSource();
+        if (!request.source_id.empty() && request.source_id != source.source_id) {
+            result.code = ToCode(SdkStatusCode::TwainSourceNotFound);
+            result.message = "TWAIN source not found";
+            return result;
+        }
+        result.opened = true;
+        result.session_id = "twain-session-mock";
+        result.source = source;
+        return result;
+    }
+
+    SdkTwainCloseResult CloseSource(const SdkTwainCloseRequest&) override {
+        SdkTwainCloseResult result;
+        result.closed = true;
+        result.was_opened = true;
+        return result;
+    }
+
+    SdkTwainGetCapabilitiesResult GetCapabilities(const SdkTwainGetCapabilitiesRequest&) override {
+        std::lock_guard<std::mutex> lock(mu_);
+        SdkTwainGetCapabilitiesResult result;
+        result.capabilities.push_back(MakeNumberCapability("ICAP_XRESOLUTION", 4376, "resolution_x", "X Resolution", TwainCapabilityValue("ICAP_XRESOLUTION", "300"), 75, 600, 75));
+        result.capabilities.push_back(MakeNumberCapability("ICAP_YRESOLUTION", 4377, "resolution_y", "Y Resolution", TwainCapabilityValue("ICAP_YRESOLUTION", "300"), 75, 600, 75));
+        result.capabilities.push_back(MakeEnumCapability("ICAP_PIXELTYPE", 257, "pixel_type", "Pixel Type", TwainCapabilityValue("ICAP_PIXELTYPE", "\"rgb\""), {"\"bw\"", "\"gray\"", "\"rgb\""}));
+        result.capabilities.push_back(MakeEnumCapability("ICAP_BITDEPTH", 258, "bit_depth", "Bit Depth", TwainCapabilityValue("ICAP_BITDEPTH", "24"), {"1", "8", "24"}));
+        result.capabilities.push_back(MakeNumberCapability("CAP_XFERCOUNT", 1, "xfer_count", "Transfer Count", TwainCapabilityValue("CAP_XFERCOUNT", "-1"), -1, 100, 1));
+        result.capabilities.push_back(MakeEnumCapability("CAP_FEEDERENABLED", 4098, "feeder_enabled", "Feeder Enabled", TwainCapabilityValue("CAP_FEEDERENABLED", "false"), {"false", "true"}));
+        result.capabilities.push_back(MakeEnumCapability("ICAP_IMAGEFILEFORMAT", 4364, "image_file_format", "Image File Format", TwainCapabilityValue("ICAP_IMAGEFILEFORMAT", "\"bmp\""), {"\"bmp\"", "\"jpg\"", "\"png\"", "\"tiff\""}));
+        result.capabilities.push_back(MakeEnumCapability("ICAP_XFERMECH", 259, "xfer_mech", "Transfer Mechanism", TwainCapabilityValue("ICAP_XFERMECH", "\"native\""), {"\"native\"", "\"file\"", "\"memory\""}));
+        return result;
+    }
+
+    SdkTwainSetCapabilitiesResult SetCapabilities(const SdkTwainSetCapabilitiesRequest& request) override {
+        std::lock_guard<std::mutex> lock(mu_);
+        SdkTwainSetCapabilitiesResult result;
+        result.applied = true;
+        result.requires_reload = true;
+        for (std::vector<SdkTwainCapabilitySetItem>::const_iterator it = request.capabilities.begin();
+             it != request.capabilities.end();
+             ++it) {
+            const std::string key = !it->cap.empty() ? it->cap : it->name;
+            if (!key.empty()) {
+                twain_capability_values_[key] = it->value_json;
+            }
+            SdkTwainCapabilitySetResultItem item;
+            item.cap = it->cap;
+            item.name = it->name;
+            item.status = "applied";
+            item.message = "ok";
+            item.value_json = it->value_json;
+            result.results.push_back(item);
+        }
+        return result;
+    }
+
+    SdkTwainProfileListResult ListProfiles(const SdkTwainProfileRequest&) override {
+        std::lock_guard<std::mutex> lock(mu_);
+        SdkTwainProfileListResult result;
+        for (std::map<std::string, SdkTwainProfile>::const_iterator it = profiles_.begin();
+             it != profiles_.end();
+             ++it) {
+            result.profiles.push_back(it->second);
+        }
+        return result;
+    }
+
+    SdkTwainProfileResult SaveProfile(const SdkTwainProfileRequest& request) override {
+        std::lock_guard<std::mutex> lock(mu_);
+        SdkTwainProfileResult result;
+        result.saved = true;
+        SdkTwainProfile profile;
+        profile.profile_id = request.profile_id.empty() ? "twain-profile-" + std::to_string(next_profile_id_++) : request.profile_id;
+        profile.source_key = request.source_key.empty() ? DefaultSource().source_id : request.source_key;
+        profile.name = request.name;
+        profile.capabilities = request.capabilities;
+        profile.created_at = "mock";
+        profile.updated_at = "mock";
+        profiles_[profile.profile_id] = profile;
+        result.profile = profile;
+        return result;
+    }
+
+    SdkTwainProfileResult ApplyProfile(const SdkTwainProfileRequest& request) override {
+        std::lock_guard<std::mutex> lock(mu_);
+        SdkTwainProfileResult result;
+        std::map<std::string, SdkTwainProfile>::const_iterator it = profiles_.find(request.profile_id);
+        if (it == profiles_.end()) {
+            result.code = ToCode(SdkStatusCode::TwainProfileNotFound);
+            result.message = "TWAIN profile not found";
+            return result;
+        }
+        for (std::vector<SdkTwainCapabilitySetItem>::const_iterator cap_it = it->second.capabilities.begin();
+             cap_it != it->second.capabilities.end();
+             ++cap_it) {
+            const std::string key = !cap_it->cap.empty() ? cap_it->cap : cap_it->name;
+            if (!key.empty()) {
+                twain_capability_values_[key] = cap_it->value_json;
+            }
+        }
+        result.applied = true;
+        result.profile = it->second;
+        return result;
+    }
+
+    SdkTwainProfileResult DeleteProfile(const SdkTwainProfileRequest& request) override {
+        std::lock_guard<std::mutex> lock(mu_);
+        SdkTwainProfileResult result;
+        std::map<std::string, SdkTwainProfile>::iterator it = profiles_.find(request.profile_id);
+        if (it == profiles_.end()) {
+            result.code = ToCode(SdkStatusCode::TwainProfileNotFound);
+            result.message = "TWAIN profile not found";
+            return result;
+        }
+        result.deleted = true;
+        result.profile = it->second;
+        profiles_.erase(it);
+        return result;
+    }
+
+    SdkTwainScanResult Scan(const SdkTwainScanRequest& request) override {
+        SdkTwainScanResult result;
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            result.task_id = "twain-scan-" + std::to_string(next_task_id_++);
+            result.accepted = true;
+            result.task.task_id = result.task_id;
+            result.task.connection_id = request.connection_id;
+            result.task.session_id = request.session_id;
+            result.task.status = "queued";
+            result.task.phase = "queued";
+            result.task.progress = 0;
+            result.task.output_type = request.output_type.empty() ? "images" : request.output_type;
+            const std::string source_image_format = NormalizeMockImageFormat(MockTwainStringCapability("ICAP_IMAGEFILEFORMAT", "bmp"));
+            const bool has_requested_image_format = !request.output_format.empty();
+            result.task.output_format = result.task.output_type == "images"
+                                            ? NormalizeMockImageFormat(has_requested_image_format ? request.output_format : source_image_format)
+                                            : (request.output_format.empty() ? result.task.output_type : request.output_format);
+            result.task.output_dir = request.output_dir.empty() ? GetSdkOpenTaskAssetDir("twain", result.task_id, "pages")
+                                                                : request.output_dir;
+            result.task.export_type = result.task.output_type == "images"
+                                          ? "single-page"
+                                          : (request.export_type.empty() ? "multi-page" : request.export_type);
+            result.task.output_path = request.output_path;
+            result.task.transfer_mechanism = MockTwainStringCapability("ICAP_XFERMECH", request.transfer_mechanism.empty() ? "native" : request.transfer_mechanism);
+            result.task.message = "mock TWAIN scan queued";
+            tasks_[result.task_id] = result.task;
+        }
+        EmitScanTask(result.task);
+        const std::string task_id = result.task_id;
+        std::thread([this, request, task_id]() {
+            SdkTwainScanTask task;
+            {
+                std::lock_guard<std::mutex> lock(mu_);
+                task = tasks_[task_id];
+                task.status = "running";
+                task.phase = "transferring";
+                task.progress = 20;
+                task.message = "mock TWAIN scan running";
+                tasks_[task_id] = task;
+            }
+            EmitScanTask(task);
+            std::this_thread::sleep_for(std::chrono::milliseconds(120));
+            {
+                std::lock_guard<std::mutex> lock(mu_);
+                task = tasks_[task_id];
+                if (task.cancel_requested) {
+                    task.status = "cancelled";
+                    task.phase = "cancelled";
+                    task.progress = 100;
+                    task.message = "cancelled";
+                    tasks_[task_id] = task;
+                    EmitScanTask(task);
+                    return;
+                }
+                const int page_count = 2;
+                EnsureDirectoryRecursive(task.output_dir);
+                const bool direct_bmp = task.output_type == "images" && NormalizeMockImageFormat(task.output_format) == "bmp";
+                // mock 只直接产出真实 BMP/JPEG；png/tiff 继续走 sdk_open finalize 转换，
+                // 避免生成“扩展名是 png/tiff、内容却是 JPEG”的假成功结果。
+                const bool can_write_requested_directly = direct_bmp || NormalizeMockImageFormat(task.output_format) == "jpg";
+                const std::string extension = direct_bmp ? "bmp" : "jpg";
+                if (task.output_type == "images" && request.output_format.empty() && !can_write_requested_directly) {
+                    task.output_format = "jpg";
+                }
+                for (int page = 1; page <= page_count; ++page) {
+                    std::ostringstream path;
+                    if (!request.output_path.empty() && task.output_type == "images" && page == 1) {
+                        path << request.output_path;
+                    } else if (!request.output_path.empty() && task.output_type == "images") {
+                        path << request.output_path << "_page" << page;
+                    } else {
+                        path << JoinPath(task.output_dir, "mock-twain-page-" + std::to_string(page) + "." + extension);
+                    }
+                    WriteBytes(path.str(), direct_bmp ? MockTwainBmp(page) : TinyJpeg());
+                    task.output_paths.push_back(path.str());
+                    task.last_page_path = path.str();
+                    if (task.output_type == "images" && task.output_path.empty()) {
+                        task.output_path = path.str();
+                    }
+                }
+                task.status = "completed";
+                task.phase = "completed";
+                task.progress = 100;
+                task.page_count = page_count;
+                task.current_page = page_count;
+                task.message = "mock TWAIN scan completed";
+                tasks_[task_id] = task;
+            }
+            EmitScanTask(task);
+        }).detach();
+        return result;
+    }
+
+    SdkTwainScanResult GetScan(const SdkTwainScanGetRequest& request) override {
+        std::lock_guard<std::mutex> lock(mu_);
+        SdkTwainScanResult result;
+        std::map<std::string, SdkTwainScanTask>::const_iterator it = tasks_.find(request.task_id);
+        if (it == tasks_.end()) {
+            result.code = ToCode(SdkStatusCode::InvalidParams);
+            result.message = "TWAIN scan task not found";
+            return result;
+        }
+        result.task_id = request.task_id;
+        result.task = it->second;
+        result.accepted = true;
+        return result;
+    }
+
+    SdkTwainScanResult CancelScan(const SdkTwainScanCancelRequest& request) override {
+        std::lock_guard<std::mutex> lock(mu_);
+        SdkTwainScanResult result;
+        result.task_id = request.task_id;
+        std::map<std::string, SdkTwainScanTask>::iterator it = tasks_.find(request.task_id);
+        if (it == tasks_.end()) {
+            result.code = ToCode(SdkStatusCode::InvalidParams);
+            result.message = "TWAIN scan task not found";
+            return result;
+        }
+        it->second.cancel_requested = true;
+        it->second.message = "cancel requested";
+        result.task = it->second;
+        result.accepted = true;
+        EmitScanTask(result.task);
+        return result;
+    }
+
+private:
+    void EmitScanTask(const SdkTwainScanTask& task) {
+        SdkTwainScanTaskEventCallback sink = scan_task_event_sink_;
+        if (!sink || task.connection_id.empty()) {
+            return;
+        }
+        SdkTwainScanTaskEvent event;
+        event.connection_id = task.connection_id;
+        event.event_name = "twain.scan_changed";
+        event.task = task;
+        event.message = task.message;
+        sink(event);
+    }
+
+    SdkTwainSource DefaultSource() const {
+        SdkTwainSource source;
+        source.source_id = "twain:mock-source-0";
+        source.source_name = "CZUR TWAIN Mock Source";
+        source.manufacturer = "CZUR";
+        source.product_family = "Scanner";
+        source.product_name = "CZUR Mock TWAIN";
+        source.protocol_major = 2;
+        source.protocol_minor = 4;
+        source.status = "online";
+        source.openable = true;
+        return source;
+    }
+
+    SdkTwainCapability MakeEnumCapability(const std::string& cap,
+                                          int cap_id,
+                                          const std::string& name,
+                                          const std::string& title,
+                                          const std::string& value_json,
+                                          const std::vector<std::string>& values_json) const {
+        SdkTwainCapability capability;
+        capability.cap = cap;
+        capability.cap_id = cap_id;
+        capability.name = name;
+        capability.title = title;
+        capability.type = "enum";
+        capability.value_json = value_json;
+        capability.constraint.type = "list";
+        capability.constraint.values_json = values_json;
+        return capability;
+    }
+
+    SdkTwainCapability MakeNumberCapability(const std::string& cap,
+                                            int cap_id,
+                                            const std::string& name,
+                                            const std::string& title,
+                                            const std::string& value_json,
+                                            double min,
+                                            double max,
+                                            double quant) const {
+        SdkTwainCapability capability;
+        capability.cap = cap;
+        capability.cap_id = cap_id;
+        capability.name = name;
+        capability.title = title;
+        capability.type = "fixed";
+        capability.value_json = value_json;
+        capability.constraint.type = "range";
+        capability.constraint.min = min;
+        capability.constraint.max = max;
+        capability.constraint.quant = quant;
+        return capability;
+    }
+
+    std::string TwainCapabilityValue(const std::string& cap, const std::string& fallback) const {
+        std::map<std::string, std::string>::const_iterator it = twain_capability_values_.find(cap);
+        return it == twain_capability_values_.end() ? fallback : it->second;
+    }
+
+    std::string MockTwainStringCapability(const std::string& cap, const std::string& fallback) const {
+        std::map<std::string, std::string>::const_iterator it = twain_capability_values_.find(cap);
+        if (it == twain_capability_values_.end()) {
+            return fallback;
+        }
+        const std::string value = it->second;
+        return value.size() >= 2 && value.front() == '"' && value.back() == '"'
+                   ? value.substr(1, value.size() - 2)
+                   : value;
+    }
+
+    static std::vector<uint8_t> TinyJpeg() {
+        static const uint8_t kJpeg[] = {
+            0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01,
+            0x01, 0x01, 0x00, 0x60, 0x00, 0x60, 0x00, 0x00, 0xff, 0xdb, 0x00, 0x43,
+            0x00, 0x08, 0x06, 0x06, 0x07, 0x06, 0x05, 0x08, 0x07, 0x07, 0x07, 0x09,
+            0x09, 0x08, 0x0a, 0x0c, 0x14, 0x0d, 0x0c, 0x0b, 0x0b, 0x0c, 0x19, 0x12,
+            0x13, 0x0f, 0x14, 0x1d, 0x1a, 0x1f, 0x1e, 0x1d, 0x1a, 0x1c, 0x1c, 0x20,
+            0x24, 0x2e, 0x27, 0x20, 0x22, 0x2c, 0x23, 0x1c, 0x1c, 0x28, 0x37, 0x29,
+            0x2c, 0x30, 0x31, 0x34, 0x34, 0x34, 0x1f, 0x27, 0x39, 0x3d, 0x38, 0x32,
+            0x3c, 0x2e, 0x33, 0x34, 0x32, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x01,
+            0x00, 0x01, 0x03, 0x01, 0x22, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01,
+            0xff, 0xc4, 0x00, 0x14, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0xff, 0xc4,
+            0x00, 0x14, 0x10, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xda, 0x00, 0x0c,
+            0x03, 0x01, 0x00, 0x02, 0x11, 0x03, 0x11, 0x00, 0x3f, 0x00, 0xb2, 0xc0,
+            0x07, 0xff, 0xd9,
+        };
+        return std::vector<uint8_t>(kJpeg, kJpeg + sizeof(kJpeg));
+    }
+
+    static void WriteBytes(const std::string& path, const std::vector<uint8_t>& bytes) {
+        std::ofstream out(path.c_str(), std::ios::binary);
+        if (out.good() && !bytes.empty()) {
+            out.write(reinterpret_cast<const char*>(&bytes[0]), static_cast<std::streamsize>(bytes.size()));
+        }
+    }
+
+    int generation_ = 1;
+    SdkTwainSourceEventCallback source_event_sink_;
+    SdkTwainScanTaskEventCallback scan_task_event_sink_;
+    std::mutex mu_;
+    std::map<std::string, SdkTwainProfile> profiles_;
+    std::map<std::string, std::string> twain_capability_values_;
+    std::map<std::string, SdkTwainScanTask> tasks_;
+    int next_profile_id_ = 1;
+    int next_task_id_ = 1;
+};
+
 } // namespace
 
 ProviderBundle CreateProviderBundle() {
@@ -1927,6 +2524,7 @@ ProviderBundle CreateProviderBundle() {
     bundle.ofd_provider = std::make_shared<MockOfdProvider>();
     bundle.recognition_provider = std::make_shared<MockRecognitionProvider>();
     bundle.sane_provider = std::make_shared<MockSaneProvider>();
+    bundle.twain_provider = std::make_shared<MockTwainProvider>();
     return bundle;
 }
 

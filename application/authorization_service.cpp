@@ -504,8 +504,10 @@ AuthorizationService::SessionResult AuthorizationService::RefreshSession(const s
         result = CreatePrivateSessionWithCApi(connection_id, bound_session.token, AuthzBaseUrl(), now_ts);
         result.created_at = bound_session.created_at;
         if (IsOkStatusCode(result.code)) {
+            // private auth 可能返回旧版本能力列表；sdk_open 本地新增的方法需要在刷新会话时同步补齐。
+            RebuildLocalCapabilities(&result.auth_context);
             std::lock_guard<std::mutex> lock(sessions_mu_);
-            sessions_[connection_id] = result;
+            sessions_[connection_id] = CopySessionResultForStorage(result);
         }
         return result;
 #else
@@ -770,6 +772,17 @@ bool AuthorizationService::HasCapability(const AuthContext& auth_context, const 
             return true;
         }
     }
+#if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
+    // 已创建的旧会话可能缺少新加入的 sdk_open 本地方法；这里按本地策略兜底，不依赖 private 返回的旧列表。
+    const std::vector<std::string> local_capabilities = BuildEntitledCapabilities(auth_context.account_type);
+    for (std::vector<std::string>::const_iterator it = local_capabilities.begin();
+         it != local_capabilities.end();
+         ++it) {
+        if (*it == capability) {
+            return true;
+        }
+    }
+#endif
     return false;
 }
 

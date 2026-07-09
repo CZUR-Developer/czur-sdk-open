@@ -9,7 +9,8 @@ export type DemoNavKey =
   | 'image-enhancement'
   | 'ocr-recognition'
   | 'file-conversion'
-  | 'sane-scanning';
+  | 'sane-scanning'
+  | 'twain-scanning';
 
 export type Tone = 'primary' | 'success' | 'warning' | 'danger' | 'neutral' | 'info';
 export type ExecutionState = 'idle' | 'running' | 'success' | 'error' | 'blocked' | 'planned';

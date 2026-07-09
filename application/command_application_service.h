@@ -27,6 +27,7 @@
 #include "sdk_config.h"
 #include "sdk_json_utils.h"
 #include "sdk_provider_bundle.h"
+#include "twain_facade.h"
 #include "video_session_service.h"
 
 namespace editor {
@@ -163,6 +164,21 @@ private:
     Json HandleSaneScan(const std::string& connection_id, const Request& request);
     Json HandleSaneScanGet(const std::string& connection_id, const Request& request);
     Json HandleSaneScanCancel(const std::string& connection_id, const Request& request);
+    Json HandleTwainStatus(const std::string& connection_id, const Request& request);
+    Json HandleTwainList(const std::string& connection_id, const Request& request);
+    Json HandleTwainWatchStart(const std::string& connection_id, const Request& request);
+    Json HandleTwainWatchStop(const std::string& connection_id, const Request& request);
+    Json HandleTwainOpen(const std::string& connection_id, const Request& request);
+    Json HandleTwainClose(const std::string& connection_id, const Request& request);
+    Json HandleTwainGetCapabilities(const std::string& connection_id, const Request& request);
+    Json HandleTwainSetCapabilities(const std::string& connection_id, const Request& request);
+    Json HandleTwainProfileList(const std::string& connection_id, const Request& request);
+    Json HandleTwainProfileSave(const std::string& connection_id, const Request& request);
+    Json HandleTwainProfileApply(const std::string& connection_id, const Request& request);
+    Json HandleTwainProfileDelete(const std::string& connection_id, const Request& request);
+    Json HandleTwainScan(const std::string& connection_id, const Request& request);
+    Json HandleTwainScanGet(const std::string& connection_id, const Request& request);
+    Json HandleTwainScanCancel(const std::string& connection_id, const Request& request);
 
     AuthorizationService::SessionResult RequireCapability(const std::string& connection_id,
                                                           const std::string& capability) const;
@@ -182,6 +198,9 @@ private:
     const MethodDescriptor* FindMethod(const std::string& method) const;
     void DispatchSaneDeviceEvent(const SdkSaneDeviceEvent& event);
     void DispatchSaneScanTaskEvent(const SdkSaneScanTaskEvent& event);
+    void DispatchTwainSourceEvent(const SdkTwainSourceEvent& event);
+    void DispatchTwainScanTaskEvent(const SdkTwainScanTaskEvent& event);
+    bool FinalizeTwainScanTask(SdkTwainScanTask* task);
     void DispatchDeviceActionEvent(const SdkDeviceActionEvent& event);
     // 将 provider 硬拍事件转换成 capture task，保证后续可通过
     // capture.get 查询，并继续收到 capture.completed/capture.failed。
@@ -206,6 +225,14 @@ private:
     void ClearCaptureProfiles(const std::string& connection_id);
     void RememberSaneWatchConnection(const std::string& connection_id);
     bool ForgetSaneWatchConnection(const std::string& connection_id);
+    void RememberTwainWatchConnection(const std::string& connection_id);
+    bool ForgetTwainWatchConnection(const std::string& connection_id);
+    void RememberOpenedTwainSession(const std::string& connection_id, const std::string& session_id);
+    void ForgetOpenedTwainSession(const std::string& connection_id, const std::string& session_id);
+    std::vector<std::string> ClearOpenedTwainSessions(const std::string& connection_id);
+    std::vector<std::string> ClearAllOpenedTwainSessions();
+    std::vector<std::string> CancelActiveTwainTasksForSessions(const std::vector<std::string>& session_ids);
+    void WaitTwainTasksTerminal(const std::vector<std::string>& task_ids);
     void RememberOpenedDevice(const std::string& connection_id, const std::string& device_id);
     void ForgetOpenedDevice(const std::string& connection_id, const std::string& device_id);
     std::vector<std::string> ForgetOpenedDeviceFromAllConnections(const std::string& device_id);
@@ -247,6 +274,7 @@ private:
     OfdFacade ofd_facade_;
     RecognitionFacade recognition_facade_;
     SaneFacade sane_facade_;
+    TwainFacade twain_facade_;
     CaptureTaskService capture_task_service_;
     ImageEnhanceTaskService image_enhance_task_service_;
     StatusSupplier status_supplier_;
@@ -264,6 +292,12 @@ private:
     std::map<std::string, std::string> sane_online_base_urls_by_task_;
     mutable std::mutex sane_watch_connections_mu_;
     std::set<std::string> sane_watch_connections_;
+    mutable std::mutex twain_tasks_mu_;
+    std::map<std::string, SdkTwainScanTask> twain_tasks_;
+    mutable std::mutex twain_watch_connections_mu_;
+    std::set<std::string> twain_watch_connections_;
+    mutable std::mutex opened_twain_sessions_mu_;
+    std::map<std::string, std::set<std::string> > opened_twain_sessions_by_connection_;
     mutable std::mutex opened_devices_mu_;
     std::map<std::string, std::set<std::string> > opened_devices_by_connection_;
     mutable std::mutex capture_contexts_mu_;

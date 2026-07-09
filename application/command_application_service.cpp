@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
 #include <ctime>
 #include <exception>
@@ -13,6 +14,7 @@
 #include <set>
 #include <sstream>
 #include <sys/stat.h>
+#include <thread>
 #include <utility>
 
 #include "sdk_runtime_paths.h"
@@ -59,22 +61,17 @@ bool FileExists(const std::string& path) {
     return !path.empty() && ::stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
 }
 
+bool DirectoryExists(const std::string& path) {
+    struct stat st;
+    return !path.empty() && ::stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+}
+
 uint64_t FileSize(const std::string& path) {
     struct stat st;
     if (path.empty() || ::stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
         return 0;
     }
     return static_cast<uint64_t>(st.st_size);
-}
-
-std::string JoinLocalPath(const std::string& dir, const std::string& name) {
-    if (dir.empty() || dir == ".") {
-        return name;
-    }
-    if (dir[dir.size() - 1] == '/') {
-        return dir + name;
-    }
-    return dir + "/" + name;
 }
 
 std::string BuildDefaultAssetBaseUrl(const SdkConfig& config) {
@@ -102,6 +99,236 @@ std::string NormalizeLower(std::string value) {
 
 bool HasOnlineImageEnhanceApiKey(const AuthorizationService::SessionResult& session_result) {
     return !session_result.token.empty();
+}
+
+bool IsWindowsDriveOnlyPath(const std::string& path) {
+#if defined(_WIN32)
+    return path.size() == 2 &&
+           std::isalpha(static_cast<unsigned char>(path[0])) &&
+           path[1] == ':';
+#else
+    (void)path;
+    return false;
+#endif
+}
+
+bool IsWindowsDriveRootLikePath(const std::string& path) {
+#if defined(_WIN32)
+    if (path.size() < 3 ||
+        !std::isalpha(static_cast<unsigned char>(path[0])) ||
+        path[1] != ':') {
+        return false;
+    }
+    for (std::string::size_type i = 2; i < path.size(); ++i) {
+        if (path[i] != '/' && path[i] != '\\') {
+            return false;
+        }
+    }
+    return true;
+#else
+    (void)path;
+    return false;
+#endif
+}
+
+std::string NormalizeDirectoryHintPath(const std::string& path) {
+#if defined(_WIN32)
+    if (IsWindowsDriveOnlyPath(path) || IsWindowsDriveRootLikePath(path)) {
+        return path.substr(0, 2) + "\\";
+    }
+    if (path.size() > 2 &&
+        std::isalpha(static_cast<unsigned char>(path[0])) &&
+        path[1] == ':') {
+        std::string normalized = path.substr(0, 2) + "\\";
+        std::string::size_type i = 2;
+        while (i < path.size() && (path[i] == '/' || path[i] == '\\')) {
+            ++i;
+        }
+        bool last_was_separator = true;
+        for (; i < path.size(); ++i) {
+            const char ch = path[i];
+            if (ch == '/' || ch == '\\') {
+                if (!last_was_separator) {
+                    normalized.push_back('\\');
+                    last_was_separator = true;
+                }
+            } else {
+                normalized.push_back(ch);
+                last_was_separator = false;
+            }
+        }
+        return normalized;
+    }
+#endif
+    return path;
+}
+
+bool IsWindowsDriveRootDirectory(const std::string& path) {
+#if defined(_WIN32)
+    return IsWindowsDriveOnlyPath(path) || IsWindowsDriveRootLikePath(path);
+#else
+    (void)path;
+    return false;
+#endif
+}
+
+bool IsWindowsDriveRelativePath(const std::string& path) {
+#if defined(_WIN32)
+    return path.size() > 2 &&
+           std::isalpha(static_cast<unsigned char>(path[0])) &&
+           path[1] == ':' &&
+           path[2] != '/' &&
+           path[2] != '\\';
+#else
+    (void)path;
+    return false;
+#endif
+}
+
+bool HasInvalidWindowsPathChar(const std::string& path) {
+#if defined(_WIN32)
+    for (std::string::size_type i = 0; i < path.size(); ++i) {
+        const unsigned char ch = static_cast<unsigned char>(path[i]);
+        if (ch < 32) {
+            return true;
+        }
+        if (path[i] == ':' && !(i == 1 && std::isalpha(static_cast<unsigned char>(path[0])))) {
+            return true;
+        }
+        if (path[i] == '<' || path[i] == '>' || path[i] == '"' ||
+            path[i] == '|' || path[i] == '?' || path[i] == '*') {
+            return true;
+        }
+    }
+#else
+    (void)path;
+#endif
+    return false;
+}
+
+std::string LastPathSegment(const std::string& path) {
+    std::string trimmed = path;
+    while (!trimmed.empty() && (trimmed[trimmed.size() - 1] == '/' || trimmed[trimmed.size() - 1] == '\\')) {
+        trimmed.erase(trimmed.size() - 1);
+    }
+    const std::string::size_type slash = trimmed.find_last_of("/\\");
+    return slash == std::string::npos ? trimmed : trimmed.substr(slash + 1);
+}
+
+bool LooksLikeFilePathWithSuffix(const std::string& path) {
+    const std::string leaf = LastPathSegment(path);
+    if (leaf.empty() || leaf == "." || leaf == "..") {
+        return false;
+    }
+    const std::string::size_type dot = leaf.find_last_of('.');
+    return dot != std::string::npos && dot + 1 < leaf.size();
+}
+
+bool HasInvalidDirectoryLeaf(const std::string& path) {
+#if defined(_WIN32)
+    const std::string leaf = LastPathSegment(path);
+    if (leaf.empty() || leaf == "." || leaf == ".." || IsWindowsDriveRootDirectory(path)) {
+        return false;
+    }
+    const char last = leaf[leaf.size() - 1];
+    return last == ' ' || last == '.';
+#else
+    (void)path;
+    return false;
+#endif
+}
+
+bool ValidateTwainOutputDirectoryPath(const std::string& raw_path,
+                                      const std::string& field_name,
+                                      std::string* normalized_dir,
+                                      std::string* error) {
+    if (normalized_dir != NULL) {
+        normalized_dir->clear();
+    }
+    if (raw_path.empty()) {
+        return true;
+    }
+    if (HasInvalidWindowsPathChar(raw_path) ||
+        IsWindowsDriveRelativePath(raw_path) ||
+        HasInvalidDirectoryLeaf(raw_path)) {
+        if (error != NULL) {
+            *error = "TWAIN output path is invalid: field=" + field_name + ", path=" + raw_path;
+        }
+        return false;
+    }
+    if (LooksLikeFilePathWithSuffix(raw_path)) {
+        if (error != NULL) {
+            *error = "TWAIN output path must be a directory without file extension: field=" + field_name + ", path=" + raw_path;
+        }
+        return false;
+    }
+    if (normalized_dir != NULL) {
+        *normalized_dir = NormalizeDirectoryHintPath(raw_path);
+    }
+    return true;
+}
+
+bool LooksLikeDirectoryOutputPath(const std::string& path) {
+    if (path.empty()) {
+        return false;
+    }
+    const char last = path[path.size() - 1];
+    if (last == '/' || last == '\\' || IsWindowsDriveOnlyPath(path) || IsWindowsDriveRootLikePath(path)) {
+        return true;
+    }
+    const std::string::size_type slash = path.find_last_of("/\\");
+    const std::string::size_type dot = path.find_last_of('.');
+    return dot == std::string::npos || (slash != std::string::npos && dot < slash);
+}
+
+bool ApplyTwainOutputPathHint(const std::string& path,
+                              const std::string& field_name,
+                              SdkTwainScanRequest* request,
+                              std::string* error) {
+    if (request == NULL || path.empty()) {
+        return true;
+    }
+    std::string normalized_dir;
+    if (!ValidateTwainOutputDirectoryPath(path, field_name, &normalized_dir, error)) {
+        return false;
+    }
+    // TWAIN 的“输出路径”统一解释为目录，最终文件名由扫描/转换流程生成。
+    request->output_dir = normalized_dir;
+    request->output_path.clear();
+    return true;
+}
+
+bool EnsureTwainOutputDirectoryReady(const std::string& raw_dir, std::string* normalized_dir, std::string* error) {
+    if (normalized_dir != NULL) {
+        normalized_dir->clear();
+    }
+    if (raw_dir.empty()) {
+        return true;
+    }
+    const std::string dir = NormalizeDirectoryHintPath(raw_dir);
+    if (normalized_dir != NULL) {
+        *normalized_dir = dir;
+    }
+#if defined(_WIN32)
+    if (IsWindowsDriveRootDirectory(raw_dir) || IsWindowsDriveRootDirectory(dir)) {
+        // Windows 盘符根目录只允许检查是否存在，不能尝试创建；不存在时在扫描开始前失败。
+        if (!DirectoryExists(dir)) {
+            if (error != NULL) {
+                *error = "TWAIN output root directory does not exist: output_dir=" + dir;
+            }
+            return false;
+        }
+        return true;
+    }
+#endif
+    // 非根目录允许递归创建，并兼容 / 与 \ 混用的子目录写法。
+    if (!EnsureDirectoryRecursive(dir)) {
+        if (error != NULL) {
+            *error = "failed to create TWAIN output directory: output_dir=" + dir;
+        }
+        return false;
+    }
+    return true;
 }
 
 
@@ -244,9 +471,19 @@ std::string ExtensionFromFilename(const std::string& filename) {
 }
 
 std::string ParentPath(const std::string& path) {
+#if defined(_WIN32)
+    if (IsWindowsDriveOnlyPath(path) || IsWindowsDriveRootLikePath(path)) {
+        return NormalizeDirectoryHintPath(path);
+    }
+#endif
     const std::string::size_type slash_pos = path.find_last_of("/\\");
     if (slash_pos == std::string::npos) {
         return ".";
+    }
+    if (slash_pos == 2 && path.size() >= 3 &&
+        std::isalpha(static_cast<unsigned char>(path[0])) &&
+        path[1] == ':') {
+        return path.substr(0, 3);
     }
     if (slash_pos == 0) {
         return path.substr(0, 1);
@@ -1164,6 +1401,231 @@ SdkSaneProfileRequest ParseSaneProfileRequest(const Json& params) {
     return request;
 }
 
+Json BuildTwainStatusJson(const SdkTwainStatusResult& result, const std::string& provider) {
+    return Json{{"available", result.available},
+                {"platform", result.platform},
+                {"supported_platforms", result.supported_platforms},
+                {"dsm_loaded", result.dsm_loaded},
+                {"dsm_path", result.dsm_path},
+                {"twain_version", result.twain_version},
+                {"reason", result.reason},
+                {"provider", provider}};
+}
+
+Json BuildTwainSourceJson(const SdkTwainSource& source) {
+    return Json{{"source_id", source.source_id},
+                {"source_name", source.source_name},
+                {"manufacturer", source.manufacturer},
+                {"product_family", source.product_family},
+                {"product_name", source.product_name},
+                {"protocol_major", source.protocol_major},
+                {"protocol_minor", source.protocol_minor},
+                {"status", source.status},
+                {"openable", source.openable}};
+}
+
+Json BuildTwainSourcesJson(const std::vector<SdkTwainSource>& sources) {
+    Json root = Json::array();
+    for (std::vector<SdkTwainSource>::const_iterator it = sources.begin(); it != sources.end(); ++it) {
+        root.push_back(BuildTwainSourceJson(*it));
+    }
+    return root;
+}
+
+Json BuildTwainSourceEventJson(const SdkTwainSourceEvent& event) {
+    return Json{{"generation", event.generation},
+                {"sources", BuildTwainSourcesJson(event.sources)},
+                {"added_sources", BuildTwainSourcesJson(event.added_sources)},
+                {"removed_sources", BuildTwainSourcesJson(event.removed_sources)}};
+}
+
+Json BuildTwainCapabilityConstraintJson(const SdkTwainCapabilityConstraint& constraint) {
+    Json values = Json::array();
+    for (std::vector<std::string>::const_iterator it = constraint.values_json.begin();
+         it != constraint.values_json.end();
+         ++it) {
+        values.push_back(JsonFromEncodedValue(*it));
+    }
+    return Json{{"type", constraint.type},
+                {"min", constraint.min},
+                {"max", constraint.max},
+                {"quant", constraint.quant},
+                {"values", values}};
+}
+
+Json BuildTwainCapabilityJson(const SdkTwainCapability& capability) {
+    return Json{{"cap", capability.cap},
+                {"cap_id", capability.cap_id},
+                {"name", capability.name},
+                {"title", capability.title},
+                {"type", capability.type},
+                {"value", JsonFromEncodedValue(capability.value_json)},
+                {"constraint", BuildTwainCapabilityConstraintJson(capability.constraint)},
+                {"readonly", capability.readonly},
+                {"settable", capability.settable},
+                {"advanced", capability.advanced}};
+}
+
+Json BuildTwainCapabilitySetResultJson(const SdkTwainCapabilitySetResultItem& item) {
+    return Json{{"cap", item.cap},
+                {"name", item.name},
+                {"status", item.status},
+                {"message", item.message},
+                {"value", JsonFromEncodedValue(item.value_json)}};
+}
+
+Json BuildTwainProfileJson(const SdkTwainProfile& profile) {
+    Json capabilities = Json::array();
+    for (std::vector<SdkTwainCapabilitySetItem>::const_iterator it = profile.capabilities.begin();
+         it != profile.capabilities.end();
+         ++it) {
+        capabilities.push_back(Json{{"cap", it->cap},
+                                    {"name", it->name},
+                                    {"value", JsonFromEncodedValue(it->value_json)}});
+    }
+    return Json{{"profile_id", profile.profile_id},
+                {"source_key", profile.source_key},
+                {"name", profile.name},
+                {"capabilities", capabilities},
+                {"created_at", profile.created_at},
+                {"updated_at", profile.updated_at}};
+}
+
+void EnsureTwainImageAssets(SdkTwainScanTask* task) {
+    if (task == NULL || !task->assets.empty() || task->output_paths.empty()) {
+        return;
+    }
+    const std::string output_type = NormalizeLower(task->output_type);
+    const std::string output_format = NormalizeLower(task->output_format);
+    const bool image_output = output_type == "images" ||
+                              output_format == "jpg" ||
+                              output_format == "jpeg" ||
+                              output_format == "png" ||
+                              output_format == "bmp" ||
+                              output_format == "webp" ||
+                              output_format == "tif" ||
+                              output_format == "tiff";
+    if (!image_output) {
+        return;
+    }
+    for (std::vector<std::string>::const_iterator it = task->output_paths.begin();
+         it != task->output_paths.end();
+         ++it) {
+        const std::string extension = ExtensionFromFilename(*it);
+        if (!IsSupportedImageExtension(extension)) {
+            continue;
+        }
+        std::ostringstream asset_id;
+        asset_id << "asset-twain-page-" << std::setw(3) << std::setfill('0')
+                 << static_cast<long long>(task->assets.size() + 1);
+        SdkCaptureAsset asset;
+        asset.asset_id = asset_id.str();
+        asset.kind = "twain_scan_page";
+        asset.path = *it;
+        asset.content_type = ContentTypeForImageExtension(extension);
+        asset.size = FileSize(*it);
+        task->assets.push_back(asset);
+    }
+}
+
+bool IsTwainTaskTerminal(const SdkTwainScanTask& task) {
+    return task.status == "completed" || task.status == "failed" || task.status == "cancelled";
+}
+
+Json BuildTwainScanTaskJson(const SdkTwainScanTask& task) {
+    Json output_paths = Json::array();
+    for (std::vector<std::string>::const_iterator it = task.output_paths.begin(); it != task.output_paths.end(); ++it) {
+        output_paths.push_back(*it);
+    }
+    Json assets = Json::array();
+    for (std::vector<SdkCaptureAsset>::const_iterator it = task.assets.begin(); it != task.assets.end(); ++it) {
+        assets.push_back(BuildAssetJson(*it));
+    }
+    return Json{{"task_id", task.task_id},
+                {"connection_id", task.connection_id},
+                {"session_id", task.session_id},
+                {"status", task.status},
+                {"phase", task.phase},
+                {"progress", task.progress},
+                {"page_count", task.page_count},
+                {"current_page", task.current_page},
+                {"output_type", task.output_type},
+                {"output_format", task.output_format},
+                {"output_dir", task.output_dir},
+                {"export_type", task.export_type},
+                {"output_path", task.output_path},
+                {"output_paths", output_paths},
+                {"last_page_path", task.last_page_path},
+                {"assets", assets},
+                {"message", task.message},
+                {"error", task.error},
+                {"started_at", task.started_at},
+                {"updated_at", task.updated_at},
+                {"cancel_requested", task.cancel_requested},
+                {"ui_required", task.ui_required},
+                {"transfer_mechanism", task.transfer_mechanism}};
+}
+
+Json BuildTwainScanCancelAckJson(const SdkTwainScanResult& result, const std::string& provider) {
+    const SdkTwainScanTask& task = result.task;
+    const std::string task_id = !result.task_id.empty() ? result.task_id : task.task_id;
+    const std::string status = !task.status.empty() ? task.status : "unknown";
+    const std::string phase = task.cancel_requested && !IsTwainTaskTerminal(task) ? "cancel_requested" : task.phase;
+    const std::string message = !task.message.empty() ? task.message : result.message;
+
+    // twain.scan_cancel 只是“取消请求已受理”的 ACK，不返回完整任务快照，
+    // 避免 output/progress/assets 等扫描字段干扰前端和接入方判断；完整状态继续由 scan_get/scan_changed 获取。
+    return Json{{"accepted", result.accepted},
+                {"task_id", task_id},
+                {"cancel_requested", task.cancel_requested || result.accepted},
+                {"status", status},
+                {"phase", phase},
+                {"message", message},
+                {"provider", provider}};
+}
+
+std::vector<SdkTwainCapabilitySetItem> ParseTwainCapabilitySetItems(const Json& value) {
+    std::vector<SdkTwainCapabilitySetItem> capabilities;
+    if (value.is_object()) {
+        for (Json::const_iterator it = value.begin(); it != value.end(); ++it) {
+            SdkTwainCapabilitySetItem item;
+            item.cap = it.key();
+            item.value_json = EncodeJsonValue(*it);
+            capabilities.push_back(item);
+        }
+    } else if (value.is_array()) {
+        for (Json::const_iterator it = value.begin(); it != value.end(); ++it) {
+            if (!it->is_object()) {
+                continue;
+            }
+            SdkTwainCapabilitySetItem item;
+            item.cap = GetOptionalStringField(*it, "cap");
+            item.name = GetOptionalStringField(*it, "name");
+            if (it->find("value") != it->end()) {
+                item.value_json = EncodeJsonValue((*it)["value"]);
+            } else if (it->find("value_json") != it->end() && (*it)["value_json"].is_string()) {
+                item.value_json = (*it)["value_json"].get<std::string>();
+            }
+            if (!item.cap.empty() || !item.name.empty()) {
+                capabilities.push_back(item);
+            }
+        }
+    }
+    return capabilities;
+}
+
+SdkTwainProfileRequest ParseTwainProfileRequest(const Json& params) {
+    SdkTwainProfileRequest request;
+    request.session_id = GetOptionalStringField(params, "session_id");
+    request.source_id = GetOptionalStringField(params, "source_id");
+    request.source_key = GetOptionalStringField(params, "source_key");
+    request.profile_id = GetOptionalStringField(params, "profile_id");
+    request.name = GetOptionalStringField(params, "name");
+    const Json capabilities = params.find("capabilities") == params.end() ? Json() : params["capabilities"];
+    request.capabilities = ParseTwainCapabilitySetItems(capabilities);
+    return request;
+}
+
 CommandApplicationService::MethodDescriptor MakeMethod(const std::string& method,
                                                        bool requires_session,
                                                        const std::string& summary) {
@@ -1238,6 +1700,131 @@ bool IsFileConvertSourceType(const std::string& source_type) {
 bool IsFileConvertImageSourceType(const std::string& source_type) {
     const std::string value = NormalizeImageFormat(source_type);
     return value == "image" || value == "images" || value == "base64";
+}
+
+bool IsTwainDocumentOutputFinal(const SdkTwainScanTask& task, const std::string& document_target) {
+    if (task.status != "completed" || task.output_paths.empty() || NormalizeImageFormat(task.output_format) != document_target) {
+        return false;
+    }
+    for (std::vector<std::string>::const_iterator it = task.output_paths.begin(); it != task.output_paths.end(); ++it) {
+        if (NormalizeImageFormat(ExtensionFromFilename(*it)) != document_target) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool IsTwainDocumentTarget(const std::string& document_target) {
+    return document_target == "pdf" || document_target == "ofd" || document_target == "tiff";
+}
+
+bool IsTwainDocumentConversionInProgress(const SdkTwainScanTask& task, const std::string& document_target) {
+    return task.status == "converting" &&
+           NormalizeImageFormat(task.output_type) == document_target &&
+           !task.output_paths.empty();
+}
+
+bool ShouldUseCachedTwainDocumentTask(const SdkTwainScanTask& task, const std::string& document_target) {
+    return IsTwainDocumentOutputFinal(task, document_target) ||
+           IsTwainDocumentConversionInProgress(task, document_target);
+}
+
+bool IsTwainImageTargetFormat(const std::string& value) {
+    const std::string format = NormalizeImageFormat(value);
+    return format == "jpg" || format == "png" || format == "bmp" || format == "tiff";
+}
+
+bool IsTwainOutputType(const std::string& value) {
+    // 这里校验的是 twain.scan 的 output.type 协议值，不是图片文件格式。
+    const std::string type = NormalizeImageFormat(value);
+    return type == "images" || type == "pdf" || type == "ofd" || type == "tiff";
+}
+
+bool IsTwainExportType(const std::string& value) {
+    return value == "multi-page" || value == "single-page";
+}
+
+std::string FormatTwainPageIndex(std::size_t index) {
+    std::ostringstream out;
+    out << std::setw(3) << std::setfill('0') << static_cast<unsigned long long>(index);
+    return out.str();
+}
+
+bool StringEqualsIgnoreSlashStyle(const std::string& lhs, const std::string& rhs) {
+    if (lhs.size() != rhs.size()) {
+        return false;
+    }
+    for (std::string::size_type i = 0; i < lhs.size(); ++i) {
+        const char l = lhs[i] == '\\' ? '/' : lhs[i];
+        const char r = rhs[i] == '\\' ? '/' : rhs[i];
+        if (l != r) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::string NormalizePathSlashStyle(std::string path) {
+    for (std::string::iterator it = path.begin(); it != path.end(); ++it) {
+        if (*it == '\\') {
+            *it = '/';
+        }
+    }
+    while (path.size() > 1 && path[path.size() - 1] == '/') {
+        path.erase(path.size() - 1);
+    }
+    return path;
+}
+
+bool EndsWithPathSegment(const std::string& path, const std::string& segment) {
+    const std::string normalized_path = NormalizeLower(NormalizePathSlashStyle(path));
+    const std::string normalized_segment = "/" + NormalizeLower(segment);
+    return normalized_path.size() >= normalized_segment.size() &&
+           normalized_path.compare(normalized_path.size() - normalized_segment.size(),
+                                   normalized_segment.size(),
+                                   normalized_segment) == 0;
+}
+
+bool ContainsPath(const std::vector<std::string>& paths, const std::string& path) {
+    for (std::vector<std::string>::const_iterator it = paths.begin(); it != paths.end(); ++it) {
+        if (StringEqualsIgnoreSlashStyle(*it, path)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool IsTwainInternalPagesDir(const SdkTwainScanTask& task, const std::string& dir) {
+    if (task.task_id.empty() || dir.empty()) {
+        return false;
+    }
+    if (StringEqualsIgnoreSlashStyle(dir, GetSdkOpenTaskAssetDir("twain", task.task_id, "pages"))) {
+        return true;
+    }
+    const std::string normalized = NormalizeLower(NormalizePathSlashStyle(dir));
+    if (normalized.find("/tasks/twain/") != std::string::npos && EndsWithPathSegment(dir, "pages")) {
+        return true;
+    }
+    for (std::vector<std::string>::const_iterator it = task.output_paths.begin(); it != task.output_paths.end(); ++it) {
+        // bridge/helper 会把内部 task_id 映射成 public task_id，不能只按完整 task_id 路径比较。
+        if (StringEqualsIgnoreSlashStyle(ParentPath(*it), dir) &&
+            normalized.find("/tasks/twain/") != std::string::npos &&
+            EndsWithPathSegment(dir, "pages")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool IsTwainIntermediatePagePath(const SdkTwainScanTask& task, const std::string& path) {
+    if (path.empty()) {
+        return false;
+    }
+    if (ContainsPath(task.output_paths, path)) {
+        return true;
+    }
+    const std::string extension = NormalizeImageFormat(ExtensionFromFilename(path));
+    return extension == "bmp" || extension == "jpg" || extension == "png" || extension == "webp";
 }
 
 std::string ExtensionForFileConvertFormat(const std::string& format) {
@@ -1405,7 +1992,7 @@ std::string OutputPathForIndexedAsset(const std::string& output_dir,
         name << "-" << std::setw(3) << std::setfill('0') << (index + 1);
     }
     name << "." << extension;
-    return JoinLocalPath(output_dir, name.str());
+    return JoinPath(output_dir, name.str());
 }
 
 } // namespace
@@ -1425,6 +2012,7 @@ CommandApplicationService::CommandApplicationService(const SdkConfig& config,
       ofd_facade_(providers_),
       recognition_facade_(providers_),
       sane_facade_(providers_),
+      twain_facade_(providers_),
       capture_task_service_(providers_, BuildDefaultAssetBaseUrl(config_)),
       image_enhance_task_service_(providers_, BuildDefaultAssetBaseUrl(config_)),
       next_image_task_seq_(1) {
@@ -1479,6 +2067,21 @@ CommandApplicationService::CommandApplicationService(const SdkConfig& config,
     methods_.push_back(MakeMethod("sane.scan", true, "Submit one SANE scan task"));
     methods_.push_back(MakeMethod("sane.scan_get", true, "Get one SANE scan task snapshot"));
     methods_.push_back(MakeMethod("sane.scan_cancel", true, "Cancel one SANE scan task"));
+    methods_.push_back(MakeMethod("twain.status", true, "Get Windows-only TWAIN runtime status"));
+    methods_.push_back(MakeMethod("twain.list", true, "List TWAIN sources on Windows"));
+    methods_.push_back(MakeMethod("twain.watch_start", true, "Start TWAIN source list monitoring"));
+    methods_.push_back(MakeMethod("twain.watch_stop", true, "Stop TWAIN source list monitoring"));
+    methods_.push_back(MakeMethod("twain.open", true, "Open one TWAIN source session"));
+    methods_.push_back(MakeMethod("twain.close", true, "Close one TWAIN source session"));
+    methods_.push_back(MakeMethod("twain.get_capabilities", true, "Get normalized TWAIN source capabilities"));
+    methods_.push_back(MakeMethod("twain.set_capabilities", true, "Set normalized TWAIN source capabilities"));
+    methods_.push_back(MakeMethod("twain.profile_list", true, "List saved TWAIN capability profiles"));
+    methods_.push_back(MakeMethod("twain.profile_save", true, "Save one TWAIN capability profile"));
+    methods_.push_back(MakeMethod("twain.profile_apply", true, "Apply one saved TWAIN capability profile"));
+    methods_.push_back(MakeMethod("twain.profile_delete", true, "Delete one saved TWAIN capability profile"));
+    methods_.push_back(MakeMethod("twain.scan", true, "Submit one TWAIN scan task"));
+    methods_.push_back(MakeMethod("twain.scan_get", true, "Get one TWAIN scan task snapshot"));
+    methods_.push_back(MakeMethod("twain.scan_cancel", true, "Cancel one TWAIN scan task"));
 }
 
 void CommandApplicationService::SetProviderNames(const Json& provider_names) {
@@ -1509,6 +2112,12 @@ void CommandApplicationService::SetCommandEventSink(CommandEventSink sink) {
     });
     sane_facade_.SetScanTaskEventSink([this](const SdkSaneScanTaskEvent& event) {
         DispatchSaneScanTaskEvent(event);
+    });
+    twain_facade_.SetSourceEventSink([this](const SdkTwainSourceEvent& event) {
+        DispatchTwainSourceEvent(event);
+    });
+    twain_facade_.SetScanTaskEventSink([this](const SdkTwainScanTaskEvent& event) {
+        DispatchTwainScanTaskEvent(event);
     });
     if (providers_.device_provider) {
         providers_.device_provider->SetDeviceActionEventSink([this](const SdkDeviceActionEvent& event) {
@@ -1702,6 +2311,51 @@ Json CommandApplicationService::HandleRequest(const std::string& connection_id, 
     if (request.method == "sane.scan_cancel") {
         return HandleSaneScanCancel(connection_id, request);
     }
+    if (request.method == "twain.status") {
+        return HandleTwainStatus(connection_id, request);
+    }
+    if (request.method == "twain.list") {
+        return HandleTwainList(connection_id, request);
+    }
+    if (request.method == "twain.watch_start") {
+        return HandleTwainWatchStart(connection_id, request);
+    }
+    if (request.method == "twain.watch_stop") {
+        return HandleTwainWatchStop(connection_id, request);
+    }
+    if (request.method == "twain.open") {
+        return HandleTwainOpen(connection_id, request);
+    }
+    if (request.method == "twain.close") {
+        return HandleTwainClose(connection_id, request);
+    }
+    if (request.method == "twain.get_capabilities") {
+        return HandleTwainGetCapabilities(connection_id, request);
+    }
+    if (request.method == "twain.set_capabilities") {
+        return HandleTwainSetCapabilities(connection_id, request);
+    }
+    if (request.method == "twain.profile_list") {
+        return HandleTwainProfileList(connection_id, request);
+    }
+    if (request.method == "twain.profile_save") {
+        return HandleTwainProfileSave(connection_id, request);
+    }
+    if (request.method == "twain.profile_apply") {
+        return HandleTwainProfileApply(connection_id, request);
+    }
+    if (request.method == "twain.profile_delete") {
+        return HandleTwainProfileDelete(connection_id, request);
+    }
+    if (request.method == "twain.scan") {
+        return HandleTwainScan(connection_id, request);
+    }
+    if (request.method == "twain.scan_get") {
+        return HandleTwainScanGet(connection_id, request);
+    }
+    if (request.method == "twain.scan_cancel") {
+        return HandleTwainScanCancel(connection_id, request);
+    }
 
     return BuildWsResponse(request.request_id, SdkStatusCode::UnsupportedMethod, "unsupported method");
 }
@@ -1713,6 +2367,29 @@ void CommandApplicationService::OnConnectionClosed(const std::string& connection
         sane_watch_request.connection_id = connection_id;
         sane_watch_request.enabled = false;
         sane_facade_.WatchStop(sane_watch_request);
+    }
+    if (ForgetTwainWatchConnection(connection_id)) {
+        SdkTwainWatchRequest twain_watch_request;
+        twain_watch_request.connection_id = connection_id;
+        twain_watch_request.enabled = false;
+        twain_facade_.WatchStop(twain_watch_request);
+    }
+
+    const std::vector<std::string> twain_sessions = ClearOpenedTwainSessions(connection_id);
+    const std::vector<std::string> cancelled_twain_tasks = CancelActiveTwainTasksForSessions(twain_sessions);
+    WaitTwainTasksTerminal(cancelled_twain_tasks);
+    for (std::vector<std::string>::const_iterator it = twain_sessions.begin(); it != twain_sessions.end(); ++it) {
+        SdkTwainCloseRequest close_request;
+        close_request.session_id = *it;
+        const SdkTwainCloseResult close_result = twain_facade_.CloseSource(close_request);
+        SDK_OPEN_LOG_INFO("[command_application] connection cleanup twain.close session={} code={} closed={}",
+                          close_request.session_id,
+                          close_result.code,
+                          close_result.closed);
+        if (!close_result.closed && close_result.code != ToCode(SdkStatusCode::TwainSourceNotFound)) {
+            // 扫描中的 Source 可能需要等待 cancel 在 provider worker 中生效；保留记录，避免会话残留后完全失去清理入口。
+            RememberOpenedTwainSession(connection_id, close_request.session_id);
+        }
     }
 
     authorization_service_.ClearConnection(connection_id);
@@ -1769,6 +2446,20 @@ void CommandApplicationService::ShutdownActiveSessions() {
                           close_result.closed);
     }
 
+    const std::vector<std::string> twain_sessions = ClearAllOpenedTwainSessions();
+    SDK_OPEN_LOG_INFO("[command_application] shutdown cleanup twain_sessions={}", twain_sessions.size());
+    const std::vector<std::string> cancelled_twain_tasks = CancelActiveTwainTasksForSessions(twain_sessions);
+    WaitTwainTasksTerminal(cancelled_twain_tasks);
+    for (std::vector<std::string>::const_iterator it = twain_sessions.begin(); it != twain_sessions.end(); ++it) {
+        SdkTwainCloseRequest close_request;
+        close_request.session_id = *it;
+        const SdkTwainCloseResult close_result = twain_facade_.CloseSource(close_request);
+        SDK_OPEN_LOG_INFO("[command_application] shutdown twain.close session={} code={} closed={}",
+                          close_request.session_id,
+                          close_result.code,
+                          close_result.closed);
+    }
+
     const std::vector<std::string> connections = ClearCommandConnections();
     for (std::vector<std::string>::const_iterator it = connections.begin(); it != connections.end(); ++it) {
         // 连接表和采集上下文已经整体清空；这里只释放连接绑定的授权和 SANE watch 状态。
@@ -1778,6 +2469,12 @@ void CommandApplicationService::ShutdownActiveSessions() {
             sane_watch_request.connection_id = *it;
             sane_watch_request.enabled = false;
             sane_facade_.WatchStop(sane_watch_request);
+        }
+        if (ForgetTwainWatchConnection(*it)) {
+            SdkTwainWatchRequest twain_watch_request;
+            twain_watch_request.connection_id = *it;
+            twain_watch_request.enabled = false;
+            twain_facade_.WatchStop(twain_watch_request);
         }
     }
 }
@@ -1794,6 +2491,22 @@ void CommandApplicationService::DispatchSaneDeviceEvent(const SdkSaneDeviceEvent
     sink(event.connection_id,
          BuildWsEvent(event.event_name,
                       BuildSaneDeviceEventJson(event),
+                      event.code,
+                       event.message));
+}
+
+void CommandApplicationService::DispatchTwainSourceEvent(const SdkTwainSourceEvent& event) {
+    CommandEventSink sink;
+    {
+        std::lock_guard<std::mutex> lock(command_event_sink_mu_);
+        sink = command_event_sink_;
+    }
+    if (!sink || event.connection_id.empty() || event.event_name.empty()) {
+        return;
+    }
+    sink(event.connection_id,
+         BuildWsEvent(event.event_name,
+                      BuildTwainSourceEventJson(event),
                       event.code,
                       event.message));
 }
@@ -2109,7 +2822,7 @@ void CommandApplicationService::DispatchSaneScanTaskEvent(const SdkSaneScanTaskE
             step_request.task_id = task.task_id;
             step_request.step = step;
             step_request.pages = pages;
-            step_request.output_dir = JoinLocalPath(task.output_dir.empty() ? GetSdkOpenTaskAssetDir("sane", task.task_id, "enhance")
+            step_request.output_dir = JoinPath(task.output_dir.empty() ? GetSdkOpenTaskAssetDir("sane", task.task_id, "enhance")
                                                                             : task.output_dir,
                                                     "enhance-step-" + std::to_string(static_cast<long long>(step_index + 1)));
             step_request.online_api_key = online_api_key;
@@ -2198,7 +2911,7 @@ void CommandApplicationService::DispatchSaneScanTaskEvent(const SdkSaneScanTaskE
                                          : task.output_dir;
         convert_request.output_path = task.output_path;
         if (convert_request.export_type != "single-page" && convert_request.output_path.empty()) {
-            convert_request.output_path = JoinLocalPath(convert_request.output_dir, "scan." + ExtensionForFileConvertFormat(document_target));
+            convert_request.output_path = JoinPath(convert_request.output_dir, "scan." + ExtensionForFileConvertFormat(document_target));
         }
 
         if (!EnsureDirectoryRecursive(convert_request.output_dir)) {
@@ -2266,6 +2979,288 @@ void CommandApplicationService::DispatchSaneScanTaskEvent(const SdkSaneScanTaskE
                       task.message.empty() ? event.message : task.message));
 }
 
+bool CommandApplicationService::FinalizeTwainScanTask(SdkTwainScanTask* task) {
+    if (task == NULL || task->task_id.empty()) {
+        return false;
+    }
+    EnsureTwainImageAssets(task);
+    for (std::vector<SdkCaptureAsset>::iterator it = task->assets.begin();
+         it != task->assets.end();
+         ++it) {
+        *it = AttachImageAssetUrls(task->task_id, *it);
+        RegisterImageAsset(task->connection_id, task->task_id, *it);
+    }
+
+    const std::string document_target = NormalizeImageFormat(task->output_type);
+    if (IsTwainDocumentTarget(document_target)) {
+        if (IsTwainDocumentOutputFinal(*task, document_target)) {
+            EnsureTwainImageAssets(task);
+            for (std::vector<SdkCaptureAsset>::iterator it = task->assets.begin();
+                 it != task->assets.end();
+                 ++it) {
+                *it = AttachImageAssetUrls(task->task_id, *it);
+                RegisterImageAsset(task->connection_id, task->task_id, *it);
+            }
+            return false;
+        }
+        SdkTwainScanTask cached_task;
+        bool has_cached_task = false;
+        {
+            std::lock_guard<std::mutex> lock(twain_tasks_mu_);
+            std::map<std::string, SdkTwainScanTask>::const_iterator it = twain_tasks_.find(task->task_id);
+            if (it != twain_tasks_.end() && ShouldUseCachedTwainDocumentTask(it->second, document_target)) {
+                cached_task = it->second;
+                has_cached_task = true;
+            }
+        }
+        if (has_cached_task) {
+            // helper/provider 可能返回原始 BMP 快照；主进程缓存已进入封装或已完成时，以缓存为准，避免 scan_get 重复转换生成 _2 文件。
+            *task = cached_task;
+            EnsureTwainImageAssets(task);
+            for (std::vector<SdkCaptureAsset>::iterator it = task->assets.begin();
+                 it != task->assets.end();
+                 ++it) {
+                *it = AttachImageAssetUrls(task->task_id, *it);
+                RegisterImageAsset(task->connection_id, task->task_id, *it);
+            }
+            SDK_OPEN_LOG_INFO("[twain] finalize skip duplicate task={} status={} output_path={} output_count={}",
+                              task->task_id,
+                              task->status,
+                              task->output_path,
+                              task->output_paths.size());
+            return false;
+        }
+    }
+    const std::string requested_output_type = NormalizeImageFormat(task->output_type);
+    const std::string requested_image_format = NormalizeImageFormat(task->output_format);
+    if (task->status == "completed" &&
+        requested_output_type == "images" &&
+        !requested_image_format.empty() &&
+        IsTwainImageTargetFormat(requested_image_format) &&
+        !task->output_paths.empty()) {
+        bool needs_image_conversion = false;
+        for (std::vector<std::string>::const_iterator it = task->output_paths.begin();
+             it != task->output_paths.end();
+             ++it) {
+            if (NormalizeImageFormat(ExtensionFromFilename(*it)) != requested_image_format) {
+                needs_image_conversion = true;
+                break;
+            }
+        }
+        if (needs_image_conversion) {
+            // native/memory 会先落 BMP 中间页；images 目标在 sdk_open 层逐页转成用户选择的图片格式。
+            const std::string output_dir =
+                (task->output_dir.empty() || IsTwainInternalPagesDir(*task, task->output_dir))
+                    ? GetSdkOpenTaskAssetDir("twain", task->task_id, "outputs")
+                    : task->output_dir;
+            if (!EnsureDirectoryRecursive(output_dir)) {
+                task->status = "failed";
+                task->phase = "failed";
+                task->progress = 100;
+                task->message = "failed to create TWAIN image output directory: output_dir=" + output_dir;
+                task->error = task->message;
+                {
+                    std::lock_guard<std::mutex> lock(twain_tasks_mu_);
+                    twain_tasks_[task->task_id] = *task;
+                }
+                return true;
+            }
+
+            std::vector<std::string> converted_paths;
+            std::vector<SdkCaptureAsset> converted_assets;
+            for (std::size_t i = 0; i < task->output_paths.size(); ++i) {
+                const std::string output_path = JoinPath(
+                    output_dir,
+                    "twain-page-" + FormatTwainPageIndex(i + 1) + "." + ExtensionForImageFormat(requested_image_format));
+                SdkFormatConvertRequest format_request;
+                format_request.input_path = task->output_paths[i];
+                format_request.output_path = output_path;
+                format_request.output_format = requested_image_format;
+                const SdkFormatConvertResult format_result = graphic_facade_.ConvertImageFormat(format_request);
+                if (!IsOkStatusCode(format_result.code)) {
+                    task->status = "failed";
+                    task->phase = "failed";
+                    task->progress = 100;
+                    task->message = format_result.message;
+                    task->error = format_result.message;
+                    {
+                        std::lock_guard<std::mutex> lock(twain_tasks_mu_);
+                        twain_tasks_[task->task_id] = *task;
+                    }
+                    return true;
+                }
+                const std::string final_path = format_result.output_path.empty() ? output_path : format_result.output_path;
+                converted_paths.push_back(final_path);
+
+                SdkCaptureAsset asset;
+                asset.asset_id = "asset-twain-page-" + FormatTwainPageIndex(i + 1);
+                asset.kind = "twain_scan_page";
+                asset.path = final_path;
+                asset.content_type = ContentTypeForImageExtension(ExtensionForImageFormat(requested_image_format));
+                asset.size = FileSize(final_path);
+                asset = AttachImageAssetUrls(task->task_id, asset);
+                RegisterImageAsset(task->connection_id, task->task_id, asset);
+                converted_assets.push_back(asset);
+            }
+
+            task->output_format = requested_image_format;
+            task->output_dir = output_dir;
+            task->output_paths = converted_paths;
+            task->output_path = converted_paths.empty() ? "" : converted_paths.front();
+            task->last_page_path = converted_paths.empty() ? "" : converted_paths.back();
+            task->assets = converted_assets;
+            task->export_type = "single-page";
+            task->phase = "completed";
+            task->progress = 100;
+            task->message = "TWAIN scan image pages converted";
+            task->error.clear();
+            {
+                std::lock_guard<std::mutex> lock(twain_tasks_mu_);
+                twain_tasks_[task->task_id] = *task;
+            }
+        }
+    }
+    if (task->status != "completed" ||
+        !IsTwainDocumentTarget(document_target) ||
+        task->output_paths.empty()) {
+        if (task->status == "completed" && document_target == "images") {
+            // provider 只产出中间 BMP 页；images 目标返回实际页路径，避免把目录型 output_path 原样回传。
+            task->output_path = task->output_paths.empty() ? "" : task->output_paths.front();
+            task->last_page_path = task->output_paths.empty() ? "" : task->output_paths.back();
+        }
+        return false;
+    }
+
+    SdkFileConvertRequest convert_request;
+    convert_request.input_paths = task->output_paths;
+    convert_request.source_type = "images";
+    convert_request.source_format = "image";
+    convert_request.target_type = document_target;
+    convert_request.output_format = document_target;
+    convert_request.export_type = task->export_type.empty() ? "multi-page" : task->export_type;
+    // TWAIN provider/helper 先落 BMP 中间页；文档输出必须写入最终 outputs 目录，
+    // 不能把 pages 目录或第一页 BMP 临时路径继续当成 TIFF/PDF/OFD 的目标。
+    convert_request.output_dir = (task->output_dir.empty() || IsTwainInternalPagesDir(*task, task->output_dir))
+                                     ? GetSdkOpenTaskAssetDir("twain", task->task_id, "outputs")
+                                     : task->output_dir;
+    convert_request.output_path = (LooksLikeDirectoryOutputPath(task->output_path) ||
+                                   IsTwainIntermediatePagePath(*task, task->output_path))
+                                      ? ""
+                                      : task->output_path;
+    if (convert_request.export_type == "single-page" &&
+        !task->output_path.empty() &&
+        LooksLikeDirectoryOutputPath(task->output_path) &&
+        !IsTwainInternalPagesDir(*task, task->output_path)) {
+        convert_request.output_dir = NormalizeDirectoryHintPath(task->output_path);
+    }
+    if (convert_request.export_type != "single-page" && convert_request.output_path.empty()) {
+        convert_request.output_path = JoinPath(convert_request.output_dir, "scan." + ExtensionForFileConvertFormat(document_target));
+    }
+
+    SDK_OPEN_LOG_INFO("[twain] finalize convert task={} target={} export={} output_dir={} output_path={} input_count={}",
+                      task->task_id,
+                      document_target,
+                      convert_request.export_type,
+                      convert_request.output_dir,
+                      convert_request.output_path,
+                      convert_request.input_paths.size());
+
+    task->status = "converting";
+    task->phase = "converting";
+    task->progress = 95;
+    task->message = "converting TWAIN scan pages";
+    {
+        std::lock_guard<std::mutex> lock(twain_tasks_mu_);
+        twain_tasks_[task->task_id] = *task;
+    }
+
+    if (!EnsureDirectoryRecursive(convert_request.output_dir)) {
+        task->status = "failed";
+        task->phase = "failed";
+        task->progress = 100;
+        task->message = "failed to create TWAIN conversion output directory: output_dir=" + convert_request.output_dir;
+        task->error = task->message;
+        SDK_OPEN_LOG_ERROR("[twain] finalize create output directory failed task={} output_dir={}",
+                           task->task_id,
+                           convert_request.output_dir);
+        return true;
+    }
+
+    const SdkFileConvertResult convert_result = ofd_facade_.Convert(convert_request);
+    if (IsOkStatusCode(convert_result.code)) {
+        task->output_type = document_target;
+        task->output_format = document_target;
+        task->output_dir = convert_request.output_dir;
+        task->output_path = convert_result.output_path;
+        task->output_paths = convert_result.output_paths;
+        task->last_page_path = task->output_paths.empty() ? "" : task->output_paths.back();
+        task->assets.clear();
+        for (std::vector<std::string>::const_iterator it = task->output_paths.begin();
+             it != task->output_paths.end();
+             ++it) {
+            SdkCaptureAsset asset;
+            asset.asset_id = "asset-twain-output-" + std::to_string(static_cast<long long>(task->assets.size() + 1));
+            asset.kind = "twain_scan_output";
+            asset.path = *it;
+            asset.content_type = ContentTypeForFileConvertFormat(document_target);
+            asset.size = FileSize(*it);
+            asset = AttachImageAssetUrls(task->task_id, asset);
+            RegisterImageAsset(task->connection_id, task->task_id, asset);
+            task->assets.push_back(asset);
+        }
+        task->status = "completed";
+        task->phase = "completed";
+        task->progress = 100;
+        task->message = "TWAIN scan converted";
+        task->error.clear();
+        SDK_OPEN_LOG_INFO("[twain] finalize convert completed task={} output_path={} output_count={}",
+                          task->task_id,
+                          task->output_path,
+                          task->output_paths.size());
+    } else {
+        task->status = "failed";
+        task->phase = "failed";
+        task->progress = 100;
+        task->message = convert_result.message;
+        task->error = convert_result.message;
+        SDK_OPEN_LOG_ERROR("[twain] finalize convert failed task={} code={} message={} output_dir={} output_path={}",
+                           task->task_id,
+                           convert_result.code,
+                           convert_result.message,
+                           convert_request.output_dir,
+                           convert_request.output_path);
+    }
+    return true;
+}
+
+void CommandApplicationService::DispatchTwainScanTaskEvent(const SdkTwainScanTaskEvent& event) {
+    SdkTwainScanTask task = event.task;
+    if (task.task_id.empty()) {
+        return;
+    }
+    FinalizeTwainScanTask(&task);
+    {
+        std::lock_guard<std::mutex> lock(twain_tasks_mu_);
+        twain_tasks_[task.task_id] = task;
+    }
+
+    CommandEventSink sink;
+    {
+        std::lock_guard<std::mutex> lock(command_event_sink_mu_);
+        sink = command_event_sink_;
+    }
+    if (!sink || task.connection_id.empty()) {
+        return;
+    }
+    sink(task.connection_id,
+         BuildWsEvent(event.event_name.empty() ? "twain.scan_changed" : event.event_name,
+                      Json{{"task_id", task.task_id},
+                           {"task", BuildTwainScanTaskJson(task)},
+                           {"provider", provider_names_.value("twain", "")}},
+                      event.code,
+                      task.message.empty() ? event.message : task.message));
+}
+
 Json CommandApplicationService::BuildCapabilitiesJson() const {
     Json methods = Json::array();
     for (std::vector<MethodDescriptor>::const_iterator it = methods_.begin(); it != methods_.end(); ++it) {
@@ -2286,10 +3281,14 @@ Json CommandApplicationService::BuildCapabilitiesJson() const {
          }},
         {"methods", std::move(methods)},
         {"platform_capabilities",
-         Json{{"sane",
-               Json{{"supported_platforms", Json::array({"linux"})},
-                    {"linux_only", true},
-                    {"provider", provider_names_.value("sane", "")}}}}},
+          Json{{"sane",
+                Json{{"supported_platforms", Json::array({"linux"})},
+                     {"linux_only", true},
+                     {"provider", provider_names_.value("sane", "")}}},
+               {"twain",
+                Json{{"supported_platforms", Json::array({"windows"})},
+                     {"windows_only", true},
+                     {"provider", provider_names_.value("twain", "")}}}}},
     };
 }
 
@@ -2442,7 +3441,7 @@ CommandApplicationService::ImageUploadResult CommandApplicationService::UploadIm
         return result;
     }
     const std::string extension = UploadExtensionForContentType(content_type, filename);
-    const std::string output_path = JoinLocalPath(asset_dir, "original." + extension);
+    const std::string output_path = JoinPath(asset_dir, "original." + extension);
     if (!WriteBinaryFile(output_path, content)) {
         result.code = ToCode(SdkStatusCode::InternalError);
         result.message = "failed to write uploaded file";
@@ -3284,7 +4283,7 @@ Json CommandApplicationService::HandleImageProcess(const std::string& connection
         return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "failed to create image process output directory");
     }
     if (process_request.output_path.empty()) {
-        process_request.output_path = JoinLocalPath(process_request.output_dir, "final." + (process_request.output_format == "tiff" ? "tiff" : process_request.output_format));
+        process_request.output_path = JoinPath(process_request.output_dir, "final." + (process_request.output_format == "tiff" ? "tiff" : process_request.output_format));
     }
 
     const SdkImageProcessResult result = graphic_facade_.Process(process_request);
@@ -3434,7 +4433,7 @@ Json CommandApplicationService::HandleImageProcessPage(const std::string& connec
         return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "failed to create image process output directory");
     }
     if (page_request.output_path.empty()) {
-        page_request.output_path = JoinLocalPath(page_request.output_dir, "page_processed." + source_output_extension);
+        page_request.output_path = JoinPath(page_request.output_dir, "page_processed." + source_output_extension);
     }
 
     const SdkPageProcessResult page_result = graphic_facade_.ProcessPage(page_request);
@@ -3588,7 +4587,7 @@ Json CommandApplicationService::HandleImageApplyColorMode(const std::string& con
         return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "failed to create image process output directory");
     }
     if (color_request.output_path.empty()) {
-        color_request.output_path = JoinLocalPath(output_dir, "color_processed." + source_output_extension);
+        color_request.output_path = JoinPath(output_dir, "color_processed." + source_output_extension);
     }
 
     const SdkColorModeResult color_result = graphic_facade_.ApplyColorMode(color_request);
@@ -3964,7 +4963,7 @@ Json CommandApplicationService::HandleOcrRecognize(const std::string& connection
         ocr_request.output_dir = GetSdkOpenTaskAssetDir("ocr", ocr_asset_task_id, "assets");
     }
     if (ocr_request.export_type == "multi-page" && ocr_request.output_path.empty()) {
-        ocr_request.output_path = JoinLocalPath(ocr_request.output_dir, "recognized." + ocr_request.format);
+        ocr_request.output_path = JoinPath(ocr_request.output_dir, "recognized." + ocr_request.format);
     }
     if (!ocr_request.output_dir.empty() && !EnsureDirectoryRecursive(ocr_request.output_dir)) {
         return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "failed to create ocr output directory");
@@ -4623,8 +5622,430 @@ Json CommandApplicationService::HandleSaneScanCancel(const std::string& connecti
                            result.message,
                            Json{{"accepted", result.accepted},
                                 {"task_id", result.task_id},
-                                {"task", BuildSaneScanTaskJson(result.task)},
-                                {"provider", provider_names_.value("sane", "")}});
+                                 {"task", BuildSaneScanTaskJson(result.task)},
+                                 {"provider", provider_names_.value("sane", "")}});
+}
+
+Json CommandApplicationService::HandleTwainStatus(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    const SdkTwainStatusResult result = twain_facade_.GetStatus();
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           BuildTwainStatusJson(result, provider_names_.value("twain", "")));
+}
+
+Json CommandApplicationService::HandleTwainList(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkTwainListRequest list_request;
+    list_request.refresh = GetOptionalBoolField(request.params, "refresh", true);
+    const SdkTwainListResult result = twain_facade_.ListSources(list_request);
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"sources", BuildTwainSourcesJson(result.sources)},
+                                {"count", result.sources.size()},
+                                {"generation", result.generation},
+                                {"provider", provider_names_.value("twain", "")}});
+}
+
+Json CommandApplicationService::HandleTwainWatchStart(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkTwainWatchRequest watch_request;
+    watch_request.connection_id = connection_id;
+    watch_request.enabled = true;
+    const SdkTwainWatchResult result = twain_facade_.WatchStart(watch_request);
+    if (IsOkStatusCode(result.code) && result.watching) {
+        RememberTwainWatchConnection(connection_id);
+    }
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"watching", result.watching},
+                                {"generation", result.generation},
+                                {"provider", provider_names_.value("twain", "")}});
+}
+
+Json CommandApplicationService::HandleTwainWatchStop(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkTwainWatchRequest watch_request;
+    watch_request.connection_id = connection_id;
+    watch_request.enabled = false;
+    const SdkTwainWatchResult result = twain_facade_.WatchStop(watch_request);
+    if (IsOkStatusCode(result.code)) {
+        ForgetTwainWatchConnection(connection_id);
+    }
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"watching", result.watching},
+                                {"generation", result.generation},
+                                {"provider", provider_names_.value("twain", "")}});
+}
+
+Json CommandApplicationService::HandleTwainOpen(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkTwainOpenRequest open_request;
+    open_request.source_id = GetOptionalStringField(request.params, "source_id");
+    if (open_request.source_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "source_id required");
+    }
+    const SdkTwainOpenResult result = twain_facade_.OpenSource(open_request);
+    if (IsOkStatusCode(result.code) && result.opened && !result.session_id.empty()) {
+        RememberOpenedTwainSession(connection_id, result.session_id);
+    }
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"opened", result.opened},
+                                {"session_id", result.session_id},
+                                {"source", BuildTwainSourceJson(result.source)},
+                                {"provider", provider_names_.value("twain", "")}});
+}
+
+Json CommandApplicationService::HandleTwainClose(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkTwainCloseRequest close_request;
+    close_request.session_id = GetOptionalStringField(request.params, "session_id");
+    if (close_request.session_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "session_id required");
+    }
+    const SdkTwainCloseResult result = twain_facade_.CloseSource(close_request);
+    if (result.closed || result.code == ToCode(SdkStatusCode::TwainSourceNotFound)) {
+        ForgetOpenedTwainSession(connection_id, close_request.session_id);
+    }
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"closed", result.closed}, {"was_opened", result.was_opened}});
+}
+
+Json CommandApplicationService::HandleTwainGetCapabilities(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkTwainGetCapabilitiesRequest capabilities_request;
+    capabilities_request.session_id = GetOptionalStringField(request.params, "session_id");
+    if (capabilities_request.session_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "session_id required");
+    }
+    const SdkTwainGetCapabilitiesResult result = twain_facade_.GetCapabilities(capabilities_request);
+    Json capabilities = Json::array();
+    for (std::vector<SdkTwainCapability>::const_iterator it = result.capabilities.begin();
+         it != result.capabilities.end();
+         ++it) {
+        capabilities.push_back(BuildTwainCapabilityJson(*it));
+    }
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"capabilities", capabilities},
+                                {"count", result.capabilities.size()},
+                                {"provider", provider_names_.value("twain", "")}});
+}
+
+Json CommandApplicationService::HandleTwainSetCapabilities(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkTwainSetCapabilitiesRequest set_request;
+    set_request.session_id = GetOptionalStringField(request.params, "session_id");
+    const Json capabilities_json = request.params.find("capabilities") == request.params.end() ? Json() : request.params["capabilities"];
+    const Json items_json = request.params.find("items") == request.params.end() ? Json() : request.params["items"];
+    set_request.capabilities = ParseTwainCapabilitySetItems(capabilities_json.is_null() ? items_json : capabilities_json);
+    if (set_request.capabilities.empty() && !items_json.is_null()) {
+        set_request.capabilities = ParseTwainCapabilitySetItems(items_json);
+    }
+    if (set_request.session_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "session_id required");
+    }
+    if (set_request.capabilities.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "capabilities required");
+    }
+    const SdkTwainSetCapabilitiesResult result = twain_facade_.SetCapabilities(set_request);
+    Json results = Json::array();
+    for (std::vector<SdkTwainCapabilitySetResultItem>::const_iterator it = result.results.begin();
+         it != result.results.end();
+         ++it) {
+        results.push_back(BuildTwainCapabilitySetResultJson(*it));
+    }
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"applied", result.applied},
+                                {"requires_reload", result.requires_reload},
+                                {"results", results},
+                                {"provider", provider_names_.value("twain", "")}});
+}
+
+Json CommandApplicationService::HandleTwainProfileList(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    const SdkTwainProfileListResult result = twain_facade_.ListProfiles(ParseTwainProfileRequest(request.params));
+    Json profiles = Json::array();
+    for (std::vector<SdkTwainProfile>::const_iterator it = result.profiles.begin(); it != result.profiles.end(); ++it) {
+        profiles.push_back(BuildTwainProfileJson(*it));
+    }
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"profiles", profiles},
+                                {"count", result.profiles.size()},
+                                {"provider", provider_names_.value("twain", "")}});
+}
+
+Json CommandApplicationService::HandleTwainProfileSave(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkTwainProfileRequest profile_request = ParseTwainProfileRequest(request.params);
+    if (profile_request.name.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "name required");
+    }
+    const SdkTwainProfileResult result = twain_facade_.SaveProfile(profile_request);
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"saved", result.saved},
+                                {"profile", BuildTwainProfileJson(result.profile)},
+                                {"provider", provider_names_.value("twain", "")}});
+}
+
+Json CommandApplicationService::HandleTwainProfileApply(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkTwainProfileRequest profile_request = ParseTwainProfileRequest(request.params);
+    if (profile_request.profile_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "profile_id required");
+    }
+    const SdkTwainProfileResult result = twain_facade_.ApplyProfile(profile_request);
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"applied", result.applied},
+                                {"profile", BuildTwainProfileJson(result.profile)},
+                                {"provider", provider_names_.value("twain", "")}});
+}
+
+Json CommandApplicationService::HandleTwainProfileDelete(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkTwainProfileRequest profile_request = ParseTwainProfileRequest(request.params);
+    if (profile_request.profile_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "profile_id required");
+    }
+    const SdkTwainProfileResult result = twain_facade_.DeleteProfile(profile_request);
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"deleted", result.deleted},
+                                {"profile", BuildTwainProfileJson(result.profile)},
+                                {"provider", provider_names_.value("twain", "")}});
+}
+
+Json CommandApplicationService::HandleTwainScan(const std::string& connection_id, const Request& request) {
+    // TWAIN 是独立扫描域：这里只处理 command 协议和 task/asset 补全，DSM/Source 状态机下沉到 provider。
+    const AuthorizationService::SessionResult session_result = ConsumeQuota(connection_id, request.method, request.request_id);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkTwainScanRequest scan_request;
+    scan_request.connection_id = connection_id;
+    scan_request.session_id = GetOptionalStringField(request.params, "session_id");
+    scan_request.show_ui = GetOptionalBoolField(request.params, "show_ui", false);
+    scan_request.output_type = GetOptionalStringField(request.params, "output_type");
+    // TWAIN 的页格式由 ICAP_IMAGEFILEFORMAT/ICAP_XFERMECH 决定，清掉 DTO 默认 jpg，避免旧默认值泄漏到 task。
+    scan_request.output_format.clear();
+    const std::string top_output_path = GetOptionalStringField(request.params, "output_path");
+    const std::string top_output_dir = GetOptionalStringField(request.params, "output_dir");
+    if (!top_output_path.empty()) {
+        std::string output_path_error;
+        if (!ApplyTwainOutputPathHint(top_output_path, "output_path", &scan_request, &output_path_error)) {
+            return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, output_path_error);
+        }
+    }
+    if (!top_output_dir.empty()) {
+        std::string normalized_output_dir;
+        std::string output_dir_error;
+        if (!ValidateTwainOutputDirectoryPath(top_output_dir, "output_dir", &normalized_output_dir, &output_dir_error)) {
+            return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, output_dir_error);
+        }
+        scan_request.output_dir = normalized_output_dir;
+    }
+    scan_request.export_type = NormalizeExportType(GetOptionalStringField(request.params, "export_type"));
+    const Json output = GetOptionalObjectField(request.params, "output");
+    if (!output.empty()) {
+        const std::string output_type = GetOptionalStringField(output, "type");
+        const std::string output_path = GetOptionalStringField(output, "path");
+        const std::string output_dir = GetOptionalStringField(output, "dir");
+        const std::string export_type = GetOptionalStringField(output, "export_type");
+        if (!output_type.empty()) scan_request.output_type = output_type;
+        if (!output_path.empty()) {
+            std::string output_path_error;
+            if (!ApplyTwainOutputPathHint(output_path, "output.path", &scan_request, &output_path_error)) {
+                return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, output_path_error);
+            }
+        }
+        if (!output_dir.empty()) {
+            std::string normalized_output_dir;
+            std::string output_dir_error;
+            if (!ValidateTwainOutputDirectoryPath(output_dir, "output.dir", &normalized_output_dir, &output_dir_error)) {
+                return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, output_dir_error);
+            }
+            scan_request.output_dir = normalized_output_dir;
+        }
+        if (!export_type.empty()) scan_request.export_type = NormalizeExportType(export_type);
+    }
+    if (scan_request.output_type.empty()) {
+        scan_request.output_type = "images";
+    }
+    scan_request.output_type = NormalizeImageFormat(scan_request.output_type);
+    if (!IsTwainOutputType(scan_request.output_type)) {
+        return BuildWsResponse(request.request_id,
+                               SdkStatusCode::InvalidParams,
+                               "TWAIN output type must be images, pdf, ofd, or tiff");
+    }
+    if (!scan_request.output_dir.empty()) {
+        std::string normalized_output_dir;
+        std::string output_dir_error;
+        if (!EnsureTwainOutputDirectoryReady(scan_request.output_dir, &normalized_output_dir, &output_dir_error)) {
+            return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, output_dir_error);
+        }
+        scan_request.output_dir = normalized_output_dir;
+    }
+    if (scan_request.export_type.empty()) {
+        scan_request.export_type = "multi-page";
+    }
+    if (!IsTwainExportType(scan_request.export_type)) {
+        return BuildWsResponse(request.request_id,
+                               SdkStatusCode::InvalidParams,
+                               "TWAIN export_type must be multi-page or single-page");
+    }
+    // output.type 是 command 层协议语义，先在这里收口；驱动层格式/传输方式统一由 TWAIN capability 决定。
+    if (scan_request.output_type == "images") {
+        scan_request.export_type = "single-page";
+    }
+    // 传给 provider 的 output_format 仅表示 TWAIN 页传输格式，不承载 PDF/OFD/TIFF 这类后处理目标。
+    scan_request.output_format.clear();
+    if (scan_request.session_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "session_id required");
+    }
+    SdkTwainScanResult result = twain_facade_.Scan(scan_request);
+    if (!result.task_id.empty()) {
+        FinalizeTwainScanTask(&result.task);
+        std::lock_guard<std::mutex> lock(twain_tasks_mu_);
+        twain_tasks_[result.task_id] = result.task;
+    }
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"accepted", result.accepted},
+                                {"task_id", result.task_id},
+                                {"task", BuildTwainScanTaskJson(result.task)},
+                                {"provider", provider_names_.value("twain", "")}});
+}
+
+Json CommandApplicationService::HandleTwainScanGet(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkTwainScanGetRequest get_request;
+    get_request.task_id = GetOptionalStringField(request.params, "task_id");
+    if (get_request.task_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "task_id required");
+    }
+    SdkTwainScanTask cached_terminal_task;
+    bool has_cached_terminal_task = false;
+    {
+        std::lock_guard<std::mutex> lock(twain_tasks_mu_);
+        std::map<std::string, SdkTwainScanTask>::iterator it = twain_tasks_.find(get_request.task_id);
+        // bridge/helper 扫描的完成态产生在独立进程内；pending 缓存必须继续下探 provider，
+        // 否则 demo 轮询会一直拿到主进程里的旧 running 快照。
+        if (it != twain_tasks_.end() && IsTwainTaskTerminal(it->second)) {
+            cached_terminal_task = it->second;
+            has_cached_terminal_task = true;
+        }
+    }
+    if (has_cached_terminal_task) {
+        FinalizeTwainScanTask(&cached_terminal_task);
+        {
+            std::lock_guard<std::mutex> lock(twain_tasks_mu_);
+            twain_tasks_[get_request.task_id] = cached_terminal_task;
+        }
+        return BuildWsResponse(request.request_id,
+                               SdkStatusCode::Ok,
+                               "ok",
+                               Json{{"task_id", get_request.task_id},
+                                    {"accepted", true},
+                                    {"task", BuildTwainScanTaskJson(cached_terminal_task)},
+                                    {"provider", provider_names_.value("twain", "")}});
+    }
+    SdkTwainScanResult result = twain_facade_.GetScan(get_request);
+    FinalizeTwainScanTask(&result.task);
+    if (!result.task_id.empty()) {
+        std::lock_guard<std::mutex> lock(twain_tasks_mu_);
+        twain_tasks_[result.task_id] = result.task;
+    }
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           Json{{"accepted", result.accepted},
+                                {"task_id", result.task_id},
+                                {"task", BuildTwainScanTaskJson(result.task)},
+                                {"provider", provider_names_.value("twain", "")}});
+}
+
+Json CommandApplicationService::HandleTwainScanCancel(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    SdkTwainScanCancelRequest cancel_request;
+    cancel_request.task_id = GetOptionalStringField(request.params, "task_id");
+    if (cancel_request.task_id.empty()) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "task_id required");
+    }
+    const SdkTwainScanResult result = twain_facade_.CancelScan(cancel_request);
+    {
+        std::lock_guard<std::mutex> lock(twain_tasks_mu_);
+        std::map<std::string, SdkTwainScanTask>::iterator it = twain_tasks_.find(cancel_request.task_id);
+        if (it != twain_tasks_.end()) {
+            it->second.message = "cancel requested";
+            it->second.cancel_requested = true;
+        }
+    }
+    return BuildWsResponse(request.request_id,
+                           result.code,
+                           result.message,
+                           BuildTwainScanCancelAckJson(result, provider_names_.value("twain", "")));
 }
 
 Json CommandApplicationService::HandleFileConvert(const std::string& connection_id, const Request& request) {
@@ -4776,7 +6197,7 @@ Json CommandApplicationService::HandleFileConvert(const std::string& connection_
             if (!EnsureDirectoryRecursive(input_dir)) {
                 return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "failed to create file convert input directory");
             }
-            const std::string base64_input_path = JoinLocalPath(input_dir, "base64." + DataUrlImageExtension(base64_payload));
+            const std::string base64_input_path = JoinPath(input_dir, "base64." + DataUrlImageExtension(base64_payload));
             if (!WriteBinaryFile(base64_input_path, decoded)) {
                 return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "failed to write base64 image");
             }
@@ -4842,7 +6263,7 @@ Json CommandApplicationService::HandleFileConvert(const std::string& connection_
     }
     if (convert_request.output_path.empty() && convert_request.export_type == "multi-page") {
         convert_request.output_path =
-            JoinLocalPath(convert_request.output_dir,
+            JoinPath(convert_request.output_dir,
                           "converted." + ExtensionForFileConvertFormat(convert_request.output_format));
     }
 
@@ -4854,7 +6275,7 @@ Json CommandApplicationService::HandleFileConvert(const std::string& connection_
     if (use_graphic_convert) {
         if (convert_request.output_path.empty()) {
             convert_request.output_path =
-                JoinLocalPath(convert_request.output_dir, "converted." + ExtensionForImageFormat(convert_request.output_format));
+                JoinPath(convert_request.output_dir, "converted." + ExtensionForImageFormat(convert_request.output_format));
         }
 
         SdkFormatConvertRequest format_request;
@@ -5150,6 +6571,137 @@ bool CommandApplicationService::ForgetSaneWatchConnection(const std::string& con
     }
     std::lock_guard<std::mutex> lock(sane_watch_connections_mu_);
     return sane_watch_connections_.erase(connection_id) > 0;
+}
+
+void CommandApplicationService::RememberTwainWatchConnection(const std::string& connection_id) {
+    if (connection_id.empty()) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(twain_watch_connections_mu_);
+    twain_watch_connections_.insert(connection_id);
+}
+
+bool CommandApplicationService::ForgetTwainWatchConnection(const std::string& connection_id) {
+    if (connection_id.empty()) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(twain_watch_connections_mu_);
+    return twain_watch_connections_.erase(connection_id) > 0;
+}
+
+void CommandApplicationService::RememberOpenedTwainSession(const std::string& connection_id, const std::string& session_id) {
+    if (connection_id.empty() || session_id.empty()) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(opened_twain_sessions_mu_);
+    opened_twain_sessions_by_connection_[connection_id].insert(session_id);
+}
+
+void CommandApplicationService::ForgetOpenedTwainSession(const std::string& connection_id, const std::string& session_id) {
+    if (connection_id.empty() || session_id.empty()) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(opened_twain_sessions_mu_);
+    std::map<std::string, std::set<std::string> >::iterator it =
+        opened_twain_sessions_by_connection_.find(connection_id);
+    if (it == opened_twain_sessions_by_connection_.end()) {
+        return;
+    }
+    it->second.erase(session_id);
+    if (it->second.empty()) {
+        opened_twain_sessions_by_connection_.erase(it);
+    }
+}
+
+std::vector<std::string> CommandApplicationService::ClearOpenedTwainSessions(const std::string& connection_id) {
+    std::vector<std::string> sessions;
+    std::lock_guard<std::mutex> lock(opened_twain_sessions_mu_);
+    std::map<std::string, std::set<std::string> >::iterator it =
+        opened_twain_sessions_by_connection_.find(connection_id);
+    if (it == opened_twain_sessions_by_connection_.end()) {
+        return sessions;
+    }
+    sessions.assign(it->second.begin(), it->second.end());
+    opened_twain_sessions_by_connection_.erase(it);
+    return sessions;
+}
+
+std::vector<std::string> CommandApplicationService::ClearAllOpenedTwainSessions() {
+    std::set<std::string> unique_sessions;
+    std::lock_guard<std::mutex> lock(opened_twain_sessions_mu_);
+    for (std::map<std::string, std::set<std::string> >::const_iterator it = opened_twain_sessions_by_connection_.begin();
+         it != opened_twain_sessions_by_connection_.end();
+         ++it) {
+        unique_sessions.insert(it->second.begin(), it->second.end());
+    }
+    opened_twain_sessions_by_connection_.clear();
+    return std::vector<std::string>(unique_sessions.begin(), unique_sessions.end());
+}
+
+std::vector<std::string> CommandApplicationService::CancelActiveTwainTasksForSessions(const std::vector<std::string>& session_ids) {
+    std::vector<std::string> task_ids;
+    if (session_ids.empty()) {
+        return task_ids;
+    }
+    const std::set<std::string> session_set(session_ids.begin(), session_ids.end());
+    {
+        std::lock_guard<std::mutex> lock(twain_tasks_mu_);
+        for (std::map<std::string, SdkTwainScanTask>::const_iterator it = twain_tasks_.begin();
+             it != twain_tasks_.end();
+             ++it) {
+            if (session_set.find(it->second.session_id) != session_set.end() &&
+                !IsTwainTaskTerminal(it->second)) {
+                task_ids.push_back(it->first);
+            }
+        }
+    }
+    for (std::vector<std::string>::const_iterator it = task_ids.begin(); it != task_ids.end(); ++it) {
+        SdkTwainScanCancelRequest cancel_request;
+        cancel_request.task_id = *it;
+        const SdkTwainScanResult cancel_result = twain_facade_.CancelScan(cancel_request);
+        SDK_OPEN_LOG_INFO("[command_application] cleanup twain.scan_cancel task={} code={} accepted={}",
+                          cancel_request.task_id,
+                          cancel_result.code,
+                          cancel_result.accepted);
+        if (!cancel_result.task_id.empty()) {
+            std::lock_guard<std::mutex> lock(twain_tasks_mu_);
+            twain_tasks_[cancel_result.task_id] = cancel_result.task;
+        }
+    }
+    return task_ids;
+}
+
+void CommandApplicationService::WaitTwainTasksTerminal(const std::vector<std::string>& task_ids) {
+    if (task_ids.empty()) {
+        return;
+    }
+    // TWAIN cancel 在 provider 的 STA 线程内异步落地；关闭 Source 前短暂等待，避免 close 立即撞上 active scan。
+    for (int attempt = 0; attempt < 20; ++attempt) {
+        bool all_terminal = true;
+        {
+            std::lock_guard<std::mutex> lock(twain_tasks_mu_);
+            for (std::vector<std::string>::const_iterator it = task_ids.begin(); it != task_ids.end(); ++it) {
+                const std::map<std::string, SdkTwainScanTask>::const_iterator task_it = twain_tasks_.find(*it);
+                if (task_it != twain_tasks_.end() && !IsTwainTaskTerminal(task_it->second)) {
+                    all_terminal = false;
+                    break;
+                }
+            }
+        }
+        if (all_terminal) {
+            return;
+        }
+        for (std::vector<std::string>::const_iterator it = task_ids.begin(); it != task_ids.end(); ++it) {
+            SdkTwainScanGetRequest get_request;
+            get_request.task_id = *it;
+            const SdkTwainScanResult get_result = twain_facade_.GetScan(get_request);
+            if (!get_result.task_id.empty()) {
+                std::lock_guard<std::mutex> lock(twain_tasks_mu_);
+                twain_tasks_[get_result.task_id] = get_result.task;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
 }
 
 void CommandApplicationService::RememberCommandConnection(const std::string& connection_id) {

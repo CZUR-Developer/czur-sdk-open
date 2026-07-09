@@ -63,6 +63,21 @@ void PushAlwaysSupportedCapabilities(std::vector<std::string>* capabilities) {
     capabilities->push_back("sane.scan");
     capabilities->push_back("sane.scan_get");
     capabilities->push_back("sane.scan_cancel");
+    capabilities->push_back("twain.status");
+    capabilities->push_back("twain.list");
+    capabilities->push_back("twain.watch_start");
+    capabilities->push_back("twain.watch_stop");
+    capabilities->push_back("twain.open");
+    capabilities->push_back("twain.close");
+    capabilities->push_back("twain.get_capabilities");
+    capabilities->push_back("twain.set_capabilities");
+    capabilities->push_back("twain.profile_list");
+    capabilities->push_back("twain.profile_save");
+    capabilities->push_back("twain.profile_apply");
+    capabilities->push_back("twain.profile_delete");
+    capabilities->push_back("twain.scan");
+    capabilities->push_back("twain.scan_get");
+    capabilities->push_back("twain.scan_cancel");
 }
 
 } // namespace
@@ -125,7 +140,7 @@ std::string CapabilityToEntitlementQuotaBucket(const std::string& capability) {
         capability == "file.convert.svip_plus") {
         return "trial_vip";
     }
-    if (capability == "capture.take") {
+    if (capability == "capture.take" || capability == "sane.scan" || capability == "twain.scan") {
         return "capture";
     }
     if (capability == "image.process" || capability == "image.process_page" ||

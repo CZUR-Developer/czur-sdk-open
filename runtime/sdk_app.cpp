@@ -291,7 +291,8 @@ SdkApp::SdkApp(const SdkConfig& config, ProviderBundle providers)
                            {"ofd", "czur-ofd-provider"},
                            {"auth", "czur-sdk-auth-provider"},
                            {"recognition", "czur-recognition-provider"},
-                           {"sane", "czur-sane-provider"}};
+                           {"sane", "czur-sane-provider"},
+                           {"twain", "czur-private-windows-twain-provider"}};
 #else
     provider_names_ = Json{{"device", providers_.device_provider ? providers_.device_provider->ProviderName() : ""},
                            {"graphic", providers_.graphic_provider ? providers_.graphic_provider->ProviderName() : ""},
@@ -302,7 +303,8 @@ SdkApp::SdkApp(const SdkConfig& config, ProviderBundle providers)
                            {"auth", providers_.auth_provider ? providers_.auth_provider->ProviderName() : ""},
                            {"recognition",
                             providers_.recognition_provider ? providers_.recognition_provider->ProviderName() : ""},
-                           {"sane", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""}};
+                           {"sane", providers_.sane_provider ? providers_.sane_provider->ProviderName() : ""},
+                           {"twain", providers_.twain_provider ? providers_.twain_provider->ProviderName() : ""}};
 #endif
     command_application_service_->SetProviderNames(provider_names_);
     admin_application_service_.SetStatusSupplier([this]() { return BuildStatusJson(); });

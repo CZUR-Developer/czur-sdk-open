@@ -190,6 +190,7 @@ set(SDK_OPEN_RUNTIME_SRCS
     facade/ofd_facade.cpp
     facade/recognition_facade.cpp
     facade/sane_facade.cpp
+    facade/twain_facade.cpp
 )
 
 add_library(sdk_open_logging STATIC
@@ -252,7 +253,6 @@ target_link_libraries(sdk_mock_providers PUBLIC
 
 add_executable(sdk_open_app
     runtime/sdk_open_main.cpp
-    providers/private_windows/private_windows_provider_factory.cpp
 )
 target_include_directories(sdk_open_app PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/runtime"
@@ -270,14 +270,53 @@ target_link_libraries(sdk_open_app PRIVATE
 set_target_properties(sdk_open_app PROPERTIES
     VERSION "${SDK_OPEN_VERSION}.${SDK_OPEN_BUILD}"
 )
-if(WIN32)
-    target_link_libraries(sdk_open_app PRIVATE Advapi32)
+if(WIN32 AND SDK_OPEN_USE_PRIVATE_PROVIDER)
+    target_sources(sdk_open_app PRIVATE
+        providers/private_windows/private_windows_provider_factory.cpp
+    )
+    target_link_libraries(sdk_open_app PRIVATE
+        Advapi32
+    )
 endif()
 
 if(SDK_OPEN_USE_PRIVATE_PROVIDER)
     target_compile_definitions(sdk_open_app PRIVATE SDK_USE_PRIVATE_PROVIDER)
     if(WIN32)
+        # sdk_open 只复制 private DLL；真实 TWAIN/provider/helper 由 sdk_private/module 层构建和打包。
         add_dependencies(sdk_open_app sdk_private_providers)
+        if(TARGET twain_helper)
+            add_dependencies(sdk_open_app twain_helper)
+        endif()
+        add_custom_command(TARGET sdk_open_app POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "$<TARGET_FILE:sdk_private_providers>"
+                "$<TARGET_FILE_DIR:sdk_open_app>/sdk_private_providers.dll"
+            COMMENT "Copy private provider DLL into sdk_open_app runtime directory"
+        )
+        if(TARGET twain_helper)
+            add_custom_command(TARGET sdk_open_app POST_BUILD
+                COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                    "$<TARGET_FILE:twain_helper>"
+                    "$<TARGET_FILE_DIR:sdk_open_app>/$<TARGET_FILE_NAME:twain_helper>"
+                COMMENT "Copy TWAIN helper into sdk_open_app runtime directory"
+            )
+            if(TWAIN_HELPER_X86_EXE AND EXISTS "${TWAIN_HELPER_X86_EXE}")
+                add_custom_command(TARGET sdk_open_app POST_BUILD
+                    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                        "${TWAIN_HELPER_X86_EXE}"
+                        "$<TARGET_FILE_DIR:sdk_open_app>/twain_helper_x86.exe"
+                    COMMENT "Copy prebuilt x86 TWAIN helper into sdk_open_app runtime directory"
+                )
+            endif()
+            if(TWAIN_HELPER_X64_EXE AND EXISTS "${TWAIN_HELPER_X64_EXE}")
+                add_custom_command(TARGET sdk_open_app POST_BUILD
+                    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                        "${TWAIN_HELPER_X64_EXE}"
+                        "$<TARGET_FILE_DIR:sdk_open_app>/twain_helper_x64.exe"
+                    COMMENT "Copy prebuilt x64 TWAIN helper into sdk_open_app runtime directory"
+                )
+            endif()
+        endif()
     else()
         target_link_libraries(sdk_open_app PRIVATE sdk_private_providers)
     endif()
@@ -488,10 +527,6 @@ elseif(BUILD_SDK_WEB)
     set(SDK_WEB_DEMO_DIST_DIR "${SDK_WEB_DEMO_PROJECT_DIR}/dist")
     set(SDK_WEB_ADMIN_TARGET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/web/admin")
     set(SDK_WEB_DEMO_TARGET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/web/demo")
-    set(SDK_WEB_RUNTIME_DIR "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
-    if(CMAKE_CONFIGURATION_TYPES)
-        set(SDK_WEB_RUNTIME_DIR "${SDK_WEB_RUNTIME_DIR}/$<CONFIG>")
-    endif()
 
     add_custom_target(sdk_web_admin_build
         COMMAND "${CMAKE_COMMAND}" -E chdir "${SDK_WEB_ADMIN_PROJECT_DIR}" "${PNPM_EXECUTABLE}" install --force --no-frozen-lockfile
@@ -513,17 +548,12 @@ elseif(BUILD_SDK_WEB)
         COMMAND "${CMAKE_COMMAND}" -E remove_directory "${SDK_WEB_DEMO_TARGET_DIR}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${SDK_WEB_DEMO_TARGET_DIR}"
         COMMAND "${CMAKE_COMMAND}" -E copy_directory "${SDK_WEB_DEMO_DIST_DIR}" "${SDK_WEB_DEMO_TARGET_DIR}"
-        COMMAND "${CMAKE_COMMAND}" -E remove_directory "${SDK_WEB_RUNTIME_DIR}/web/admin"
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "${SDK_WEB_RUNTIME_DIR}/web/admin"
-        COMMAND "${CMAKE_COMMAND}" -E copy_directory "${SDK_WEB_ADMIN_DIST_DIR}" "${SDK_WEB_RUNTIME_DIR}/web/admin"
-        COMMAND "${CMAKE_COMMAND}" -E remove_directory "${SDK_WEB_RUNTIME_DIR}/web/demo"
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "${SDK_WEB_RUNTIME_DIR}/web/demo"
-        COMMAND "${CMAKE_COMMAND}" -E copy_directory "${SDK_WEB_DEMO_DIST_DIR}" "${SDK_WEB_RUNTIME_DIR}/web/demo"
         COMMENT "Build sdk web assets and copy dist into web/admin|demo"
     )
 
     add_dependencies(sdk_open_app sdk_web_assets)
     add_custom_command(TARGET sdk_open_app POST_BUILD
+        # 运行目录复制必须挂在 sdk_open_app POST_BUILD，避免 sdk_web_assets 反向依赖 sdk_open_app 形成 CMake 环。
         COMMAND "${CMAKE_COMMAND}" -E remove_directory "$<TARGET_FILE_DIR:sdk_open_app>/web/admin"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:sdk_open_app>/web/admin"
         COMMAND "${CMAKE_COMMAND}" -E copy_directory "${SDK_WEB_ADMIN_DIST_DIR}" "$<TARGET_FILE_DIR:sdk_open_app>/web/admin"

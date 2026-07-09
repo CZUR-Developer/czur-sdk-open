@@ -39,6 +39,32 @@ bool IsAbsolutePath(const std::string& path) {
            (path[2] == '/' || path[2] == '\\');
 }
 
+#if defined(_WIN32)
+bool IsWindowsDriveOnlyPath(const std::string& path) {
+    return path.size() == 2 &&
+           std::isalpha(static_cast<unsigned char>(path[0])) &&
+           path[1] == ':';
+}
+
+bool IsWindowsDriveRootLikePath(const std::string& path) {
+    if (path.size() < 3 ||
+        !std::isalpha(static_cast<unsigned char>(path[0])) ||
+        path[1] != ':') {
+        return false;
+    }
+    for (std::string::size_type i = 2; i < path.size(); ++i) {
+        if (path[i] != '/' && path[i] != '\\') {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::string NormalizeWindowsDriveRootPath(const std::string& path) {
+    return path.substr(0, 2) + "\\";
+}
+#endif
+
 bool DirectoryExists(const std::string& path) {
     if (path.empty()) {
         return false;
@@ -130,6 +156,14 @@ bool EnsureDirectoryRecursive(const std::string& path) {
     if (path.empty()) {
         return false;
     }
+#if defined(_WIN32)
+    if (IsWindowsDriveOnlyPath(path)) {
+        return DirectoryExists(path + "\\");
+    }
+    if (IsWindowsDriveRootLikePath(path)) {
+        return DirectoryExists(NormalizeWindowsDriveRootPath(path));
+    }
+#endif
     if (DirectoryExists(path)) {
         return true;
     }

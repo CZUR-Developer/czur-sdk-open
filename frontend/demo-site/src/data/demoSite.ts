@@ -25,6 +25,7 @@ export const navigationItems: NavigationItem[] = [
   { key: 'ocr-recognition', labelKey: 'nav.ocrRecognition', to: '/ocr-recognition' },
   { key: 'file-conversion', labelKey: 'nav.fileConversion', to: '/file-conversion' },
   { key: 'sane-scanning', labelKey: 'nav.saneScanning', to: '/sane-scanning' },
+  { key: 'twain-scanning', labelKey: 'nav.twainScanning', to: '/twain-scanning' },
 ];
 
 export const shellStatusItems: ShellStatusItem[] = [
