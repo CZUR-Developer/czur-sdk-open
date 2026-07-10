@@ -124,11 +124,15 @@ ws://127.0.0.1:17090
     "expires_in": 7200,
     "auth_context": {
       "is_valid": true,
-      "account_type": "svip",
-      "account_type_code": 1,
+      "account_type": "trial",
+      "account_type_code": 4,
+      "licensed_account_type": "svip",
+      "licensed_account_type_code": 1,
       "auth_scene": "plugin",
       "license_mode": "offline_api_key",
-      "entitlement_state": "offline_limited",
+      "host_auth_mode": "activation_required",
+      "entitlement_state": "offline_trial",
+      "commercial_authorized": false,
       "machine_code": "MC-xxxx",
       "device_scope": [
         { "vid": 4660, "pid": 22136 }
@@ -189,7 +193,7 @@ ws://127.0.0.1:17090
 
 成功后：
 
-- `auth_context.entitlement_state` 会从 `offline_limited` 切到 `offline_unlocked`
+- `auth_context.entitlement_state` 会从 `offline_trial` 或 `offline_limited` 切到 `offline_unlocked`
 - 服务端会立即返回新的 `session_token`
 - `capture.take`、图像处理类方法、`file.convert` 的本地 quota 限制停止生效
 
@@ -449,15 +453,18 @@ OCR 任务查询/取消示例：
 ### 离线 API Key
 
 - `license_mode` 为 `offline_api_key`
-- 默认状态为 `offline_limited`
+- `host_auth_mode=activation_required` 时默认状态为 `offline_trial`；旧模式未要求 Host 激活时为 `offline_limited`
 - 当前机器码会通过 `auth_context.machine_code` 返回
-- `capture.take`、图像处理类方法、`file.convert` 默认走本地 quota 限制
-- `auth.activate_offline` 成功后状态切为 `offline_unlocked`
+- `commercial_authorized` 会原样透出到 `auth_context`，但不阻断离线 Host 激活
+- Host 激活前，`capture.take`、图像处理类方法、`file.convert` 走本地 quota 限制
+- `auth.activate_offline` 提交有效 Host 授权码后状态切为 `offline_unlocked`
 
 ### 在线 API Key
 
 - `license_mode` 为 `online_api_key`
 - 创建会话时会调用配置的 HTTP 授权服务
+- `commercialAuthorized=false` 或字段缺失会进入 `online_trial`；商业授权成功后进入 `online_validated`
+- 成者设备可本地自动激活 VIP/SVIP，但不能自动激活 SVIP+
 - `capture.take`、图像处理类方法、`file.convert` 每次调用前都会走远端 quota 校验
 - 当前实现直接支持 `http://...` 在线授权地址
 
