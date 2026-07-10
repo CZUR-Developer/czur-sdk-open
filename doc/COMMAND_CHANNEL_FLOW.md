@@ -124,11 +124,15 @@ Successful response example:
     "expires_in": 7200,
     "auth_context": {
       "is_valid": true,
-      "account_type": "svip",
-      "account_type_code": 1,
+      "account_type": "trial",
+      "account_type_code": 4,
+      "licensed_account_type": "svip",
+      "licensed_account_type_code": 1,
       "auth_scene": "plugin",
       "license_mode": "offline_api_key",
-      "entitlement_state": "offline_limited",
+      "host_auth_mode": "activation_required",
+      "entitlement_state": "offline_trial",
+      "commercial_authorized": false,
       "machine_code": "MC-xxxx",
       "device_scope": [
         { "vid": 4660, "pid": 22136 }
@@ -189,7 +193,7 @@ Only offline API keys use this step. The client obtains a machine-specific auth 
 
 On success:
 
-- `auth_context.entitlement_state` changes from `offline_limited` to `offline_unlocked`
+- `auth_context.entitlement_state` changes from `offline_trial` or `offline_limited` to `offline_unlocked`
 - a fresh `session_token` is returned immediately
 - local quota enforcement for `capture.take`, image-processing methods, and `file.convert` stops
 
@@ -449,15 +453,18 @@ Supported lifecycle methods:
 ### Offline API key
 
 - license mode: `offline_api_key`
-- default state: `offline_limited`
+- default state is `offline_trial` when `host_auth_mode=activation_required`; legacy keys without host activation use `offline_limited`
 - local machine code is exposed in `auth_context.machine_code`
-- `capture.take`, image-processing methods, and `file.convert` are locally quota-limited by default
-- `auth.activate_offline` upgrades the current key to `offline_unlocked`
+- `commercial_authorized` is preserved in `auth_context`, but does not block offline host activation
+- `capture.take`, image-processing methods, and `file.convert` are locally quota-limited before host activation
+- `auth.activate_offline` upgrades the current key to `offline_unlocked` after a valid host auth code
 
 ### Online API key
 
 - license mode: `online_api_key`
 - validation is performed through the configured HTTP auth service
+- `commercialAuthorized=false` or a missing field becomes `online_trial`; successful commercial authorization becomes `online_validated`
+- CZUR-owned devices may locally activate VIP/SVIP, but never SVIP+
 - quota checks for `capture.take`, image-processing methods, and `file.convert` are delegated to the same remote auth service
 - the current build supports `http://...` online auth endpoints directly
 
