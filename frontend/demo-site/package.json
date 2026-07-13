@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 17081",
     "build": "vite build",
+    "test": "node --test tests/*.test.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 18081"
   },
   "dependencies": {
