@@ -10,7 +10,8 @@ export type DemoNavKey =
   | 'ocr-recognition'
   | 'file-conversion'
   | 'sane-scanning'
-  | 'twain-scanning';
+  | 'twain-scanning'
+  | 'storage-management';
 
 export type Tone = 'primary' | 'success' | 'warning' | 'danger' | 'neutral' | 'info';
 export type ExecutionState = 'idle' | 'running' | 'success' | 'error' | 'blocked' | 'planned';

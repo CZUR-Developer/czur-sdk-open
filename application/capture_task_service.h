@@ -75,6 +75,8 @@ public:
     CaptureAssetResult GetAsset(const std::string& connection_id,
                                 const std::string& task_id,
                                 const std::string& asset_id) const;
+    std::size_t ActiveTaskCount() const;
+    std::size_t ClearFinishedTasks();
 
 private:
     void RunTask(const std::string& task_id, CaptureTaskStartRequest request);

@@ -27,6 +27,7 @@
 #include "sdk_config.h"
 #include "sdk_json_utils.h"
 #include "sdk_provider_bundle.h"
+#include "storage_facade.h"
 #include "twain_facade.h"
 #include "video_session_service.h"
 
@@ -179,6 +180,7 @@ private:
     Json HandleTwainScan(const std::string& connection_id, const Request& request);
     Json HandleTwainScanGet(const std::string& connection_id, const Request& request);
     Json HandleTwainScanCancel(const std::string& connection_id, const Request& request);
+    Json HandleStorageCleanupTemp(const std::string& connection_id, const Request& request);
 
     AuthorizationService::SessionResult RequireCapability(const std::string& connection_id,
                                                           const std::string& capability) const;
@@ -275,6 +277,7 @@ private:
     RecognitionFacade recognition_facade_;
     SaneFacade sane_facade_;
     TwainFacade twain_facade_;
+    StorageFacade storage_facade_;
     CaptureTaskService capture_task_service_;
     ImageEnhanceTaskService image_enhance_task_service_;
     StatusSupplier status_supplier_;
@@ -302,6 +305,7 @@ private:
     std::map<std::string, std::set<std::string> > opened_devices_by_connection_;
     mutable std::mutex capture_contexts_mu_;
     std::map<std::string, std::map<std::string, CaptureRuntimeContext> > capture_contexts_by_connection_;
+    mutable std::recursive_mutex storage_lifecycle_mu_;
 };
 
 } // namespace sdk

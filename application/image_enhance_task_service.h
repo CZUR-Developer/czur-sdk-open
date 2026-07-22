@@ -30,6 +30,8 @@ public:
     SdkImageEnhanceTaskResult StartTask(const SdkImageEnhanceTaskRequest& request);
     SdkImageEnhanceTaskSnapshot GetTask(const std::string& connection_id, const std::string& task_id) const;
     SdkImageEnhanceTaskResult CancelTask(const std::string& connection_id, const SdkImageEnhanceCancelRequest& request);
+    std::size_t ActiveTaskCount() const;
+    std::size_t ClearFinishedTasks();
 
 private:
     void RunTask(const std::string& task_id, SdkImageEnhanceTaskRequest request);

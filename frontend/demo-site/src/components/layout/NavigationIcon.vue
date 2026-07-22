@@ -10,6 +10,7 @@
     <path v-else-if="navKey === 'file-conversion'" d="M6 4h6l3 3v9H6zM12 4v3h3" />
     <path v-else-if="navKey === 'sane-scanning'" d="M5 5h10v4H5zM7 13h6M6 9h8v6H6z" />
     <path v-else-if="navKey === 'twain-scanning'" d="M5 4h10v4H5zM6 8h8v7H6zM8 11h4M8 13h4" />
+    <path v-else-if="navKey === 'storage-management'" d="M4 6c0-1.1 2.7-2 6-2s6 .9 6 2-2.7 2-6 2-6-.9-6-2zM4 6v4c0 1.1 2.7 2 6 2s6-.9 6-2V6M4 10v4c0 1.1 2.7 2 6 2s6-.9 6-2v-4" />
     <path v-else d="M5 5h10v3H5zM5 9h10v6H5zM8 12h4" />
   </svg>
 </template>

@@ -190,6 +190,7 @@ set(SDK_OPEN_RUNTIME_SRCS
     facade/ofd_facade.cpp
     facade/recognition_facade.cpp
     facade/sane_facade.cpp
+    facade/storage_facade.cpp
     facade/twain_facade.cpp
 )
 
@@ -302,7 +303,7 @@ if(SDK_OPEN_USE_PRIVATE_PROVIDER)
                     COMMENT "Copy prebuilt x86 TWAIN helper into sdk_open_app runtime directory"
                 )
             endif()
-            if(TWAIN_HELPER_X64_EXE AND EXISTS "${TWAIN_HELPER_X64_EXE}")
+            if(LIB_ARCH STREQUAL "windows64" AND TWAIN_HELPER_X64_EXE AND EXISTS "${TWAIN_HELPER_X64_EXE}")
                 add_custom_command(TARGET sdk_open_app POST_BUILD
                     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                         "${TWAIN_HELPER_X64_EXE}"
@@ -353,6 +354,24 @@ if(BUILD_SDK_PRIVATE)
         set(SDK_OPEN_ZSTD_DLL_SRC "$<$<CONFIG:Debug>:${CMAKE_SOURCE_DIR}/third_party_repo/zstd/lib/win_debug/zstd.dll>$<$<NOT:$<CONFIG:Debug>>:${CMAKE_SOURCE_DIR}/third_party_repo/zstd/lib/${LIB_ARCH}/zstd.dll>")
         set(SDK_OPEN_CZCV_MODEL_DIR "${CMAKE_SOURCE_DIR}/third_party_repo/czcv/models/x86-64")
         set(SDK_OPEN_CZOCR_MODEL_DIR "${CMAKE_SOURCE_DIR}/third_party_repo/czocr/models/${LIB_ARCH}")
+        if(LIB_ARCH STREQUAL "windows32")
+            set(SDK_OPEN_CZOCR_MODEL_DIR "${CMAKE_SOURCE_DIR}/third_party_repo/czocr/models/windows64")
+        endif()
+        if(LIB_ARCH STREQUAL "windows32")
+            set(SDK_OPEN_OPENSSL11_CRYPTO_DLL_NAME "libcrypto-1_1.dll")
+            set(SDK_OPEN_OPENSSL11_SSL_DLL_NAME "libssl-1_1.dll")
+            set(SDK_OPEN_OPENSSL3_CRYPTO_DLL_NAME "libcrypto-3.dll")
+            set(SDK_OPEN_OPENSSL3_SSL_DLL_NAME "libssl-3.dll")
+        else()
+            set(SDK_OPEN_OPENSSL11_CRYPTO_DLL_NAME "libcrypto-1_1-x64.dll")
+            set(SDK_OPEN_OPENSSL11_SSL_DLL_NAME "libssl-1_1-x64.dll")
+            set(SDK_OPEN_OPENSSL3_CRYPTO_DLL_NAME "libcrypto-3-x64.dll")
+            set(SDK_OPEN_OPENSSL3_SSL_DLL_NAME "libssl-3-x64.dll")
+        endif()
+        set(SDK_OPEN_OPENSSL11_CRYPTO_DLL_SRC "${CMAKE_SOURCE_DIR}/third_party_repo/openssl/lib/${LIB_ARCH}/${SDK_OPEN_OPENSSL11_CRYPTO_DLL_NAME}")
+        set(SDK_OPEN_OPENSSL11_SSL_DLL_SRC "${CMAKE_SOURCE_DIR}/third_party_repo/openssl/lib/${LIB_ARCH}/${SDK_OPEN_OPENSSL11_SSL_DLL_NAME}")
+        set(SDK_OPEN_OPENSSL3_CRYPTO_DLL_SRC "${CMAKE_SOURCE_DIR}/third_party_repo/openssl3/lib/${LIB_ARCH}/${SDK_OPEN_OPENSSL3_CRYPTO_DLL_NAME}")
+        set(SDK_OPEN_OPENSSL3_SSL_DLL_SRC "${CMAKE_SOURCE_DIR}/third_party_repo/openssl3/lib/${LIB_ARCH}/${SDK_OPEN_OPENSSL3_SSL_DLL_NAME}")
     endif()
 
     set(SDK_OPEN_COPY_OCR_FONTS_COMMANDS)
@@ -388,6 +407,14 @@ if(BUILD_SDK_PRIVATE)
                 COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                     "$<TARGET_FILE:sdk_private_providers>"
                     "$<TARGET_FILE_DIR:sdk_open_app>/$<TARGET_FILE_NAME:sdk_private_providers>"
+            )
+        endif()
+        set(SDK_OPEN_OPENJPEG_DLL_COPY_COMMANDS)
+        if(EXISTS "${CMAKE_SOURCE_DIR}/third_party_repo/openjpeg/lib/${LIB_ARCH}/libopenjp2.dll")
+            list(APPEND SDK_OPEN_OPENJPEG_DLL_COPY_COMMANDS
+                COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                    "${SDK_OPEN_OPENJPEG_DLL_SRC}"
+                    "$<TARGET_FILE_DIR:sdk_open_app>/libopenjp2-7.dll"
             )
         endif()
 
@@ -460,9 +487,7 @@ if(BUILD_SDK_PRIVATE)
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                 "${SDK_OPEN_ZSTD_DLL_SRC}"
                 "$<TARGET_FILE_DIR:sdk_open_app>/zstd.dll"
-            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                "${SDK_OPEN_OPENJPEG_DLL_SRC}"
-                "$<TARGET_FILE_DIR:sdk_open_app>/libopenjp2-7.dll"
+            ${SDK_OPEN_OPENJPEG_DLL_COPY_COMMANDS}
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                 "${SDK_OPEN_LIBPNG_DLL_SRC}"
                 "${SDK_OPEN_LIBPNG_DLL_DST}"
@@ -476,17 +501,17 @@ if(BUILD_SDK_PRIVATE)
                 "${SDK_OPEN_TURBOJPEG_DLL_SRC}"
                 "$<TARGET_FILE_DIR:sdk_open_app>/turbojpeg.dll"
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                "${CMAKE_SOURCE_DIR}/third_party_repo/openssl/lib/${LIB_ARCH}/libcrypto-1_1-x64.dll"
-                "$<TARGET_FILE_DIR:sdk_open_app>/libcrypto-1_1-x64.dll"
+                "${SDK_OPEN_OPENSSL11_CRYPTO_DLL_SRC}"
+                "$<TARGET_FILE_DIR:sdk_open_app>/${SDK_OPEN_OPENSSL11_CRYPTO_DLL_NAME}"
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                "${CMAKE_SOURCE_DIR}/third_party_repo/openssl/lib/${LIB_ARCH}/libssl-1_1-x64.dll"
-                "$<TARGET_FILE_DIR:sdk_open_app>/libssl-1_1-x64.dll"
+                "${SDK_OPEN_OPENSSL11_SSL_DLL_SRC}"
+                "$<TARGET_FILE_DIR:sdk_open_app>/${SDK_OPEN_OPENSSL11_SSL_DLL_NAME}"
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                "${CMAKE_SOURCE_DIR}/third_party_repo/openssl3/lib/${LIB_ARCH}/libcrypto-3-x64.dll"
-                "$<TARGET_FILE_DIR:sdk_open_app>/libcrypto-3-x64.dll"
+                "${SDK_OPEN_OPENSSL3_CRYPTO_DLL_SRC}"
+                "$<TARGET_FILE_DIR:sdk_open_app>/${SDK_OPEN_OPENSSL3_CRYPTO_DLL_NAME}"
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                "${CMAKE_SOURCE_DIR}/third_party_repo/openssl3/lib/${LIB_ARCH}/libssl-3-x64.dll"
-                "$<TARGET_FILE_DIR:sdk_open_app>/libssl-3-x64.dll"
+                "${SDK_OPEN_OPENSSL3_SSL_DLL_SRC}"
+                "$<TARGET_FILE_DIR:sdk_open_app>/${SDK_OPEN_OPENSSL3_SSL_DLL_NAME}"
             COMMENT "Copy sdk_open_app dependency DLLs into runtime directory"
         )
     endif()
