@@ -4,6 +4,32 @@
 
 本文档记录 CZUR Open SDK 项目的重要版本变更。
 
+## [0.0.3] - 2026-07-22
+
+### 新增
+
+- 新增 Windows TWAIN 支持，包括 Source 枚举与监听、Source 会话、Capability 与 Profile 管理，以及异步扫描任务。
+- 新增 `storage.cleanup_temp`，用于清理 SDK 托管的已完成采集、OCR 和图像处理临时数据；存在活跃任务时拒绝清理。
+- 对外 Demo 新增独立的 TWAIN 和临时存储管理页面，并提供真实 OCR 生命周期场景，用于验证 busy 保护、清理后查询和重复清理幂等性。
+- 新增 PDF、OFD OCR 导出的托管临时工作目录。
+
+### 变更
+
+- Windows runtime 打包支持按架构使用 private Provider 和 TWAIN helper；x64 runtime 可使用 x86、x64 TWAIN Source，x86 runtime 仅使用 x86 Source。
+- 扩展 TWAIN 和 SDK 托管临时存储相关的公共 Provider 与 command 类型。
+
+### 修复
+
+- 构建授权上下文响应时保留显式 API Key 授权状态，并补充对应鉴权状态文档。
+- 修复 Windows private Provider 依赖加载和复制问题。
+- 修复 Demo 默认 OCR 输出路径处理问题。
+
+### 兼容性说明
+
+- 新增 command 域：`twain.*`。
+- 新增 command 方法：`storage.cleanup_temp`。
+- 新增可选 Provider 边界：TWAIN 和 SDK 托管存储。
+
 ## [0.0.2] - 2026-06-26
 
 ### 新增

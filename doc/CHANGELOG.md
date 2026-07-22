@@ -4,6 +4,32 @@
 
 All notable changes to the CZUR Open SDK are documented in this file.
 
+## [0.0.3] - 2026-07-22
+
+### Added
+
+- Added Windows TWAIN support for source discovery and monitoring, source sessions, capability and profile management, and asynchronous scan tasks.
+- Added `storage.cleanup_temp` to remove completed SDK-managed capture, OCR, and image-processing temporary data while refusing cleanup when a task is active.
+- Added standalone TWAIN and temporary-storage management pages to the public Demo site, including a real OCR lifecycle scenario for verifying busy protection, post-cleanup lookup, and idempotent cleanup.
+- Added managed temporary work directories for PDF and OFD OCR exports.
+
+### Changed
+
+- Windows runtime packaging now supports architecture-specific private providers and TWAIN helpers; an x64 runtime can use x86 and x64 TWAIN sources, while an x86 runtime uses x86 sources only.
+- Expanded the public provider and command types for TWAIN and managed temporary-storage operations.
+
+### Fixed
+
+- Preserved explicit API Key authorization state when building auth context responses and documented the resulting authentication states.
+- Fixed Windows private-provider dependency loading and copying.
+- Fixed the Demo site's default OCR output-path handling.
+
+### Compatibility Notes
+
+- New command domain: `twain.*`.
+- New command method: `storage.cleanup_temp`.
+- New optional provider boundaries: TWAIN and managed SDK storage.
+
 ## [0.0.2] - 2026-06-26
 
 ### Added
