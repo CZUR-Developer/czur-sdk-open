@@ -181,6 +181,32 @@ CaptureAssetResult CaptureTaskService::GetAsset(const std::string& connection_id
     return result;
 }
 
+std::size_t CaptureTaskService::ActiveTaskCount() const {
+    std::lock_guard<std::mutex> lock(mu_);
+    std::size_t count = 0;
+    for (std::map<std::string, CaptureTaskSnapshot>::const_iterator it = tasks_.begin(); it != tasks_.end(); ++it) {
+        if (it->second.status == "queued" || it->second.status == "running") {
+            ++count;
+        }
+    }
+    return count;
+}
+
+std::size_t CaptureTaskService::ClearFinishedTasks() {
+    std::lock_guard<std::mutex> lock(mu_);
+    std::size_t count = 0;
+    for (std::map<std::string, CaptureTaskSnapshot>::iterator it = tasks_.begin(); it != tasks_.end();) {
+        // 生命周期锁保证此处不会和新任务注册并发；活跃任务仍采用保守策略保留。
+        if (it->second.status == "queued" || it->second.status == "running") {
+            ++it;
+            continue;
+        }
+        it = tasks_.erase(it);
+        ++count;
+    }
+    return count;
+}
+
 void CaptureTaskService::RunTask(const std::string& task_id, CaptureTaskStartRequest request) {
     try {
         RunTaskImpl(task_id, request);

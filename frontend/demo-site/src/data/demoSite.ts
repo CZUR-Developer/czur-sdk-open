@@ -26,6 +26,7 @@ export const navigationItems: NavigationItem[] = [
   { key: 'file-conversion', labelKey: 'nav.fileConversion', to: '/file-conversion' },
   { key: 'sane-scanning', labelKey: 'nav.saneScanning', to: '/sane-scanning' },
   { key: 'twain-scanning', labelKey: 'nav.twainScanning', to: '/twain-scanning' },
+  { key: 'storage-management', labelKey: 'nav.storageManagement', to: '/storage-management' },
 ];
 
 export const shellStatusItems: ShellStatusItem[] = [

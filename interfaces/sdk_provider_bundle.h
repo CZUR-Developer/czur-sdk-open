@@ -13,6 +13,7 @@
 #include "i_sdk_ofd_provider.h"
 #include "i_sdk_recognition_provider.h"
 #include "i_sdk_sane_provider.h"
+#include "i_sdk_storage_provider.h"
 #include "i_sdk_twain_provider.h"
 
 namespace editor {
@@ -27,6 +28,7 @@ struct ProviderBundle {
     std::shared_ptr<ISdkOfdProvider> ofd_provider;
     std::shared_ptr<ISdkRecognitionProvider> recognition_provider;
     std::shared_ptr<ISdkSaneProvider> sane_provider;
+    std::shared_ptr<ISdkStorageProvider> storage_provider;
     std::shared_ptr<ISdkTwainProvider> twain_provider;
 };
 

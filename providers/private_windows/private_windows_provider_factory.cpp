@@ -40,6 +40,7 @@ struct PrivateProvidersCApi {
     PrivateProviderJsonFn ocr_get = NULL;
     PrivateProviderJsonFn ocr_cancel = NULL;
     PrivateProviderJsonFn ocr_extract_text = NULL;
+    PrivateProviderJsonFn storage_cleanup_temp = NULL;
     PrivateProviderJsonFn twain_status = NULL;
     PrivateProviderJsonFn twain_list = NULL;
     PrivateProviderJsonFn twain_watch_start = NULL;
@@ -85,6 +86,8 @@ PrivateProvidersCApi& GetPrivateProvidersCApi() {
         ::GetProcAddress(api.module, "czur_sdk_private_ocr_cancel_json"));
     api.ocr_extract_text = reinterpret_cast<PrivateProviderJsonFn>(
         ::GetProcAddress(api.module, "czur_sdk_private_ocr_extract_text_json"));
+    api.storage_cleanup_temp = reinterpret_cast<PrivateProviderJsonFn>(
+        ::GetProcAddress(api.module, "czur_sdk_private_storage_cleanup_temp_json"));
     api.twain_status = reinterpret_cast<PrivateProviderJsonFn>(
         ::GetProcAddress(api.module, "czur_sdk_private_twain_status_json"));
     api.twain_list = reinterpret_cast<PrivateProviderJsonFn>(
@@ -750,6 +753,39 @@ public:
     }
 };
 
+class WindowsPrivateStorageProvider : public ISdkStorageProvider {
+public:
+    std::string ProviderName() const override { return "czur-private-storage-provider"; }
+
+    SdkStorageCleanupResult CleanupTemp(const SdkStorageCleanupRequest& request) override {
+        // Windows Open 进程不直接递归删除目录，通过 DLL C API 复用 private 层的任务检查和路径防护。
+        SdkStorageCleanupResult result;
+        PrivateProvidersCApi& api = GetPrivateProvidersCApi();
+        Json response;
+        std::string error;
+        if (!InvokePrivateProviderCApi(api.storage_cleanup_temp,
+                                       Json{{"work_dir", request.work_dir}},
+                                       &response,
+                                       &error)) {
+            result.code = ToCode(SdkStatusCode::ProviderNotReady);
+            result.message = error;
+            return result;
+        }
+        result.code = IntField(response, "code");
+        result.message = StringField(response, "message");
+        result.capture_removed = BoolField(response, "capture_removed");
+        result.tasks_removed = BoolField(response, "tasks_removed");
+        result.cleared_task_count = static_cast<std::size_t>(Int64Field(response, "cleared_task_count"));
+        result.cleared_ocr_task_count = static_cast<std::size_t>(Int64Field(response, "cleared_ocr_task_count"));
+        result.cleared_twain_task_count = static_cast<std::size_t>(Int64Field(response, "cleared_twain_task_count"));
+        const Json active = response.value("active", Json::object());
+        result.active.ocr = static_cast<std::size_t>(Int64Field(active, "ocr"));
+        result.active.sane = static_cast<std::size_t>(Int64Field(active, "sane"));
+        result.active.twain = static_cast<std::size_t>(Int64Field(active, "twain"));
+        return result;
+    }
+};
+
 // Windows private 分支的设备命令已经由 DeviceFacade 直接桥接 private C API。
 // 这个 provider 只挂到 ProviderBundle 上，用于承接 private 层异步上报的设备动作和插拔事件。
 class WindowsPrivateDeviceProvider : public ISdkDeviceProvider {
@@ -1293,6 +1329,7 @@ ProviderBundle CreateProviderBundle() {
     bundle.device_provider = std::make_shared<WindowsPrivateDeviceProvider>();
     bundle.image_enhance_provider = std::make_shared<WindowsPrivateImageEnhanceProvider>();
     bundle.ocr_provider = std::make_shared<WindowsPrivateOcrProvider>();
+    bundle.storage_provider = std::make_shared<WindowsPrivateStorageProvider>();
     bundle.twain_provider = std::make_shared<WindowsPrivateTwainProvider>();
 #endif
     return bundle;

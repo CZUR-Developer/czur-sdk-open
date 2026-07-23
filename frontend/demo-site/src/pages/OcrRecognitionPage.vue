@@ -150,6 +150,7 @@ import StatusPill from '../components/cards/StatusPill.vue';
 import { authSessionState, sendBoundCommand } from '../services/auth-session';
 import { openImageViewer } from '../services/image-viewer';
 import { buildAssetApiUrl, isOkResponse } from '../services/protocol';
+import { buildOcrDefaultOutputDir, buildOcrDefaultOutputPath } from '../utils/ocr-output-paths.js';
 
 type RunningAction = '' | 'extract' | 'recognize' | 'barcode' | 'get' | 'cancel';
 
@@ -494,11 +495,11 @@ function buildUploadUrl(): string {
 }
 
 function defaultOutputPath(format: string): string {
-  return `/tmp/czur-sdk-ocr-demo-${Date.now().toString(36)}.${format}`;
+  return buildOcrDefaultOutputPath(format);
 }
 
 function defaultOutputDir(): string {
-  return `/tmp/czur-sdk-ocr-demo-${Date.now().toString(36)}`;
+  return buildOcrDefaultOutputDir();
 }
 
 function asString(value: unknown): string {

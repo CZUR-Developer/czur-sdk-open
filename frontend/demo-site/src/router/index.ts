@@ -9,6 +9,7 @@ import ImageProcessingPage from '../pages/ImageProcessingPage.vue';
 import OcrRecognitionPage from '../pages/OcrRecognitionPage.vue';
 import QuickStartPage from '../pages/QuickStartPage.vue';
 import SaneScanningPage from '../pages/SaneScanningPage.vue';
+import StorageManagementPage from '../pages/StorageManagementPage.vue';
 import TwainScanningPage from '../pages/TwainScanningPage.vue';
 
 export const router = createRouter({
@@ -116,6 +117,16 @@ export const router = createRouter({
         navKey: 'twain-scanning',
         titleKey: 'pages.twainScanning.title',
         subtitleKey: 'pages.twainScanning.subtitle',
+      },
+    },
+    {
+      path: '/storage-management',
+      name: 'storage-management',
+      component: StorageManagementPage,
+      meta: {
+        navKey: 'storage-management',
+        titleKey: 'pages.storageManagement.title',
+        subtitleKey: 'pages.storageManagement.subtitle',
       },
     },
   ],

@@ -51,6 +51,7 @@ enum class SdkStatusCode : int {
     TwainScanFailed = 1714,
     TwainProfileNotFound = 1715,
     TwainUiRequired = 1716,
+    StorageBusy = 1800,
     InternalError = 1900,
     ProviderNotReady = 1901,
     ProviderCallFailed = 1902,

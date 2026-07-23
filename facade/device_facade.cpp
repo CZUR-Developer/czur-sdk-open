@@ -393,10 +393,10 @@ void PopulateDetectedRectsFromJson(const Json& value, std::vector<SdkRect4P>* re
     }
 }
 
-void CALLBACK PrivateVideoFrameThunk(const char* frame_json,
-                                     const unsigned char* payload,
-                                     size_t payload_size,
-                                     void* user_data) {
+void PrivateVideoFrameThunk(const char* frame_json,
+                            const unsigned char* payload,
+                            size_t payload_size,
+                            void* user_data) {
     PrivateVideoCallbackContext* context = reinterpret_cast<PrivateVideoCallbackContext*>(user_data);
     if (context == NULL || !context->callback || frame_json == NULL || payload == NULL || payload_size == 0) {
         return;

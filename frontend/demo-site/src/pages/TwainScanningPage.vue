@@ -316,13 +316,14 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { onBeforeRouteLeave } from 'vue-router';
 
 import JsonPanel from '../components/blocks/JsonPanel.vue';
 import SectionPanel from '../components/blocks/SectionPanel.vue';
 import StatusPill from '../components/cards/StatusPill.vue';
 import { authSessionState, onCommandEvent, sendBoundCommand } from '../services/auth-session';
 import { openImageViewer } from '../services/image-viewer';
-import { buildAssetApiUrl, buildCommandRequest, type CommandEvent, type CommandResponse } from '../services/protocol';
+import { buildAssetApiUrl, buildCommandRequest, isOkResponse, type CommandEvent, type CommandResponse } from '../services/protocol';
 
 interface TwainSource {
   source_id: string;
@@ -426,6 +427,8 @@ const outputPreviews = ref<TwainOutputPreview[]>([]);
 const twainEventHistory = ref<CommandEvent<Record<string, unknown>>[]>([]);
 let commandEventUnsubscribe: (() => void) | null = null;
 let outputPreviewGeneration = 0;
+let sourceOpenPromise: Promise<void> | null = null;
+let sourceClosePromise: Promise<boolean> | null = null;
 
 const requestJson = computed(() => JSON.stringify(lastRequest.value ?? {}, null, 2));
 const responseJson = computed(() => JSON.stringify(lastResponse.value ?? {}, null, 2));
@@ -476,6 +479,33 @@ onUnmounted(() => {
   clearOutputPreviews();
   if (watchEnabled.value) {
     void stopWatch().catch(() => undefined);
+  }
+});
+
+onBeforeRouteLeave(async () => {
+  // Source 会话归当前页面所有；切页前必须等待打开流程结束并关闭，避免驱动仍被旧页面占用。
+  try {
+    await sourceOpenPromise;
+  } catch {
+    // 打开失败时继续依据 session_id 判断，防止驱动已打开但后续 capability 读取失败造成泄漏。
+  }
+
+  if (sourceClosePromise) {
+    try {
+      return await sourceClosePromise;
+    } catch {
+      return false;
+    }
+  }
+  if (!sessionId.value) {
+    return true;
+  }
+
+  try {
+    return await closeSource();
+  } catch {
+    // 自动关闭异常时保留当前页面和会话，便于查看响应并重新关闭，不能静默遗留 Source。
+    return false;
   }
 });
 
@@ -562,21 +592,61 @@ function updateSources(nextSources: TwainSource[]): void {
 }
 
 async function openSource(): Promise<void> {
-  const response = await runCommand('twain.open', { source_id: selectedSourceId.value });
-  const openedSessionId = asString(response.data.session_id);
-  if (openedSessionId) {
-    sessionId.value = openedSessionId;
-    appliedCapabilityHistory.value = [];
-    await loadCapabilities();
+  if (sourceOpenPromise) {
+    return sourceOpenPromise;
+  }
+
+  const operation = (async () => {
+    const response = await runCommand('twain.open', { source_id: selectedSourceId.value });
+    const openedSessionId = asString(response.data.session_id);
+    if (openedSessionId) {
+      sessionId.value = openedSessionId;
+      appliedCapabilityHistory.value = [];
+      await loadCapabilities();
+    }
+  })();
+  sourceOpenPromise = operation;
+  try {
+    await operation;
+  } finally {
+    if (sourceOpenPromise === operation) {
+      sourceOpenPromise = null;
+    }
   }
 }
 
-async function closeSource(): Promise<void> {
-  await runCommand('twain.close', { session_id: sessionId.value });
-  sessionId.value = '';
-  capabilities.value = [];
-  appliedCapabilityHistory.value = [];
-  resetScanState();
+async function closeSource(): Promise<boolean> {
+  if (sourceClosePromise) {
+    return sourceClosePromise;
+  }
+  const closingSessionId = sessionId.value;
+  if (!closingSessionId) {
+    return true;
+  }
+
+  const operation = (async () => {
+    const response = await runCommand('twain.close', { session_id: closingSessionId });
+    if (!isOkResponse(response) || response.data.closed !== true) {
+      return false;
+    }
+
+    // 仅清理本次已成功关闭的会话，避免异步响应误清除后来建立的新会话。
+    if (sessionId.value === closingSessionId) {
+      sessionId.value = '';
+      capabilities.value = [];
+      appliedCapabilityHistory.value = [];
+      resetScanState();
+    }
+    return !sessionId.value;
+  })();
+  sourceClosePromise = operation;
+  try {
+    return await operation;
+  } finally {
+    if (sourceClosePromise === operation) {
+      sourceClosePromise = null;
+    }
+  }
 }
 
 async function loadCapabilities(): Promise<void> {

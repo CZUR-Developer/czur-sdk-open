@@ -441,6 +441,33 @@ SdkImageEnhanceTaskResult ImageEnhanceTaskService::CancelTask(const std::string&
     return result;
 }
 
+std::size_t ImageEnhanceTaskService::ActiveTaskCount() const {
+    std::lock_guard<std::mutex> lock(mu_);
+    std::size_t count = 0;
+    for (std::map<std::string, SdkImageEnhanceTaskSnapshot>::const_iterator it = tasks_.begin(); it != tasks_.end(); ++it) {
+        if (it->second.status == "queued" || it->second.status == "running") {
+            ++count;
+        }
+    }
+    return count;
+}
+
+std::size_t ImageEnhanceTaskService::ClearFinishedTasks() {
+    std::lock_guard<std::mutex> lock(mu_);
+    std::size_t count = 0;
+    for (std::map<std::string, SdkImageEnhanceTaskSnapshot>::iterator it = tasks_.begin(); it != tasks_.end();) {
+        // cancel_requested 并不等于终态，运行中的 worker 仍可能读取或写入临时文件。
+        if (it->second.status == "queued" || it->second.status == "running") {
+            ++it;
+            continue;
+        }
+        cancel_requested_.erase(it->first);
+        it = tasks_.erase(it);
+        ++count;
+    }
+    return count;
+}
+
 void ImageEnhanceTaskService::RunTask(const std::string& task_id, SdkImageEnhanceTaskRequest request) {
     std::vector<SdkImageEnhancePage> pages;
     std::map<std::string, int> online_usage_by_capability;

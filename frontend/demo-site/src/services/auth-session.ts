@@ -9,6 +9,7 @@ import {
   extractSessionToken,
   isOkResponse,
   type CommandEvent,
+  type CommandRequest,
   type CommandResponse,
 } from './protocol';
 import { nowTimeLabel, recordAlert, recordCommandRequest, recordRuntimeEvent } from './runtime-records';
@@ -340,7 +341,7 @@ export function disconnectCommandChannel(): void {
 
 export async function sendBoundCommand(
   method: string,
-  options: { params?: Record<string, unknown> } = {},
+  options: { params?: Record<string, unknown>; onRequest?: (request: CommandRequest) => void } = {},
 ): Promise<CommandResponse<Record<string, unknown>>> {
   if (!client || state.commandState !== 'success') {
     if (state.token) {
@@ -464,9 +465,11 @@ function handleCommandEvent(event: CommandEvent<Record<string, unknown>>): void 
 async function sendTrackedCommand(
   activeClient: CommandWsClient,
   method: string,
-  options: { params?: Record<string, unknown> } = {},
+  options: { params?: Record<string, unknown>; onRequest?: (request: CommandRequest) => void } = {},
 ): Promise<CommandResponse<Record<string, unknown>>> {
   const request = buildCommandRequest(method, options);
+  // 在 WebSocket 发送前暴露最终请求，供 Demo 精确展示实际发送的完整指令。
+  options.onRequest?.(request);
   const traceId =
     typeof request.client.trace_id === 'string' && request.client.trace_id ? request.client.trace_id : request.request_id;
   const startedAt = performance.now();

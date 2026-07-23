@@ -693,6 +693,29 @@ bool GetOptionalBoolField(const Json& obj, const char* key, bool default_value) 
     return default_value;
 }
 
+bool IsStorageWritingMethod(const std::string& method) {
+    // 这些消息可能创建任务或写入 capture/tasks，必须和全局清理共用生命周期锁。
+    return method == "capture.take" || method == "image.process" ||
+           method == "image.process_page" || method == "image.apply_color_mode" ||
+           method == "image.enhance" || method == "ocr.recognize" ||
+           method == "file.convert" || method == "sane.scan" ||
+           method == "twain.scan" || method == "storage.cleanup_temp";
+}
+
+bool IsSaneTaskActive(const SdkSaneScanTask& task) {
+    // 增强和格式转换仍会继续读取扫描中间页，不能当作已结束任务清理。
+    return task.status == "queued" || task.status == "running" ||
+           task.status == "enhancing" || task.status == "converting";
+}
+
+bool IsTwainTaskActiveForStorage(const SdkTwainScanTask& task) {
+    // cancel_requested 只是取消请求已受理；收到终态之前仍可能有驱动或 helper 写文件。
+    return task.status == "queued" || task.status == "running" ||
+           task.status == "enhancing" || task.status == "converting" ||
+           (task.cancel_requested && task.status != "completed" &&
+            task.status != "failed" && task.status != "cancelled");
+}
+
 float GetOptionalFloatField(const Json& obj, const char* key, float default_value) {
     const auto it = obj.find(key);
     if (it != obj.end() && it->is_number()) {
@@ -2021,6 +2044,7 @@ CommandApplicationService::CommandApplicationService(const SdkConfig& config,
       recognition_facade_(providers_),
       sane_facade_(providers_),
       twain_facade_(providers_),
+      storage_facade_(providers_),
       capture_task_service_(providers_, BuildDefaultAssetBaseUrl(config_)),
       image_enhance_task_service_(providers_, BuildDefaultAssetBaseUrl(config_)),
       next_image_task_seq_(1) {
@@ -2090,6 +2114,7 @@ CommandApplicationService::CommandApplicationService(const SdkConfig& config,
     methods_.push_back(MakeMethod("twain.scan", true, "Submit one TWAIN scan task"));
     methods_.push_back(MakeMethod("twain.scan_get", true, "Get one TWAIN scan task snapshot"));
     methods_.push_back(MakeMethod("twain.scan_cancel", true, "Cancel one TWAIN scan task"));
+    methods_.push_back(MakeMethod("storage.cleanup_temp", true, "Delete completed SDK Open temporary task data"));
 }
 
 void CommandApplicationService::SetProviderNames(const Json& provider_names) {
@@ -2164,6 +2189,13 @@ Json CommandApplicationService::HandleRequest(const std::string& connection_id, 
     const MethodDescriptor* descriptor = FindMethod(request.method);
     if (descriptor == NULL) {
         return BuildWsResponse(request.request_id, SdkStatusCode::UnsupportedMethod, "unsupported method");
+    }
+
+    // 任务注册和清理必须串行：避免“busy 检查通过后、删除前”又提交新任务。
+    // 使用 recursive_mutex 是因为硬拍和异步回调可能在持锁路径中复用任务处理逻辑。
+    std::unique_lock<std::recursive_mutex> storage_lifecycle_lock(storage_lifecycle_mu_, std::defer_lock);
+    if (IsStorageWritingMethod(request.method)) {
+        storage_lifecycle_lock.lock();
     }
 
     if (request.method == "system.ping") {
@@ -2364,6 +2396,9 @@ Json CommandApplicationService::HandleRequest(const std::string& connection_id, 
     if (request.method == "twain.scan_cancel") {
         return HandleTwainScanCancel(connection_id, request);
     }
+    if (request.method == "storage.cleanup_temp") {
+        return HandleStorageCleanupTemp(connection_id, request);
+    }
 
     return BuildWsResponse(request.request_id, SdkStatusCode::UnsupportedMethod, "unsupported method");
 }
@@ -2520,6 +2555,7 @@ void CommandApplicationService::DispatchTwainSourceEvent(const SdkTwainSourceEve
 }
 
 void CommandApplicationService::DispatchDeviceActionEvent(const SdkDeviceActionEvent& event) {
+    std::lock_guard<std::recursive_mutex> storage_lock(storage_lifecycle_mu_);
     const bool is_hardgrab = event.type == SdkDeviceActionType::HardGrab;
     const std::string event_name = is_hardgrab ? "capture.hardgrab_detected" : "capture.turn_detected";
     CommandEventSink sink;
@@ -2758,6 +2794,7 @@ void CommandApplicationService::DispatchDeviceEvent(const SdkDeviceEvent& event)
 }
 
 void CommandApplicationService::DispatchSaneScanTaskEvent(const SdkSaneScanTaskEvent& event) {
+    std::lock_guard<std::recursive_mutex> storage_lock(storage_lifecycle_mu_);
     SdkSaneScanTask task = event.task;
     EnsureSaneImageAssets(&task);
     for (std::vector<SdkCaptureAsset>::iterator it = task.assets.begin(); it != task.assets.end(); ++it) {
@@ -3242,6 +3279,7 @@ bool CommandApplicationService::FinalizeTwainScanTask(SdkTwainScanTask* task) {
 }
 
 void CommandApplicationService::DispatchTwainScanTaskEvent(const SdkTwainScanTaskEvent& event) {
+    std::lock_guard<std::recursive_mutex> storage_lock(storage_lifecycle_mu_);
     SdkTwainScanTask task = event.task;
     if (task.task_id.empty()) {
         return;
@@ -3392,8 +3430,9 @@ CommandApplicationService::AssetAccessResult CommandApplicationService::ResolveA
 
 CommandApplicationService::ImageUploadResult CommandApplicationService::UploadImage(const std::string& session_token,
                                                                                    const std::string& filename,
-                                                                                   const std::string& content_type,
-                                                                                   const std::string& content) {
+                                                                                    const std::string& content_type,
+                                                                                    const std::string& content) {
+    std::lock_guard<std::recursive_mutex> storage_lock(storage_lifecycle_mu_);
     ImageUploadResult result;
     AuthorizationService::SessionResult session_result = authorization_service_.RequireSessionToken(session_token);
     if (!IsOkStatusCode(session_result.code)) {
@@ -6061,6 +6100,92 @@ Json CommandApplicationService::HandleTwainScanCancel(const std::string& connect
                            result.code,
                            result.message,
                            BuildTwainScanCancelAckJson(result, provider_names_.value("twain", "")));
+}
+
+Json CommandApplicationService::HandleStorageCleanupTemp(const std::string& connection_id, const Request& request) {
+    // 清理属于运行时维护消息，只要求有效绑定会话，不校验业务 capability，也不消耗额度。
+    const AuthorizationService::SessionResult session_result = authorization_service_.RequireSession(connection_id);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+
+    SdkStorageActiveTasks active;
+    active.capture = capture_task_service_.ActiveTaskCount();
+    active.image_enhance = image_enhance_task_service_.ActiveTaskCount();
+    {
+        std::lock_guard<std::mutex> lock(sane_tasks_mu_);
+        for (std::map<std::string, SdkSaneScanTask>::const_iterator it = sane_tasks_.begin(); it != sane_tasks_.end(); ++it) {
+            if (IsSaneTaskActive(it->second)) {
+                ++active.sane;
+            }
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lock(twain_tasks_mu_);
+        for (std::map<std::string, SdkTwainScanTask>::const_iterator it = twain_tasks_.begin(); it != twain_tasks_.end(); ++it) {
+            if (IsTwainTaskActiveForStorage(it->second)) {
+                ++active.twain;
+            }
+        }
+    }
+    const Json active_json = Json{{"capture", active.capture},
+                                  {"image_enhance", active.image_enhance},
+                                  {"ocr", active.ocr},
+                                  {"sane", active.sane},
+                                  {"twain", active.twain}};
+    if (active.Total() != 0) {
+        // 全局清理不等待、不取消任务；发现任一活跃任务立即返回 busy。
+        return BuildWsResponse(request.request_id,
+                               SdkStatusCode::StorageBusy,
+                               "temporary storage is busy",
+                               Json{{"active", active_json}});
+    }
+
+    SdkStorageCleanupRequest cleanup_request;
+    cleanup_request.work_dir = GetSdkOpenWorkDir();
+    // private 层会再次检查真实 OCR/TWAIN 任务，防止仅依赖 Open 层缓存造成误删。
+    SdkStorageCleanupResult result = storage_facade_.CleanupTemp(cleanup_request);
+    if (!IsOkStatusCode(result.code)) {
+        const Json private_active = Json{{"capture", active.capture},
+                                         {"image_enhance", active.image_enhance},
+                                         {"ocr", result.active.ocr},
+                                         {"sane", result.active.sane},
+                                         {"twain", result.active.twain}};
+        return BuildWsResponse(request.request_id,
+                               result.code,
+                               result.message,
+                               Json{{"active", private_active}});
+    }
+
+    // TWAIN 同一任务在 Open/private 两层均有快照，因此总数以 Open 快照为准，不重复累计 private TWAIN 数量。
+    std::size_t cleared = result.cleared_ocr_task_count;
+    cleared += capture_task_service_.ClearFinishedTasks();
+    cleared += image_enhance_task_service_.ClearFinishedTasks();
+    {
+        std::lock_guard<std::mutex> lock(image_assets_mu_);
+        // 资产索引是任务附属状态，只清空引用，不重复增加 cleared_task_count。
+        image_assets_by_task_.clear();
+        image_asset_connection_by_task_.clear();
+    }
+    {
+        std::lock_guard<std::mutex> lock(sane_tasks_mu_);
+        cleared += sane_tasks_.size();
+        sane_tasks_.clear();
+        sane_pipelines_by_task_.clear();
+        sane_online_api_keys_by_task_.clear();
+        sane_online_base_urls_by_task_.clear();
+    }
+    {
+        std::lock_guard<std::mutex> lock(twain_tasks_mu_);
+        cleared += twain_tasks_.size();
+        twain_tasks_.clear();
+    }
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"capture_removed", result.capture_removed},
+                                {"tasks_removed", result.tasks_removed},
+                                {"cleared_task_count", cleared}});
 }
 
 Json CommandApplicationService::HandleFileConvert(const std::string& connection_id, const Request& request) {
