@@ -196,7 +196,10 @@ private:
     Json BuildSessionJson(const AuthorizationService::SessionResult& session_result) const;
     Json BuildAdminSessionJson(const AuthorizationService::SessionResult& session_result) const;
     Json BuildAuthContextJson(const AuthContext& auth_context) const;
-    Json BuildDeviceJson(const SdkDeviceDescriptor& device) const;
+    Json BuildDeviceJson(const SdkDeviceDescriptor& device, bool include_capture_output = false) const;
+    int ApplyCaptureOutputCapabilities(const AuthContext& auth_context,
+                                       SdkCaptureProfile* profile,
+                                       std::string* message) const;
     const MethodDescriptor* FindMethod(const std::string& method) const;
     void DispatchSaneDeviceEvent(const SdkSaneDeviceEvent& event);
     void DispatchSaneScanTaskEvent(const SdkSaneScanTaskEvent& event);

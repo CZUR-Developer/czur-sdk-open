@@ -883,12 +883,15 @@ std::string NormalizeVideoPixelFormat(const std::string& pixel_format) {
     return "mjpeg";
 }
 
-SdkCaptureProfile ParseCaptureProfile(const Json& params, const std::string& device_id) {
+bool TryParseCaptureProfile(const Json& params, const std::string& device_id, SdkCaptureProfile* out_profile, std::string* error) {
     SdkCaptureProfile profile;
     profile.device_id = device_id;
     const Json profile_json = GetOptionalObjectField(params, "profile");
     if (profile_json.empty()) {
-        return profile;
+        if (out_profile != NULL) {
+            *out_profile = profile;
+        }
+        return true;
     }
     profile.profile_version = GetOptionalStringField(profile_json, "profile_version");
     if (profile.profile_version.empty()) {
@@ -936,7 +939,41 @@ SdkCaptureProfile ParseCaptureProfile(const Json& params, const std::string& dev
     if (!output_json.empty()) {
         const std::string format = GetOptionalStringField(output_json, "format");
         if (!format.empty()) {
-            profile.output_format = format;
+            profile.output_format = NormalizeLower(format);
+        }
+        const Json::const_iterator quality_it = output_json.find("quality");
+        if (quality_it != output_json.end()) {
+            if (!quality_it->is_number_integer()) {
+                if (error != NULL) {
+                    *error = "output.quality must be an integer between 1 and 100";
+                }
+                return false;
+            }
+            const int quality = quality_it->get<int>();
+            if (quality < 1 || quality > 100) {
+                if (error != NULL) {
+                    *error = "output.quality must be between 1 and 100";
+                }
+                return false;
+            }
+            profile.output_quality = quality;
+        }
+        const Json::const_iterator target_size_it = output_json.find("target_size");
+        if (target_size_it != output_json.end()) {
+            if (!target_size_it->is_number_integer()) {
+                if (error != NULL) {
+                    *error = "output.target_size must be an integer pixel bucket";
+                }
+                return false;
+            }
+            const int target_size = target_size_it->get<int>();
+            if (target_size <= 0) {
+                if (error != NULL) {
+                    *error = "output.target_size must be a positive integer pixel bucket";
+                }
+                return false;
+            }
+            profile.output_target_size = target_size;
         }
         const Json thumbnails_json = GetOptionalObjectField(output_json, "thumbnails");
         profile.thumbnail_original = GetOptionalBoolField(thumbnails_json, "original", profile.thumbnail_original);
@@ -944,7 +981,10 @@ SdkCaptureProfile ParseCaptureProfile(const Json& params, const std::string& dev
         profile.thumbnail_color_processed = GetOptionalBoolField(thumbnails_json, "color_processed", profile.thumbnail_color_processed);
         profile.thumbnail_final = GetOptionalBoolField(thumbnails_json, "final", profile.thumbnail_final);
     }
-    return profile;
+    if (out_profile != NULL) {
+        *out_profile = profile;
+    }
+    return true;
 }
 
 Json BuildAssetJson(const SdkCaptureAsset& asset) {
@@ -957,6 +997,38 @@ Json BuildAssetJson(const SdkCaptureAsset& asset) {
                 {"width", asset.width},
                 {"height", asset.height},
                 {"size", asset.size}};
+}
+
+Json BuildOutputTargetSizeJson(const SdkOutputTargetSizeOption& option) {
+    Json value = Json{{"target_size", option.target_size},
+                      {"width", option.width},
+                      {"height", option.height}};
+    if (option.is_device_default) {
+        value["is_device_default"] = true;
+    }
+    return value;
+}
+
+Json BuildCaptureOutputCapabilitiesJson(const SdkCaptureOutputCapabilities& capabilities) {
+    Json target_sizes = Json::array();
+    for (std::vector<SdkOutputTargetSizeOption>::const_iterator it = capabilities.target_sizes.begin();
+         it != capabilities.target_sizes.end();
+         ++it) {
+        target_sizes.push_back(BuildOutputTargetSizeJson(*it));
+    }
+    return Json{{"target_size_supported", capabilities.target_size_supported},
+                {"target_sizes", target_sizes}};
+}
+
+std::string FormatOutputTargetSizeList(const std::vector<SdkOutputTargetSizeOption>& options) {
+    std::ostringstream oss;
+    for (std::vector<SdkOutputTargetSizeOption>::const_iterator it = options.begin(); it != options.end(); ++it) {
+        if (it != options.begin()) {
+            oss << ",";
+        }
+        oss << it->target_size;
+    }
+    return oss.str();
 }
 
 // 仅用于 websocket 事件回传 provider 原始采集状态。
@@ -2634,9 +2706,7 @@ CommandApplicationService::BuildHardGrabPayload(const std::string& connection_id
         profile = SdkCaptureProfile();
         profile.device_id = event.device_id;
     }
-    if (profile.device_id.empty()) {
-        profile.device_id = event.device_id;
-    }
+    profile.device_id = event.device_id;
 
     // 硬拍自动采集在语义上等价于 capture.take，任务创建前先复用
     // capture.take 的鉴权和配额检查；失败时不创建 task，直接在事件中回传原因。
@@ -2650,6 +2720,20 @@ CommandApplicationService::BuildHardGrabPayload(const std::string& connection_id
         payload["warning"] = "hardgrab image was not processed: " + session_result.message;
         payload_result.code = session_result.code;
         payload_result.message = session_result.message;
+        return payload_result;
+    }
+    std::string profile_error;
+    const int output_profile_code =
+        ApplyCaptureOutputCapabilities(session_result.auth_context, &profile, &profile_error);
+    if (!IsOkStatusCode(output_profile_code)) {
+        payload["capture"] = BuildCaptureResultJson(event.capture);
+        payload["accepted"] = false;
+        payload["code"] = output_profile_code;
+        payload["message"] = profile_error;
+        payload["error"] = profile_error;
+        payload["warning"] = "hardgrab image was not processed: " + profile_error;
+        payload_result.code = output_profile_code;
+        payload_result.message = profile_error;
         return payload_result;
     }
     // 硬拍等价于一次 capture.take，必须同步扣减 capture 配额；
@@ -3776,7 +3860,7 @@ Json CommandApplicationService::HandleDeviceOpen(const std::string& connection_i
     if (!IsOkStatusCode(result.code)) {
         return BuildWsResponse(request.request_id, result.code, result.message);
     }
-    Json data = BuildDeviceJson(result.device);
+    Json data = BuildDeviceJson(result.device, true);
     data["device_id"] = result.device.device_id.empty() ? open_request.device_id : result.device.device_id;
     data["opened"] = result.opened;
     data["provider"] = ProviderNameOrEmpty(provider_names_, "device");
@@ -3876,13 +3960,19 @@ Json CommandApplicationService::HandleCaptureTake(const std::string& connection_
         start_request.include_base64 = GetOptionalBoolField(request.params, "include_base64", false);
         start_request.timeout_ms = GetOptionalIntField(request.params, "timeout_ms", 15000);
         start_request.auth_context = session_result.auth_context;
-        start_request.profile = ParseCaptureProfile(request.params, device_id);
+        std::string profile_error;
+        if (!TryParseCaptureProfile(request.params, device_id, &start_request.profile, &profile_error)) {
+            return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, profile_error);
+        }
+        start_request.profile.device_id = start_request.device_id;
+        const int output_profile_code =
+            ApplyCaptureOutputCapabilities(session_result.auth_context, &start_request.profile, &profile_error);
+        if (!IsOkStatusCode(output_profile_code)) {
+            return BuildWsResponse(request.request_id, output_profile_code, profile_error);
+        }
         start_request.pipeline = ParseImageEnhancePipeline(pipeline_json);
         start_request.online_api_key = session_result.token;
         start_request.online_base_url = runtime_config_ ? runtime_config_->OnlineImageEnhanceBaseUrl() : "";
-        if (start_request.profile.device_id.empty()) {
-            start_request.profile.device_id = device_id;
-        }
     } catch (const std::exception& e) {
         SDK_OPEN_LOG_ERROR("[command_application] capture.take parse failed connection={} request_id={} err={}",
                            connection_id,
@@ -4024,9 +4114,15 @@ Json CommandApplicationService::HandleVideoStart(const std::string& connection_i
     remembered_profile.device_id = start_request.device_id;
     const Json profile_json = GetOptionalObjectField(request.params, "profile");
     if (!profile_json.empty()) {
-        remembered_profile = ParseCaptureProfile(request.params, start_request.device_id);
-        if (remembered_profile.device_id.empty()) {
-            remembered_profile.device_id = start_request.device_id;
+        std::string profile_error;
+        if (!TryParseCaptureProfile(request.params, start_request.device_id, &remembered_profile, &profile_error)) {
+            return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, profile_error);
+        }
+        remembered_profile.device_id = start_request.device_id;
+        const int output_profile_code =
+            ApplyCaptureOutputCapabilities(session_result.auth_context, &remembered_profile, &profile_error);
+        if (!IsOkStatusCode(output_profile_code)) {
+            return BuildWsResponse(request.request_id, output_profile_code, profile_error);
         }
         start_request.page_processing = remembered_profile.page_processing;
         start_request.single_page_realtime_detect_rects = remembered_profile.single_page_realtime_detect_rects;
@@ -4197,7 +4293,17 @@ Json CommandApplicationService::HandleVideoSetProfile(const std::string& connect
         profile_params = Json{{"profile", request.params}};
     }
 
-    const SdkCaptureProfile profile = ParseCaptureProfile(profile_params, profile_request.device_id);
+    SdkCaptureProfile profile;
+    std::string profile_error;
+    if (!TryParseCaptureProfile(profile_params, profile_request.device_id, &profile, &profile_error)) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, profile_error);
+    }
+    profile.device_id = profile_request.device_id;
+    const int output_profile_code =
+        ApplyCaptureOutputCapabilities(session_result.auth_context, &profile, &profile_error);
+    if (!IsOkStatusCode(output_profile_code)) {
+        return BuildWsResponse(request.request_id, output_profile_code, profile_error);
+    }
     const bool has_pipeline_param = request.params.find("pipeline") != request.params.end();
     const SdkImageEnhancePipeline pipeline =
         has_pipeline_param ? ParseImageEnhancePipeline(GetOptionalObjectField(request.params, "pipeline")) : SdkImageEnhancePipeline();
@@ -4243,7 +4349,11 @@ Json CommandApplicationService::HandleImageProcess(const std::string& connection
 
     const Json profile_json = GetOptionalObjectField(request.params, "profile");
     if (!profile_json.empty()) {
-        const SdkCaptureProfile profile = ParseCaptureProfile(request.params, "");
+        SdkCaptureProfile profile;
+        std::string profile_error;
+        if (!TryParseCaptureProfile(request.params, "", &profile, &profile_error)) {
+            return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, profile_error);
+        }
         process_request.page_processing = profile.page_processing;
         process_request.color_mode = profile.color_mode;
         process_request.output_format = profile.output_format;
@@ -4399,7 +4509,11 @@ Json CommandApplicationService::HandleImageProcessPage(const std::string& connec
 
     const Json profile_json = GetOptionalObjectField(request.params, "profile");
     if (!profile_json.empty()) {
-        const SdkCaptureProfile profile = ParseCaptureProfile(request.params, "");
+        SdkCaptureProfile profile;
+        std::string profile_error;
+        if (!TryParseCaptureProfile(request.params, "", &profile, &profile_error)) {
+            return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, profile_error);
+        }
         page_request.page_processing = profile.page_processing;
         page_request.single_page = profile.single_page;
         page_request.curved_book = profile.curved_book;
@@ -4577,7 +4691,11 @@ Json CommandApplicationService::HandleImageApplyColorMode(const std::string& con
     color_request.output_path = GetOptionalStringField(request.params, "output_path");
     color_request.color_mode = GetOptionalStringField(request.params, "color_mode");
     if (color_request.color_mode.empty()) {
-        const SdkCaptureProfile profile = ParseCaptureProfile(request.params, "");
+        SdkCaptureProfile profile;
+        std::string profile_error;
+        if (!TryParseCaptureProfile(request.params, "", &profile, &profile_error)) {
+            return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, profile_error);
+        }
         color_request.color_mode = profile.color_mode.empty() ? "no_optimize" : profile.color_mode;
     }
 
@@ -6422,6 +6540,7 @@ Json CommandApplicationService::HandleFileConvert(const std::string& connection_
         format_request.input_path = convert_request.input_path;
         format_request.output_path = convert_request.output_path;
         format_request.output_format = convert_request.output_format;
+        format_request.quality = convert_request.quality;
         const SdkFormatConvertResult result = graphic_facade_.ConvertImageFormat(format_request);
         if (!IsOkStatusCode(result.code)) {
             return BuildWsResponse(request.request_id, result.code, result.message);
@@ -6658,7 +6777,70 @@ Json CommandApplicationService::BuildAuthContextJson(const AuthContext& auth_con
     return result;
 }
 
-Json CommandApplicationService::BuildDeviceJson(const SdkDeviceDescriptor& device) const {
+int CommandApplicationService::ApplyCaptureOutputCapabilities(const AuthContext& auth_context,
+                                                              SdkCaptureProfile* profile,
+                                                              std::string* message) const {
+    if (profile == NULL || profile->output_target_size <= 0) {
+        return ToCode(SdkStatusCode::Ok);
+    }
+    if (profile->device_id.empty()) {
+        if (message != NULL) {
+            *message = "device_id required for output.target_size";
+        }
+        return ToCode(SdkStatusCode::InvalidParams);
+    }
+
+    const DeviceGetResult device_result = device_facade_.GetDevice(auth_context, profile->device_id);
+    if (!IsOkStatusCode(device_result.code)) {
+        if (message != NULL) {
+            *message = device_result.message;
+        }
+        return device_result.code;
+    }
+
+    const SdkCaptureOutputCapabilities& capabilities = device_result.device.capture_output;
+    if (!capabilities.target_size_supported || capabilities.target_sizes.empty()) {
+        SDK_OPEN_LOG_INFO("[command_application] output.target_size ignored device={} target_size={} reason=unsupported",
+                          profile->device_id,
+                          profile->output_target_size);
+        profile->output_target_size = 0;
+        profile->output_target_width = 0;
+        profile->output_target_height = 0;
+        return ToCode(SdkStatusCode::Ok);
+    }
+
+    for (std::vector<SdkOutputTargetSizeOption>::const_iterator it = capabilities.target_sizes.begin();
+         it != capabilities.target_sizes.end();
+         ++it) {
+        if (it->target_size != profile->output_target_size) {
+            continue;
+        }
+        int target_width = it->width;
+        int target_height = it->height;
+        if (target_width <= 0 || target_height <= 0) {
+            ResolveSdkOutputTargetSize(it->target_size, &target_width, &target_height);
+        }
+        if (target_width <= 0 || target_height <= 0) {
+            if (message != NULL) {
+                *message = "unsupported output.target_size: " + std::to_string(profile->output_target_size);
+            }
+            return ToCode(SdkStatusCode::InvalidParams);
+        }
+        profile->output_target_width = target_width;
+        profile->output_target_height = target_height;
+        return ToCode(SdkStatusCode::Ok);
+    }
+
+    const std::string allowed = FormatOutputTargetSizeList(capabilities.target_sizes);
+    if (message != NULL) {
+        *message = allowed.empty()
+            ? "unsupported output.target_size: " + std::to_string(profile->output_target_size)
+            : "unsupported output.target_size: " + std::to_string(profile->output_target_size) + ", allowed: " + allowed;
+    }
+    return ToCode(SdkStatusCode::InvalidParams);
+}
+
+Json CommandApplicationService::BuildDeviceJson(const SdkDeviceDescriptor& device, bool include_capture_output) const {
     Json resolutions = Json::array();
     for (std::vector<SdkVideoResolution>::const_iterator it = device.resolutions.begin();
          it != device.resolutions.end();
@@ -6674,7 +6856,7 @@ Json CommandApplicationService::BuildDeviceJson(const SdkDeviceDescriptor& devic
         });
     }
 
-    return Json{
+    Json value = Json{
         {"device_id", device.device_id},
         {"model", device.model},
         {"display_name", device.display_name},
@@ -6686,6 +6868,10 @@ Json CommandApplicationService::BuildDeviceJson(const SdkDeviceDescriptor& devic
         {"features", Json{{"image_transfer_protocol", device.image_transfer_protocol}}},
         {"resolutions", resolutions},
     };
+    if (include_capture_output) {
+        value["capture_output"] = BuildCaptureOutputCapabilitiesJson(device.capture_output);
+    }
+    return value;
 }
 
 const CommandApplicationService::MethodDescriptor* CommandApplicationService::FindMethod(const std::string& method) const {

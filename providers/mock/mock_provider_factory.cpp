@@ -445,6 +445,18 @@ public:
         first.authorized = true;
         first.supports_video = true;
         first.image_transfer_protocol = true;
+        first.capture_output.target_size_supported = true;
+        SdkOutputTargetSizeOption first_500;
+        first_500.target_size = 500;
+        first_500.width = 2592;
+        first_500.height = 1944;
+        first.capture_output.target_sizes.push_back(first_500);
+        SdkOutputTargetSizeOption first_1600;
+        first_1600.target_size = 1600;
+        first_1600.width = 4608;
+        first_1600.height = 3456;
+        first_1600.is_device_default = true;
+        first.capture_output.target_sizes.push_back(first_1600);
         devices.push_back(first);
 
         SdkDeviceDescriptor second;

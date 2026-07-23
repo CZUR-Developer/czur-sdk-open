@@ -663,6 +663,7 @@ void ImageEnhanceTaskService::RunTask(const std::string& task_id, SdkImageEnhanc
                 convert_request.input_path = it->path;
                 convert_request.output_path = final_path;
                 convert_request.output_format = output_format;
+                convert_request.quality = request.pipeline.target.quality;
                 const SdkFormatConvertResult convert_result = providers_.graphic_provider->ConvertImageFormat(convert_request);
                 if (!IsOkStatusCode(convert_result.code)) {
                     continue;

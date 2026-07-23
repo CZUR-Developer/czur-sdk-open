@@ -23,6 +23,159 @@ struct SdkVideoResolution {
     bool is_default = false;
 };
 
+struct SdkOutputTargetSizeOption {
+    int target_size = 0;
+    int width = 0;
+    int height = 0;
+    bool is_device_default = false;
+};
+
+struct SdkCaptureOutputCapabilities {
+    bool target_size_supported = false;
+    std::vector<SdkOutputTargetSizeOption> target_sizes;
+};
+
+inline bool ResolveSdkOutputTargetSize(int target_size, int* width, int* height) {
+    int resolved_width = 0;
+    int resolved_height = 0;
+    switch (target_size) {
+        case 10:
+            resolved_width = 320;
+            resolved_height = 240;
+            break;
+        case 30:
+            resolved_width = 640;
+            resolved_height = 480;
+            break;
+        case 50:
+            resolved_width = 800;
+            resolved_height = 600;
+            break;
+        case 100:
+            resolved_width = 1160;
+            resolved_height = 870;
+            break;
+        case 180:
+            resolved_width = 1536;
+            resolved_height = 1152;
+            break;
+        case 200:
+            resolved_width = 1600;
+            resolved_height = 1200;
+            break;
+        case 300:
+            resolved_width = 2048;
+            resolved_height = 1536;
+            break;
+        case 400:
+            resolved_width = 2304;
+            resolved_height = 1728;
+            break;
+        case 500:
+            resolved_width = 2592;
+            resolved_height = 1944;
+            break;
+        case 600:
+            resolved_width = 3072;
+            resolved_height = 1728;
+            break;
+        case 800:
+            resolved_width = 3264;
+            resolved_height = 2448;
+            break;
+        case 1000:
+            resolved_width = 3648;
+            resolved_height = 2736;
+            break;
+        case 1001:
+            resolved_width = 3672;
+            resolved_height = 2754;
+            break;
+        case 1002:
+            resolved_width = 3840;
+            resolved_height = 2160;
+            break;
+        case 1200:
+        case 1201:
+            resolved_width = 4032;
+            resolved_height = 3024;
+            break;
+        case 1202:
+            resolved_width = 4000;
+            resolved_height = 3000;
+            break;
+        case 1300:
+            resolved_width = 4160;
+            resolved_height = 3120;
+            break;
+        case 1400:
+            resolved_width = 4320;
+            resolved_height = 3240;
+            break;
+        case 1500:
+            resolved_width = 4480;
+            resolved_height = 3360;
+            break;
+        case 1600:
+            resolved_width = 4608;
+            resolved_height = 3456;
+            break;
+        case 1800:
+            resolved_width = 4896;
+            resolved_height = 3672;
+            break;
+        case 2000:
+            resolved_width = 5248;
+            resolved_height = 3936;
+            break;
+        case 2200:
+            resolved_width = 5440;
+            resolved_height = 4080;
+            break;
+        case 2400:
+            resolved_width = 5696;
+            resolved_height = 4272;
+            break;
+        case 2500:
+            resolved_width = 5824;
+            resolved_height = 4368;
+            break;
+        case 2600:
+            resolved_width = 5888;
+            resolved_height = 4416;
+            break;
+        case 2800:
+            resolved_width = 6144;
+            resolved_height = 4608;
+            break;
+        case 3200:
+            resolved_width = 6528;
+            resolved_height = 4896;
+            break;
+        case 3800:
+            resolved_width = 7168;
+            resolved_height = 5376;
+            break;
+        case 4000:
+            resolved_width = 7296;
+            resolved_height = 5472;
+            break;
+        case 4800:
+            resolved_width = 7936;
+            resolved_height = 5952;
+            break;
+        default:
+            return false;
+    }
+    if (width != nullptr) {
+        *width = resolved_width;
+    }
+    if (height != nullptr) {
+        *height = resolved_height;
+    }
+    return true;
+}
+
 struct SdkDeviceDescriptor {
     std::string device_id;
     std::string model;
@@ -34,6 +187,7 @@ struct SdkDeviceDescriptor {
     bool supports_video = false;
     bool image_transfer_protocol = false;
     std::vector<SdkVideoResolution> resolutions;
+    SdkCaptureOutputCapabilities capture_output;
 };
 
 struct SdkDeviceOpenRequest {
@@ -307,6 +461,10 @@ struct SdkCaptureProfile {
     int selected_area_source_height = 0;
     std::string color_mode = "auto_optimize";
     std::string output_format = "jpg";
+    int output_quality = 0;
+    int output_target_size = 0;
+    int output_target_width = 0;
+    int output_target_height = 0;
     bool thumbnail_original = true;
     bool thumbnail_page_processed = true;
     bool thumbnail_color_processed = false;
@@ -396,6 +554,8 @@ struct SdkFormatConvertRequest {
     std::string input_path;
     std::string output_path;
     std::string output_format;
+    int quality = 0;
+    float scale = 1.0f;
 };
 
 struct SdkFormatConvertResult {

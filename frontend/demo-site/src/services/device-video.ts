@@ -41,6 +41,18 @@ interface DeviceFeatures {
   image_transfer_protocol: boolean;
 }
 
+export interface OutputTargetSizeOption {
+  target_size: number;
+  width: number;
+  height: number;
+  is_device_default: boolean;
+}
+
+interface CaptureOutputCapabilities {
+  target_size_supported: boolean;
+  target_sizes: OutputTargetSizeOption[];
+}
+
 interface DeviceVideoState {
   selectedDeviceId: string;
   detailState: ExecutionState;
@@ -51,6 +63,7 @@ interface DeviceVideoState {
   videoState: ExecutionState;
   errorMessage: string;
   features: DeviceFeatures;
+  captureOutput: CaptureOutputCapabilities;
   resolutions: DeviceResolution[];
   selectedResolutionKey: string;
   opened: boolean;
@@ -94,6 +107,7 @@ const state = reactive<DeviceVideoState>({
   videoState: 'idle',
   errorMessage: '',
   features: { image_transfer_protocol: false },
+  captureOutput: { target_size_supported: false, target_sizes: [] },
   resolutions: [],
   selectedResolutionKey: '',
   opened: false,
@@ -127,6 +141,7 @@ export async function selectDevice(deviceId: string): Promise<void> {
   state.opened = false;
   state.closeState = 'idle';
   state.features = { image_transfer_protocol: false };
+  state.captureOutput = { target_size_supported: false, target_sizes: [] };
   state.resolutions = [];
   state.selectedResolutionKey = '';
   if (deviceId) {
@@ -178,6 +193,16 @@ export async function openSelectedDevice(): Promise<void> {
     return;
   }
   state.opened = Boolean(response.data.opened);
+  const openedDevice = response.data.device && typeof response.data.device === 'object'
+    ? response.data.device as Record<string, unknown>
+    : response.data;
+  state.features = asFeatures(openedDevice.features);
+  state.captureOutput = asCaptureOutputCapabilities(openedDevice.capture_output);
+  const openedResolutions = asResolutions(openedDevice.resolutions);
+  if (openedResolutions.length > 0) {
+    state.resolutions = openedResolutions;
+    state.selectedResolutionKey = resolutionKey(openedResolutions[0]);
+  }
   state.openState = state.opened ? 'success' : 'error';
   state.closeState = 'idle';
   recordRuntimeEvent({
@@ -220,6 +245,7 @@ export async function closeSelectedDevice(): Promise<void> {
 
   resetPreview();
   state.opened = false;
+  state.captureOutput = { target_size_supported: false, target_sizes: [] };
   state.openState = 'idle';
   state.startState = 'idle';
   state.stopState = 'idle';
@@ -359,6 +385,7 @@ export function resetDeviceVideo(): void {
   state.errorMessage = '';
   state.resolutions = [];
   state.features = { image_transfer_protocol: false };
+  state.captureOutput = { target_size_supported: false, target_sizes: [] };
   state.selectedResolutionKey = '';
   state.opened = false;
   resetPreview();
@@ -385,6 +412,7 @@ export function handleDeviceRemoved(deviceId: string, reason = 'hotplug_removed'
   state.opened = false;
   state.resolutions = [];
   state.features = { image_transfer_protocol: false };
+  state.captureOutput = { target_size_supported: false, target_sizes: [] };
   state.selectedResolutionKey = '';
   state.openState = 'idle';
   state.startState = 'idle';
@@ -413,6 +441,7 @@ export function clearSelectionIfDeviceMissing(activeDeviceIds: string[], reason 
   state.errorMessage = `device unavailable (${reason})`;
   state.resolutions = [];
   state.features = { image_transfer_protocol: false };
+  state.captureOutput = { target_size_supported: false, target_sizes: [] };
   state.selectedResolutionKey = '';
   state.opened = false;
   recordInternalRuntimeEvent({
@@ -691,6 +720,28 @@ function asFeatures(value: unknown): DeviceFeatures {
   const features = value as Record<string, unknown>;
   return {
     image_transfer_protocol: Boolean(features.image_transfer_protocol),
+  };
+}
+
+function asCaptureOutputCapabilities(value: unknown): CaptureOutputCapabilities {
+  if (!value || typeof value !== 'object') {
+    return { target_size_supported: false, target_sizes: [] };
+  }
+  const record = value as Record<string, unknown>;
+  const targetSizes = Array.isArray(record.target_sizes)
+    ? record.target_sizes
+        .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+        .map((item) => ({
+          target_size: asNumber(item.target_size),
+          width: asNumber(item.width),
+          height: asNumber(item.height),
+          is_device_default: Boolean(item.is_device_default),
+        }))
+        .filter((item) => item.target_size > 0 && item.width > 0 && item.height > 0)
+    : [];
+  return {
+    target_size_supported: Boolean(record.target_size_supported) && targetSizes.length > 0,
+    target_sizes: targetSizes,
   };
 }
 
