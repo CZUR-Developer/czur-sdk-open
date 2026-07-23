@@ -4,31 +4,32 @@
 
 本文档记录 CZUR Open SDK 项目的重要版本变更。
 
-## [0.0.3] - 2026-07-22
+## [0.0.3] - 2026-07-10
 
 ### 新增
 
-- 新增 Windows TWAIN 支持，包括 Source 枚举与监听、Source 会话、Capability 与 Profile 管理，以及异步扫描任务。
-- 新增 `storage.cleanup_temp`，用于清理 SDK 托管的已完成采集、OCR 和图像处理临时数据；存在活跃任务时拒绝清理。
-- 对外 Demo 新增独立的 TWAIN 和临时存储管理页面，并提供真实 OCR 生命周期场景，用于验证 busy 保护、清理后查询和重复清理幂等性。
-- 新增 PDF、OFD OCR 导出的托管临时工作目录。
+- 新增 `device.added` 设备接入通知，Demo 可在设备热插拔后自动刷新授权范围内的设备列表。
+- 硬拍事件现在可直接创建异步采集任务，并复用当前预览/采集配置和图像增强流程。
+- 授权上下文补充返回状态信息，便于客户端展示当前可用能力、购买等级和试用态。
 
 ### 变更
 
-- Windows runtime 打包支持按架构使用 private Provider 和 TWAIN helper；x64 runtime 可使用 x86、x64 TWAIN Source，x86 runtime 仅使用 x86 Source。
-- 扩展 TWAIN 和 SDK 托管临时存储相关的公共 Provider 与 command 类型。
+- 优化设备移除事件：已打开或正在预览的设备返回精确 `device_id`，未打开设备仅提示设备列表变化，避免暴露未授权设备信息。
+- `ocr.recognize` 在 Linux PDF/OFD 导出中使用独立临时目录处理质量参数，识别仍基于原始输入图片，避免压缩影响识别效果。
+- `file.convert.options.quality` 明确继续作为公开质量参数使用，用于图片层或页面渲染输出质量控制。
+- 优化 API Key 的正式态、试用态和本机激活状态处理，使不同授权模式下的能力判断更稳定。
 
 ### 修复
 
-- 构建授权上下文响应时保留显式 API Key 授权状态，并补充对应鉴权状态文档。
-- 修复 Windows private Provider 依赖加载和复制问题。
-- 修复 Demo 默认 OCR 输出路径处理问题。
+- 修复部分授权状态被默认值覆盖的问题，避免状态展示和能力判断不一致。
+- 修复离线本机激活状态恢复问题，提升重启后的授权状态稳定性。
+- 修复 Windows 运行时加载私有授权 DLL 和拷贝私有 Provider 依赖的问题。
+- 修复设备关闭、视频停止和设备拔出同时发生时的清理与错误语义，减少残留预览、挂起采集和重复事件。
 
 ### 兼容性说明
 
-- 新增 command 域：`twain.*`。
-- 新增 command 方法：`storage.cleanup_temp`。
-- 新增可选 Provider 边界：TWAIN 和 SDK 托管存储。
+- 新增 command 事件：`device.added`。
+- 授权上下文有状态字段补充；旧版离线 Key 与既有本地限额行为保持兼容。
 
 ## [0.0.2] - 2026-06-26
 
