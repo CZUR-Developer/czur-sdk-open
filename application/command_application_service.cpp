@@ -699,7 +699,7 @@ bool IsStorageWritingMethod(const std::string& method) {
            method == "image.process_page" || method == "image.apply_color_mode" ||
            method == "image.enhance" || method == "ocr.recognize" ||
            method == "file.convert" || method == "sane.scan" ||
-           method == "twain.scan" || method == "storage.cleanup_temp";
+           method == "twain.scan";
 }
 
 bool IsSaneTaskActive(const SdkSaneScanTask& task) {
@@ -6225,6 +6225,14 @@ Json CommandApplicationService::HandleStorageCleanupTemp(const std::string& conn
     const AuthorizationService::SessionResult session_result = authorization_service_.RequireSession(connection_id);
     if (!IsOkStatusCode(session_result.code)) {
         return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+
+    // 清理不等待正在写盘的命令；普通写入命令仍保持原有阻塞语义。
+    std::unique_lock<std::recursive_mutex> storage_lifecycle_lock(storage_lifecycle_mu_, std::try_to_lock);
+    if (!storage_lifecycle_lock.owns_lock()) {
+        return BuildWsResponse(request.request_id,
+                               SdkStatusCode::StorageBusy,
+                               "temporary storage is busy");
     }
 
     SdkStorageActiveTasks active;

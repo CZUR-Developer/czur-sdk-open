@@ -9,6 +9,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <sys/stat.h>
@@ -21,6 +22,13 @@ namespace editor {
 namespace sdk {
 
 namespace {
+
+struct CaptureCallbackState {
+    std::mutex mu;
+    std::condition_variable cv;
+    bool completed = false;
+    SdkCaptureResult result;
+};
 
 std::string ExtensionForFormat(const std::string& format) {
     if (format == "png") {
@@ -240,32 +248,34 @@ public:
         capture_request.include_base64 = request_.include_base64;
         capture_request.timeout_ms = request_.timeout_ms;
 
-        std::mutex capture_mu;
-        std::condition_variable capture_cv;
-        bool completed = false;
-        SdkCaptureResult result;
-        device_facade_.CaptureStill(request_.auth_context, capture_request, [&](const SdkCaptureResult& capture_result) {
-            {
-                std::lock_guard<std::mutex> lock(capture_mu);
-                if (completed) {
-                    return;
+        const std::shared_ptr<CaptureCallbackState> state(new CaptureCallbackState());
+        device_facade_.CaptureStill(request_.auth_context, capture_request, [state](const SdkCaptureResult& capture_result) {
+                bool notify = false;
+                {
+                    std::lock_guard<std::mutex> lock(state->mu);
+                    if (!state->completed) {
+                        state->result = capture_result;
+                        state->completed = true;
+                        notify = true;
+                    }
                 }
-                result = capture_result;
-                completed = true;
-            }
-            capture_cv.notify_one();
-        });
+                if (notify) {
+                    state->cv.notify_one();
+                }
+            });
 
+        SdkCaptureResult result;
         {
-            std::unique_lock<std::mutex> lock(capture_mu);
-            if (!completed) {
+            std::unique_lock<std::mutex> lock(state->mu);
+            if (!state->completed) {
                 const int timeout_ms = request_.timeout_ms > 0 ? request_.timeout_ms : 15000;
-                if (!capture_cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [&completed]() { return completed; })) {
-                    completed = true;
-                    result.code = ToCode(SdkStatusCode::CaptureTimeout);
-                    result.message = "capture timeout";
+                if (!state->cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [state]() { return state->completed; })) {
+                    state->completed = true;
+                    state->result.code = ToCode(SdkStatusCode::CaptureTimeout);
+                    state->result.message = "capture timeout";
                 }
             }
+            result = state->result;
         }
 
         if (!IsOkStatusCode(result.code) || !result.captured) {

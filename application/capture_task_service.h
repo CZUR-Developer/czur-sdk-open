@@ -98,6 +98,8 @@ private:
     mutable std::mutex mu_;
     std::map<std::string, CaptureTaskSnapshot> tasks_;
     std::set<std::string> busy_devices_;
+    // 协议状态可能先进入终态；该集合以 task worker 实际退出作为 Open 层清理边界。
+    std::set<std::string> active_worker_task_ids_;
     std::vector<std::thread> workers_;
     EventSink event_sink_;
     std::atomic<uint64_t> next_task_seq_;

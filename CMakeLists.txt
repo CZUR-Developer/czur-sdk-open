@@ -252,6 +252,17 @@ target_link_libraries(sdk_mock_providers PUBLIC
     sdk_open_logging
 )
 
+# 这些静态库会被 sdk_private 共享库复用，必须生成位置无关代码。
+set_target_properties(
+    sdk_open_entitlement_policy
+    sdk_open_cgraph
+    sdk_open_logging
+    sdk_open_runtime
+    sdk_mock_providers
+    PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+)
+
 add_executable(sdk_open_app
     runtime/sdk_open_main.cpp
 )
@@ -269,8 +280,14 @@ target_link_libraries(sdk_open_app PRIVATE
     sdk_open_runtime
 )
 set_target_properties(sdk_open_app PROPERTIES
-    VERSION "${SDK_OPEN_VERSION}.${SDK_OPEN_BUILD}"
+    RUNTIME_OUTPUT_DIRECTORY "${CZUR_TARGET_OUTPUT_DIR}"
 )
+if(WIN32)
+    # Windows 保留 PE image version；可执行文件名固定为 sdk_open_app.exe。
+    set_target_properties(sdk_open_app PROPERTIES
+        VERSION "${SDK_OPEN_VERSION}.${SDK_OPEN_BUILD}"
+    )
+endif()
 if(WIN32 AND SDK_OPEN_USE_PRIVATE_PROVIDER)
     target_sources(sdk_open_app PRIVATE
         providers/private_windows/private_windows_provider_factory.cpp
@@ -314,6 +331,19 @@ if(SDK_OPEN_USE_PRIVATE_PROVIDER)
         endif()
     else()
         target_link_libraries(sdk_open_app PRIVATE sdk_private_providers)
+        if(UNIX AND NOT APPLE AND TARGET docx)
+            # Linux private provider 间接依赖 libdocx.so，随 sdk_open_app 进入同一运行目录。
+            add_custom_target(sdk_open_docx_runtime_dep
+                COMMAND "${CMAKE_COMMAND}" -E make_directory
+                    "${CZUR_TARGET_OUTPUT_DIR}"
+                COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                    "$<TARGET_FILE:docx>"
+                    "${CZUR_TARGET_OUTPUT_DIR}/$<TARGET_FILE_NAME:docx>"
+                DEPENDS docx
+                COMMENT "Copy libdocx into sdk_open_app runtime directory"
+            )
+            add_dependencies(sdk_open_app sdk_open_docx_runtime_dep)
+        endif()
     endif()
 else()
     target_link_libraries(sdk_open_app PRIVATE sdk_mock_providers)

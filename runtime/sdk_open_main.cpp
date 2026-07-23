@@ -326,7 +326,8 @@ std::unique_ptr<editor::sdk::SdkApp> CreateSdkOpenApp(const std::string& config_
     SDK_OPEN_LOG_INFO("[sdk_open_app] provider mode: private");
 #elif defined(SDK_USE_PRIVATE_PROVIDER)
     ApplyDefaultSaneConfigDir();
-    editor::sdk::ProviderBundle providers = editor::sdk::private_impl::CreateProviderBundle();
+    // Linux SDK Open 显式挂载 storage provider；其他 private bundle 调用保持原有能力集合。
+    editor::sdk::ProviderBundle providers = editor::sdk::private_impl::CreateProviderBundle(true);
     SDK_OPEN_LOG_INFO("[sdk_open_app] provider mode: private");
 #else
     editor::sdk::ProviderBundle providers = editor::sdk::mock::CreateProviderBundle();
