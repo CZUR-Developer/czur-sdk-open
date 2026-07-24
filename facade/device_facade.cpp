@@ -150,6 +150,39 @@ SdkVideoResolution VideoResolutionFromJson(const Json& value) {
     return resolution;
 }
 
+SdkOutputTargetSizeOption OutputTargetSizeOptionFromJson(const Json& value) {
+    SdkOutputTargetSizeOption option;
+    if (!value.is_object()) {
+        return option;
+    }
+    option.target_size = IntField(value, "target_size");
+    option.width = IntField(value, "width");
+    option.height = IntField(value, "height");
+    option.is_device_default = BoolField(value, "is_device_default");
+    return option;
+}
+
+SdkCaptureOutputCapabilities CaptureOutputCapabilitiesFromJson(const Json& value) {
+    SdkCaptureOutputCapabilities capabilities;
+    if (!value.is_object()) {
+        return capabilities;
+    }
+    capabilities.target_size_supported = BoolField(value, "target_size_supported");
+    Json::const_iterator sizes_it = value.find("target_sizes");
+    if (sizes_it != value.end() && sizes_it->is_array()) {
+        for (Json::const_iterator it = sizes_it->begin(); it != sizes_it->end(); ++it) {
+            SdkOutputTargetSizeOption option = OutputTargetSizeOptionFromJson(*it);
+            if (option.target_size > 0 && option.width > 0 && option.height > 0) {
+                capabilities.target_sizes.push_back(option);
+            }
+        }
+    }
+    if (capabilities.target_sizes.empty()) {
+        capabilities.target_size_supported = false;
+    }
+    return capabilities;
+}
+
 SdkDeviceDescriptor DeviceDescriptorFromJson(const Json& value) {
     SdkDeviceDescriptor device;
     if (!value.is_object()) {
@@ -173,6 +206,10 @@ SdkDeviceDescriptor DeviceDescriptorFromJson(const Json& value) {
         for (Json::const_iterator it = resolutions_it->begin(); it != resolutions_it->end(); ++it) {
             device.resolutions.push_back(VideoResolutionFromJson(*it));
         }
+    }
+    Json::const_iterator capture_output_it = value.find("capture_output");
+    if (capture_output_it != value.end()) {
+        device.capture_output = CaptureOutputCapabilitiesFromJson(*capture_output_it);
     }
     return device;
 }

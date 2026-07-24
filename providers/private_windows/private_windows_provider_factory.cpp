@@ -779,6 +779,7 @@ public:
         result.cleared_ocr_task_count = static_cast<std::size_t>(Int64Field(response, "cleared_ocr_task_count"));
         result.cleared_twain_task_count = static_cast<std::size_t>(Int64Field(response, "cleared_twain_task_count"));
         const Json active = response.value("active", Json::object());
+        result.active.capture = static_cast<std::size_t>(Int64Field(active, "capture"));
         result.active.ocr = static_cast<std::size_t>(Int64Field(active, "ocr"));
         result.active.sane = static_cast<std::size_t>(Int64Field(active, "sane"));
         result.active.twain = static_cast<std::size_t>(Int64Field(active, "twain"));

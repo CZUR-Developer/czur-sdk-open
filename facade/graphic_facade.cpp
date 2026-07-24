@@ -171,7 +171,9 @@ Json ColorModeRequestToJson(const SdkColorModeRequest& request) {
 Json FormatConvertRequestToJson(const SdkFormatConvertRequest& request) {
     return Json{{"input_path", request.input_path},
                 {"output_path", request.output_path},
-                {"output_format", request.output_format}};
+                {"output_format", request.output_format},
+                {"quality", request.quality},
+                {"scale", request.scale}};
 }
 
 bool InvokePrivateGraphicCApi(PrivateGraphicJsonFn fn,

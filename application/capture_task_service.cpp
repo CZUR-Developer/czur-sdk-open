@@ -132,7 +132,15 @@ CaptureTaskStartResult CaptureTaskService::StartTask(const CaptureTaskStartReque
         }
         busy_devices_.insert(request.device_id);
         tasks_[task_id] = task;
-        workers_.push_back(std::thread(&CaptureTaskService::RunTask, this, task_id, request));
+        active_worker_task_ids_.insert(task_id);
+        try {
+            workers_.push_back(std::thread(&CaptureTaskService::RunTask, this, task_id, request));
+        } catch (...) {
+            active_worker_task_ids_.erase(task_id);
+            tasks_.erase(task_id);
+            busy_devices_.erase(request.device_id);
+            throw;
+        }
     }
 
     result.accepted = true;
@@ -183,21 +191,14 @@ CaptureAssetResult CaptureTaskService::GetAsset(const std::string& connection_id
 
 std::size_t CaptureTaskService::ActiveTaskCount() const {
     std::lock_guard<std::mutex> lock(mu_);
-    std::size_t count = 0;
-    for (std::map<std::string, CaptureTaskSnapshot>::const_iterator it = tasks_.begin(); it != tasks_.end(); ++it) {
-        if (it->second.status == "queued" || it->second.status == "running") {
-            ++count;
-        }
-    }
-    return count;
+    return active_worker_task_ids_.size();
 }
 
 std::size_t CaptureTaskService::ClearFinishedTasks() {
     std::lock_guard<std::mutex> lock(mu_);
     std::size_t count = 0;
     for (std::map<std::string, CaptureTaskSnapshot>::iterator it = tasks_.begin(); it != tasks_.end();) {
-        // 生命周期锁保证此处不会和新任务注册并发；活跃任务仍采用保守策略保留。
-        if (it->second.status == "queued" || it->second.status == "running") {
+        if (active_worker_task_ids_.find(it->first) != active_worker_task_ids_.end()) {
             ++it;
             continue;
         }
@@ -217,6 +218,8 @@ void CaptureTaskService::RunTask(const std::string& task_id, CaptureTaskStartReq
         SDK_OPEN_LOG_ERROR("[capture_task] task failed with unknown exception task_id={}", task_id);
         FailTask(task_id, request, "capture task failed");
     }
+    std::lock_guard<std::mutex> lock(mu_);
+    active_worker_task_ids_.erase(task_id);
 }
 
 void CaptureTaskService::RunTaskImpl(const std::string& task_id, CaptureTaskStartRequest request) {

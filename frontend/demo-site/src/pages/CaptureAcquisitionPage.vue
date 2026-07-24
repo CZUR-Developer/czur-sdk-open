@@ -387,6 +387,36 @@
               </div>
             </div>
 
+            <div class="grid gap-3 sm:grid-cols-2">
+              <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {{ t('pages.captureAcquisition.jpegQuality') }}
+                <input
+                  v-model.number="captureConfig.outputQuality"
+                  type="number"
+                  min="1"
+                  max="100"
+                  :placeholder="t('pages.captureAcquisition.outputQualityPlaceholder')"
+                  :disabled="captureConfig.outputFormat !== 'jpg'"
+                  class="field-input mt-1"
+                />
+              </label>
+              <label class="block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {{ t('pages.captureAcquisition.targetSize') }}
+                <select
+                  v-model="captureConfig.outputTargetSize"
+                  class="field-input mt-1"
+                  :disabled="!targetSizeSupported"
+                >
+                  <option v-for="option in outputTargetSizeOptions" :key="option.value || 'unset'" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
+                <span v-if="deviceVideoState.opened && !targetSizeSupported" class="mt-2 block text-xs font-medium normal-case tracking-normal text-slate-500">
+                  {{ t('pages.captureAcquisition.targetSizeUnsupported') }}
+                </span>
+              </label>
+            </div>
+
             <div>
               <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{{ t('pages.captureAcquisition.thumbnailOutputs') }}</p>
               <div class="space-y-2">
@@ -454,6 +484,7 @@ import {
   closeSelectedDevice,
   clearSelectionIfDeviceMissing,
   type DeviceResolution,
+  type OutputTargetSizeOption,
   deviceVideoState,
   handleDeviceRemoved,
   loadDeviceDetail,
@@ -476,6 +507,7 @@ import type { TableColumn, TableRow, TimelineItem, Tone } from '../types/demo';
 type PageProcessingMode = 'single_page' | 'curved_book' | 'selected_area' | 'keep_original';
 type ColorMode = 'auto_optimize' | 'color_enhance' | 'black_white' | 'grayscale' | 'white_paper_seal' | 'certificate' | 'ancient' | 'no_optimize';
 type OutputFormat = 'jpg' | 'png' | 'tiff';
+type OutputTargetSize = string;
 type ThumbnailKey = 'original' | 'pageProcessed' | 'colorProcessed' | 'final';
 type ThumbnailState = 'idle' | 'loading' | 'ready' | 'error' | 'unavailable';
 type SelectedAreaMode = 'rectangle' | 'points';
@@ -615,6 +647,23 @@ const colorModeOptions = computed<Array<{ value: ColorMode; label: string; descr
 
 const outputFormats: OutputFormat[] = ['jpg', 'png', 'tiff'];
 
+const targetSizeSupported = computed(() =>
+  deviceVideoState.opened &&
+  deviceVideoState.captureOutput.target_size_supported &&
+  deviceVideoState.captureOutput.target_sizes.length > 0,
+);
+
+const outputTargetSizeOptions = computed<Array<{ value: OutputTargetSize; label: string }>>(() => {
+  const options = [{ value: '', label: t('pages.captureAcquisition.targetSizeUnset') }];
+  if (!targetSizeSupported.value) {
+    return options;
+  }
+  for (const option of deviceVideoState.captureOutput.target_sizes) {
+    options.push({ value: String(option.target_size), label: targetSizeOptionLabel(option) });
+  }
+  return options;
+});
+
 const thumbnailOptions = computed<Array<{ key: ThumbnailKey; label: string }>>(() => [
   { key: 'original', label: t('pages.captureAcquisition.originalThumbnail') },
   { key: 'pageProcessed', label: t('pages.captureAcquisition.pageProcessedThumbnail') },
@@ -644,6 +693,8 @@ const captureConfig = reactive({
   selectedAreaPoints: [] as ImagePoint[],
   colorMode: 'color_enhance' as ColorMode,
   outputFormat: 'jpg' as OutputFormat,
+  outputQuality: '' as number | '',
+  outputTargetSize: '' as OutputTargetSize,
   thumbnails: {
     original: true,
     pageProcessed: true,
@@ -817,56 +868,8 @@ const captureMetrics = computed(() => [
   },
 ]);
 
-const captureProfile = computed(() => ({
-  profile_version: 'capture.profile.v1',
-  revision: profileRevision.value,
-  initialized_at: profileInitializedAt.value,
-  device: {
-    device_id: deviceVideoState.selectedDeviceId || null,
-    resolution: selectedResolution.value
-      ? {
-          width: selectedResolution.value.width,
-          height: selectedResolution.value.height,
-          fps: selectedResolution.value.fps,
-        }
-      : null,
-  },
-  capture: {
-    page_processing: captureConfig.pageProcessing,
-    single_page: {
-      realtime_detect_rects: captureConfig.singlePageRealtimeDetectRects,
-      crop_border: {
-        enabled: captureConfig.singlePageCropBorder,
-        width: clampCropMargin(captureConfig.singlePageCropBorderWidth),
-        height: clampCropMargin(captureConfig.singlePageCropBorderHeight),
-      },
-      id_card_round_corner: captureConfig.singlePageIdCardRoundCorner,
-      auto_rotate: captureConfig.singlePageAutoRotate,
-      smart_black_edge_optimize: captureConfig.singlePageSmartBlackEdgeOptimize,
-      multi_target_paging: captureConfig.singlePageMultiTargetPaging,
-    },
-    curved_book: {
-      remove_finger: {
-        enabled: captureConfig.curvedBookRemoveFinger,
-        finger_type: captureConfig.curvedBookFingerType,
-      },
-      smart_paging: captureConfig.curvedBookSmartPaging,
-      crop_border: {
-        enabled: captureConfig.curvedBookCropBorder,
-        width: clampCropMargin(captureConfig.curvedBookCropBorderWidth),
-        height: clampCropMargin(captureConfig.curvedBookCropBorderHeight),
-      },
-      auto_complete: captureConfig.curvedBookAutoComplete,
-    },
-    selected_area: selectedAreaRect.value
-      ? {
-          points: selectedAreaRect.value,
-          source: selectedAreaSource.value,
-        }
-      : null,
-    color_mode: captureConfig.colorMode,
-  },
-  output: {
+const captureProfile = computed(() => {
+  const output: Record<string, unknown> = {
     format: captureConfig.outputFormat,
     thumbnails: {
       original: captureConfig.thumbnails.original,
@@ -874,8 +877,66 @@ const captureProfile = computed(() => ({
       color_processed: captureConfig.thumbnails.colorProcessed,
       final: captureConfig.thumbnails.final,
     },
-  },
-}));
+  };
+  if (captureConfig.outputFormat === 'jpg' && typeof captureConfig.outputQuality === 'number' && captureConfig.outputQuality > 0) {
+    output.quality = captureConfig.outputQuality;
+  }
+  if (targetSizeSupported.value && captureConfig.outputTargetSize) {
+    output.target_size = Number(captureConfig.outputTargetSize);
+  }
+
+  return {
+    profile_version: 'capture.profile.v1',
+    revision: profileRevision.value,
+    initialized_at: profileInitializedAt.value,
+    device: {
+      device_id: deviceVideoState.selectedDeviceId || null,
+      resolution: selectedResolution.value
+        ? {
+            width: selectedResolution.value.width,
+            height: selectedResolution.value.height,
+            fps: selectedResolution.value.fps,
+          }
+        : null,
+    },
+    capture: {
+      page_processing: captureConfig.pageProcessing,
+      single_page: {
+        realtime_detect_rects: captureConfig.singlePageRealtimeDetectRects,
+        crop_border: {
+          enabled: captureConfig.singlePageCropBorder,
+          width: clampCropMargin(captureConfig.singlePageCropBorderWidth),
+          height: clampCropMargin(captureConfig.singlePageCropBorderHeight),
+        },
+        id_card_round_corner: captureConfig.singlePageIdCardRoundCorner,
+        auto_rotate: captureConfig.singlePageAutoRotate,
+        smart_black_edge_optimize: captureConfig.singlePageSmartBlackEdgeOptimize,
+        multi_target_paging: captureConfig.singlePageMultiTargetPaging,
+      },
+      curved_book: {
+        remove_finger: {
+          enabled: captureConfig.curvedBookRemoveFinger,
+          finger_type: captureConfig.curvedBookFingerType,
+        },
+        smart_paging: captureConfig.curvedBookSmartPaging,
+        crop_border: {
+          enabled: captureConfig.curvedBookCropBorder,
+          width: clampCropMargin(captureConfig.curvedBookCropBorderWidth),
+          height: clampCropMargin(captureConfig.curvedBookCropBorderHeight),
+        },
+        auto_complete: captureConfig.curvedBookAutoComplete,
+      },
+      selected_area: selectedAreaRect.value
+        ? {
+            points: selectedAreaRect.value,
+            source: selectedAreaSource.value,
+          }
+        : null,
+      color_mode: captureConfig.colorMode,
+    },
+    output,
+  };
+});
 
 const profilePayload = computed(() => JSON.stringify(captureProfile.value, null, 2));
 
@@ -1003,17 +1064,31 @@ watch(
     captureConfig.selectedAreaPoints.map((point) => `${point.x},${point.y}`).join('|'),
     captureConfig.colorMode,
     captureConfig.outputFormat,
+    captureConfig.outputQuality,
+    captureConfig.outputTargetSize,
     captureConfig.thumbnails.original,
     captureConfig.thumbnails.pageProcessed,
     captureConfig.thumbnails.colorProcessed,
     captureConfig.thumbnails.final,
     deviceVideoState.selectedDeviceId,
     deviceVideoState.selectedResolutionKey,
+    deviceVideoState.captureOutput.target_size_supported,
+    deviceVideoState.captureOutput.target_sizes.map((item) => item.target_size).join('|'),
   ],
   () => {
     profileRevision.value += 1;
     profileInitializedAt.value = timeLabel();
   },
+);
+
+watch(
+  () => outputTargetSizeOptions.value.map((option) => option.value).join('|'),
+  () => {
+    if (!outputTargetSizeOptions.value.some((option) => option.value === captureConfig.outputTargetSize)) {
+      captureConfig.outputTargetSize = '';
+    }
+  },
+  { immediate: true },
 );
 
 watch(
@@ -1185,6 +1260,18 @@ function clamp(value: number, min: number, max: number): number {
 
 function clampCropMargin(value: number): number {
   return Math.trunc(clamp(Number.isFinite(value) ? value : 0, -100, 100));
+}
+
+function targetSizeOptionLabel(option: OutputTargetSizeOption): string {
+  const label = t('pages.captureAcquisition.targetSizeOption', {
+    size: option.target_size,
+    width: option.width,
+    height: option.height,
+  });
+  if (!option.is_device_default) {
+    return label;
+  }
+  return `${label} ${t('pages.captureAcquisition.targetSizeDefaultSuffix')}`;
 }
 
 function handleResolutionChange(event: Event): void {

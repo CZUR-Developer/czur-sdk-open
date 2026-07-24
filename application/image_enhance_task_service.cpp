@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include "sdk_logger.h"
 #include "sdk_runtime_paths.h"
 #include "sdk_status_code.h"
 
@@ -385,7 +386,14 @@ SdkImageEnhanceTaskResult ImageEnhanceTaskService::StartTask(const SdkImageEnhan
     {
         std::lock_guard<std::mutex> lock(mu_);
         tasks_[task_id] = task;
-        workers_.push_back(std::thread(&ImageEnhanceTaskService::RunTask, this, task_id, task_request));
+        active_worker_task_ids_.insert(task_id);
+        try {
+            workers_.push_back(std::thread(&ImageEnhanceTaskService::RunTask, this, task_id, task_request));
+        } catch (...) {
+            active_worker_task_ids_.erase(task_id);
+            tasks_.erase(task_id);
+            throw;
+        }
     }
     result.accepted = true;
     result.task_id = task_id;
@@ -443,21 +451,14 @@ SdkImageEnhanceTaskResult ImageEnhanceTaskService::CancelTask(const std::string&
 
 std::size_t ImageEnhanceTaskService::ActiveTaskCount() const {
     std::lock_guard<std::mutex> lock(mu_);
-    std::size_t count = 0;
-    for (std::map<std::string, SdkImageEnhanceTaskSnapshot>::const_iterator it = tasks_.begin(); it != tasks_.end(); ++it) {
-        if (it->second.status == "queued" || it->second.status == "running") {
-            ++count;
-        }
-    }
-    return count;
+    return active_worker_task_ids_.size();
 }
 
 std::size_t ImageEnhanceTaskService::ClearFinishedTasks() {
     std::lock_guard<std::mutex> lock(mu_);
     std::size_t count = 0;
     for (std::map<std::string, SdkImageEnhanceTaskSnapshot>::iterator it = tasks_.begin(); it != tasks_.end();) {
-        // cancel_requested 并不等于终态，运行中的 worker 仍可能读取或写入临时文件。
-        if (it->second.status == "queued" || it->second.status == "running") {
+        if (active_worker_task_ids_.find(it->first) != active_worker_task_ids_.end()) {
             ++it;
             continue;
         }
@@ -469,20 +470,56 @@ std::size_t ImageEnhanceTaskService::ClearFinishedTasks() {
 }
 
 void ImageEnhanceTaskService::RunTask(const std::string& task_id, SdkImageEnhanceTaskRequest request) {
+    try {
+        RunTaskImpl(task_id, request);
+    } catch (const std::exception& e) {
+        SDK_OPEN_LOG_ERROR("[image_enhance_task] worker failed task_id={} err={}", task_id, e.what());
+        std::lock_guard<std::mutex> lock(mu_);
+        SdkImageEnhanceTaskSnapshot& task = tasks_[task_id];
+        task.status = "failed";
+        task.phase = "failed";
+        task.progress = 100;
+        task.error = e.what();
+    } catch (...) {
+        SDK_OPEN_LOG_ERROR("[image_enhance_task] worker failed task_id={} err=<unknown>", task_id);
+        std::lock_guard<std::mutex> lock(mu_);
+        SdkImageEnhanceTaskSnapshot& task = tasks_[task_id];
+        task.status = "failed";
+        task.phase = "failed";
+        task.progress = 100;
+        task.error = "image enhance task failed";
+    }
+    std::lock_guard<std::mutex> lock(mu_);
+    active_worker_task_ids_.erase(task_id);
+}
+
+void ImageEnhanceTaskService::RunTaskImpl(const std::string& task_id, SdkImageEnhanceTaskRequest request) {
     std::vector<SdkImageEnhancePage> pages;
     std::map<std::string, int> online_usage_by_capability;
     SdkImageEnhanceTaskSnapshot event_task;
+    bool cancelled = false;
     {
         std::lock_guard<std::mutex> lock(mu_);
         SdkImageEnhanceTaskSnapshot& task = tasks_[task_id];
-        task.status = "running";
-        task.phase = "enhancing";
-        task.progress = 5;
-        task.message = "running";
+        if (cancel_requested_.find(task_id) != cancel_requested_.end()) {
+            task.status = "cancelled";
+            task.phase = "cancelled";
+            task.progress = 100;
+            task.cancel_requested = true;
+            cancelled = true;
+        } else {
+            task.status = "running";
+            task.phase = "enhancing";
+            task.progress = 5;
+            task.message = "running";
+        }
         pages = task.pages;
         event_task = task;
     }
     PublishEvent(event_task);
+    if (cancelled) {
+        return;
+    }
 
     const int step_count = static_cast<int>(request.pipeline.steps.size());
     for (int i = 0; i < step_count; ++i) {
@@ -663,6 +700,7 @@ void ImageEnhanceTaskService::RunTask(const std::string& task_id, SdkImageEnhanc
                 convert_request.input_path = it->path;
                 convert_request.output_path = final_path;
                 convert_request.output_format = output_format;
+                convert_request.quality = request.pipeline.target.quality;
                 const SdkFormatConvertResult convert_result = providers_.graphic_provider->ConvertImageFormat(convert_request);
                 if (!IsOkStatusCode(convert_result.code)) {
                     continue;

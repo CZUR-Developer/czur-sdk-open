@@ -35,6 +35,7 @@ public:
 
 private:
     void RunTask(const std::string& task_id, SdkImageEnhanceTaskRequest request);
+    void RunTaskImpl(const std::string& task_id, SdkImageEnhanceTaskRequest request);
     void PublishEvent(const SdkImageEnhanceTaskSnapshot& task) const;
     SdkImageEnhanceTaskSnapshot GetTaskUnlocked(const std::string& task_id) const;
     void AttachAssetUrls(const std::string& task_id, std::vector<SdkCaptureAsset>* assets) const;
@@ -45,6 +46,8 @@ private:
     mutable std::mutex mu_;
     std::map<std::string, SdkImageEnhanceTaskSnapshot> tasks_;
     std::set<std::string> cancel_requested_;
+    // 协议状态可能先进入终态；该集合以 worker 实际退出作为清理边界。
+    std::set<std::string> active_worker_task_ids_;
     std::vector<std::thread> workers_;
     EventSink event_sink_;
     std::atomic<uint64_t> next_task_seq_;

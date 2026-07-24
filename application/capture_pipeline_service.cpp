@@ -9,7 +9,9 @@
 #include <condition_variable>
 #include <cstdint>
 #include <fstream>
+#include <memory>
 #include <mutex>
+#include <sstream>
 #include <sys/stat.h>
 
 #include "CGraph.h"
@@ -20,6 +22,13 @@ namespace editor {
 namespace sdk {
 
 namespace {
+
+struct CaptureCallbackState {
+    std::mutex mu;
+    std::condition_variable cv;
+    bool completed = false;
+    SdkCaptureResult result;
+};
 
 std::string ExtensionForFormat(const std::string& format) {
     if (format == "png") {
@@ -51,6 +60,10 @@ bool HasExtension(const std::string& path, const std::string& format) {
     return suffix == ext;
 }
 
+bool IsJpegFormat(const std::string& format) {
+    return format == "jpg" || format == "jpeg";
+}
+
 bool FileExists(const std::string& path) {
     struct stat st;
     return !path.empty() && ::stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
@@ -62,6 +75,14 @@ uint64_t FileSize(const std::string& path) {
         return 0;
     }
     return static_cast<uint64_t>(st.st_size);
+}
+
+int ScaledDimension(int value, float scale) {
+    if (value <= 0) {
+        return 0;
+    }
+    const int scaled = static_cast<int>(static_cast<float>(value) * scale + 0.5f);
+    return std::max(1, scaled);
 }
 
 bool CopyFileBinary(const std::string& input_path, const std::string& output_path) {
@@ -227,32 +248,34 @@ public:
         capture_request.include_base64 = request_.include_base64;
         capture_request.timeout_ms = request_.timeout_ms;
 
-        std::mutex capture_mu;
-        std::condition_variable capture_cv;
-        bool completed = false;
-        SdkCaptureResult result;
-        device_facade_.CaptureStill(request_.auth_context, capture_request, [&](const SdkCaptureResult& capture_result) {
-            {
-                std::lock_guard<std::mutex> lock(capture_mu);
-                if (completed) {
-                    return;
+        const std::shared_ptr<CaptureCallbackState> state(new CaptureCallbackState());
+        device_facade_.CaptureStill(request_.auth_context, capture_request, [state](const SdkCaptureResult& capture_result) {
+                bool notify = false;
+                {
+                    std::lock_guard<std::mutex> lock(state->mu);
+                    if (!state->completed) {
+                        state->result = capture_result;
+                        state->completed = true;
+                        notify = true;
+                    }
                 }
-                result = capture_result;
-                completed = true;
-            }
-            capture_cv.notify_one();
-        });
+                if (notify) {
+                    state->cv.notify_one();
+                }
+            });
 
+        SdkCaptureResult result;
         {
-            std::unique_lock<std::mutex> lock(capture_mu);
-            if (!completed) {
+            std::unique_lock<std::mutex> lock(state->mu);
+            if (!state->completed) {
                 const int timeout_ms = request_.timeout_ms > 0 ? request_.timeout_ms : 15000;
-                if (!capture_cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [&completed]() { return completed; })) {
-                    completed = true;
-                    result.code = ToCode(SdkStatusCode::CaptureTimeout);
-                    result.message = "capture timeout";
+                if (!state->cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [state]() { return state->completed; })) {
+                    state->completed = true;
+                    state->result.code = ToCode(SdkStatusCode::CaptureTimeout);
+                    state->result.message = "capture timeout";
                 }
             }
+            result = state->result;
         }
 
         if (!IsOkStatusCode(result.code) || !result.captured) {
@@ -552,13 +575,19 @@ private:
 
         const std::string final_path = JoinPath(output_dir_, single ? ("capture_final" + ExtensionForFormat(request_.profile.output_format))
                                                                     : ("capture_final_" + output.output_id + ExtensionForFormat(request_.profile.output_format)));
-        if (HasExtension(output.color_path, request_.profile.output_format)) {
+        const float scale = OutputScale();
+        const bool needs_scale = NeedsScale(scale);
+        const bool needs_quality = request_.profile.output_quality > 0 && IsJpegFormat(request_.profile.output_format);
+        const bool same_format = HasExtension(output.color_path, request_.profile.output_format);
+        if (same_format && !needs_scale && !needs_quality) {
             output.final_path = output.color_path;
         } else {
             SdkFormatConvertRequest convert_request;
             convert_request.input_path = output.color_path;
             convert_request.output_path = final_path;
             convert_request.output_format = request_.profile.output_format;
+            convert_request.quality = request_.profile.output_quality;
+            convert_request.scale = scale;
             const SdkFormatConvertResult result = graphic_facade_.ConvertImageFormat(convert_request);
             if (!IsOkStatusCode(result.code) || (!result.converted && !result.passthrough)) {
                 FinishStage(stage_name, "failed", ProviderName(providers_graphic), result.message, {output.color_asset_id}, {});
@@ -569,9 +598,13 @@ private:
             }
             output.final_path = result.output_path.empty() ? final_path : result.output_path;
         }
+        if (needs_scale) {
+            output.width = ScaledDimension(output.width, scale);
+            output.height = ScaledDimension(output.height, scale);
+        }
         output.final_asset_id = single ? "asset-final" : ("asset-final-" + output.output_id);
         AddAsset(MakeAsset(output.final_asset_id, single ? "final" : ("final_" + output.output_id), output.final_path, ContentTypeForFormat(request_.profile.output_format), output.width, output.height, FileSize(output.final_path)));
-        FinishStage(stage_name, "succeeded", ProviderName(providers_graphic), output.final_path == output.color_path ? "passthrough" : "ok", {output.color_asset_id}, {output.final_asset_id});
+        FinishStage(stage_name, "succeeded", ProviderName(providers_graphic), output.final_path == output.color_path ? "passthrough" : FormatConvertMessage(scale), {output.color_asset_id}, {output.final_asset_id});
         return CStatus();
     }
 
@@ -651,6 +684,32 @@ private:
         AddAsset(MakeAsset(spec.output_asset_id, spec.kind, request.output_path, "image/jpeg", 0, 0, FileSize(request.output_path)));
         FinishStage(spec.stage_name, "succeeded", ProviderName(providers_graphic), "fallback copy original", {spec.input_asset_id}, {spec.output_asset_id});
         return CStatus();
+    }
+
+    float OutputScale() const {
+        if (request_.profile.output_target_width <= 0 ||
+            request_.profile.output_target_height <= 0 ||
+            original_width_ <= 0 ||
+            original_height_ <= 0) {
+            return 1.0f;
+        }
+        const float scale_x = static_cast<float>(request_.profile.output_target_width) / static_cast<float>(original_width_);
+        const float scale_y = static_cast<float>(request_.profile.output_target_height) / static_cast<float>(original_height_);
+        const float scale = std::min(scale_x, scale_y);
+        return scale > 0.0f ? scale : 1.0f;
+    }
+
+    bool NeedsScale(float scale) const {
+        return scale < 0.999f || scale > 1.001f;
+    }
+
+    std::string FormatConvertMessage(float scale) const {
+        if (!NeedsScale(scale)) {
+            return "ok";
+        }
+        std::ostringstream oss;
+        oss << "ok scale=" << scale;
+        return oss.str();
     }
 
     CapturePipelineRequest request_;
