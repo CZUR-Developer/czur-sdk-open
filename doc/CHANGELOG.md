@@ -4,6 +4,29 @@
 
 All notable changes to the CZUR Open SDK are documented in this file.
 
+<<<<<<< HEAD
+=======
+## [0.0.4] - 2026-07-24
+
+### Added
+
+- Added Windows runtime and package support for 32-bit builds.
+- Added `storage.cleanup_temp` to clean completed SDK-managed temporary tasks and cache files; cleanup is rejected while tasks are active.
+- Added `profile.output.quality` and `profile.output.target_size` for capture profiles, allowing callers to request JPG output quality and target capture output size buckets.
+- `device.open` responses now include `capture_output.target_sizes`, listing target output resolution options supported by the opened device.
+- Updated the demo with capture output controls and a temporary-storage cleanup verification page.
+
+### Fixed
+
+- Fixed the OCR demo default output path, Linux cleanup-directory compatibility, and package validation issues.
+
+### Compatibility Notes
+
+- New command method: `storage.cleanup_temp`.
+- New optional capture profile fields: `output.quality` and `output.target_size`.
+- New optional `device.open` response field: `capture_output`.
+
+>>>>>>> release/0.0.4
 ## [0.0.3] - 2026-07-10
 
 ### Added

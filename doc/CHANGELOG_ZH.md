@@ -4,6 +4,26 @@
 
 本文档记录 CZUR Open SDK 项目的重要版本变更。
 
+## [0.0.4] - 2026-07-24
+
+### 新增
+
+- Windows 运行时和打包补充 32-bit 支持。
+- 新增 `storage.cleanup_temp`，用于清理 SDK 托管的已完成临时任务和缓存文件；存在活跃任务时拒绝清理。
+- 采集配置新增 `profile.output.quality` 和 `profile.output.target_size`，可指定 JPG 输出质量和目标拍照输出尺寸档位。
+- `device.open` 响应新增 `capture_output.target_sizes`，返回当前设备支持的目标输出分辨率选项。
+- Demo 补充采集输出参数选择和临时存储清理验证页面。
+
+### 修复
+
+- 修复 OCR Demo 默认输出路径、Linux 清理目录兼容和部分打包校验问题。
+
+### 兼容性说明
+
+- 新增 command 方法：`storage.cleanup_temp`。
+- 采集 profile 新增可选字段：`output.quality`、`output.target_size`。
+- `device.open` 响应新增可选字段：`capture_output`。
+
 ## [0.0.3] - 2026-07-10
 
 ### 新增
