@@ -4,8 +4,6 @@
 
 All notable changes to the CZUR Open SDK are documented in this file.
 
-<<<<<<< HEAD
-=======
 ## [0.0.4] - 2026-07-24
 
 ### Added
@@ -26,7 +24,6 @@ All notable changes to the CZUR Open SDK are documented in this file.
 - New optional capture profile fields: `output.quality` and `output.target_size`.
 - New optional `device.open` response field: `capture_output`.
 
->>>>>>> release/0.0.4
 ## [0.0.3] - 2026-07-10
 
 ### Added
