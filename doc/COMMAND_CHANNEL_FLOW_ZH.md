@@ -453,18 +453,18 @@ OCR 任务查询/取消示例：
 ### 离线 API Key
 
 - `license_mode` 为 `offline_api_key`
-- `host_auth_mode=activation_required` 时默认状态为 `offline_trial`；旧模式未要求 Host 激活时为 `offline_limited`
+- 有兼容成者设备时可直接进入 `offline_unlocked`，不需要 Host 授权码；没有该设备时，`host_auth_mode=activation_required` 默认状态为 `offline_trial`，旧模式未要求 Host 激活时为 `offline_limited`
 - 当前机器码会通过 `auth_context.machine_code` 返回
 - `commercial_authorized` 会原样透出到 `auth_context`，但不阻断离线 Host 激活
-- Host 激活前，`capture.take`、图像处理类方法、`file.convert` 走本地 quota 限制
-- `auth.activate_offline` 提交有效 Host 授权码后状态切为 `offline_unlocked`
+- 未被成者设备自动正式化且 Host 未激活前，`capture.take`、图像处理类方法、`file.convert` 走本地 quota 限制
+- `auth.activate_offline` 提交有效 Host 授权码后状态切为 `offline_unlocked`；已自动正式化时仍可调用以持久化 Host 授权
 
 ### 在线 API Key
 
 - `license_mode` 为 `online_api_key`
 - 创建会话时会调用配置的 HTTP 授权服务
-- `commercialAuthorized=false` 或字段缺失会进入 `online_trial`；商业授权成功后进入 `online_validated`
-- 成者设备可本地自动激活 VIP/SVIP，但不能自动激活 SVIP+
+- `commercialAuthorized=false` 或字段缺失且没有兼容成者设备时会进入 `online_trial`；商业授权成功后进入 `online_validated`
+- 普通成者设备可本地自动正式化 VIP/SVIP；配置 `SpecialAuthorization=true` 的成者设备还可自动正式化 SVIP+。自动正式化不改写 `commercial_authorized` 的商务授权事实
 - `capture.take`、图像处理类方法、`file.convert` 每次调用前都会走远端 quota 校验
 - 当前实现直接支持 `http://...` 在线授权地址
 
@@ -473,6 +473,12 @@ OCR 任务查询/取消示例：
 - `system.*` 可匿名调用
 - `auth.create_session` 可匿名调用
 - `auth.get_context`、`auth.refresh_session`、`auth.activate_offline`、`auth.destroy_session` 需要当前连接已有合法会话
+
+## 设备范围规则
+
+- `device_scope` 为空表示不限制业务设备。
+- `device_scope` 非空时，`device.list` 仅返回 scope 中 `{vid,pid}` 匹配的设备，`device.get/open`、采集和视频控制等操作对 scope 外目标设备返回 `1105 DeviceNotInAuthScope`。
+- `device_scope` 仅限制业务操作的目标设备；不会排除已连接成者设备参与 API Key 的自动正式化判定。
 - 其他业务方法默认都要求当前连接已有合法会话
 
 常见失败码：

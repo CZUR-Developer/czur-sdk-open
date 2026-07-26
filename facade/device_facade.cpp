@@ -784,14 +784,6 @@ void DeviceFacade::CaptureStill(const AuthContext& auth_context,
                                 const SdkCaptureRequest& request,
                                 SdkCaptureCallback callback) const {
     SdkCaptureResult result;
-#if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
-    (void)auth_context;
-    result = CaptureProviderStillWithCApi(request);
-    if (callback) {
-        callback(result);
-    }
-    return;
-#else
     const DeviceGetResult device_result = LookupDevice(auth_context, request.device_id);
     if (!IsOkStatusCode(device_result.code)) {
         result.code = device_result.code;
@@ -801,6 +793,13 @@ void DeviceFacade::CaptureStill(const AuthContext& auth_context,
         }
         return;
     }
+#if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
+    result = CaptureProviderStillWithCApi(request);
+    if (callback) {
+        callback(result);
+    }
+    return;
+#else
     providers_.device_provider->CaptureStill(request, callback);
 #endif
 }
@@ -809,37 +808,37 @@ SdkVideoStartResult DeviceFacade::StartVideo(const AuthContext& auth_context,
                                              const SdkVideoStartRequest& request,
                                              SdkVideoFrameCallback callback) const {
     SdkVideoStartResult result;
-#if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
-    (void)auth_context;
-    return StartProviderVideoWithCApi(request, callback);
-#else
     const DeviceGetResult device_result = LookupDevice(auth_context, request.device_id);
     if (!IsOkStatusCode(device_result.code)) {
         result.code = device_result.code;
         result.message = device_result.message;
         return result;
     }
+#if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
+    return StartProviderVideoWithCApi(request, callback);
+#else
     return providers_.device_provider->StartVideo(request, callback);
 #endif
 }
 
 SdkVideoStopResult DeviceFacade::StopVideo(const AuthContext& auth_context, const SdkVideoStopRequest& request) const {
     SdkVideoStopResult result;
-#if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
-    (void)auth_context;
-    return StopProviderVideoWithCApi(request);
-#else
     const DeviceGetResult device_result = LookupDevice(auth_context, request.device_id);
     if (!IsOkStatusCode(device_result.code)) {
+#if !defined(_WIN32) || !defined(SDK_USE_PRIVATE_PROVIDER)
         if (device_result.code == ToCode(SdkStatusCode::DeviceNotFound) &&
             providers_.device_provider &&
             providers_.device_provider->IsDeviceRecentlyRemoved(request.device_id)) {
             return providers_.device_provider->StopVideo(request);
         }
+#endif
         result.code = device_result.code;
         result.message = device_result.message;
         return result;
     }
+#if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
+    return StopProviderVideoWithCApi(request);
+#else
     return providers_.device_provider->StopVideo(request);
 #endif
 }
@@ -847,16 +846,15 @@ SdkVideoStopResult DeviceFacade::StopVideo(const AuthContext& auth_context, cons
 SdkVideoFormatResult DeviceFacade::SetVideoFormat(const AuthContext& auth_context,
                                                   const SdkVideoFormatRequest& request) const {
     SdkVideoFormatResult result;
-#if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
-    (void)auth_context;
-    return SetProviderVideoFormatWithCApi(request);
-#else
     const DeviceGetResult device_result = LookupDevice(auth_context, request.device_id);
     if (!IsOkStatusCode(device_result.code)) {
         result.code = device_result.code;
         result.message = device_result.message;
         return result;
     }
+#if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
+    return SetProviderVideoFormatWithCApi(request);
+#else
     try {
         return providers_.device_provider->SetVideoFormat(request);
     } catch (const std::exception& e) {
@@ -873,16 +871,15 @@ SdkVideoFormatResult DeviceFacade::SetVideoFormat(const AuthContext& auth_contex
 SdkVideoProfileResult DeviceFacade::SetVideoProfile(const AuthContext& auth_context,
                                                     const SdkVideoProfileRequest& request) const {
     SdkVideoProfileResult result;
-#if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
-    (void)auth_context;
-    return SetProviderVideoProfileWithCApi(request);
-#else
     const DeviceGetResult device_result = LookupDevice(auth_context, request.device_id);
     if (!IsOkStatusCode(device_result.code)) {
         result.code = device_result.code;
         result.message = device_result.message;
         return result;
     }
+#if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
+    return SetProviderVideoProfileWithCApi(request);
+#else
     try {
         return providers_.device_provider->SetVideoProfile(request);
     } catch (const std::exception& e) {
@@ -899,16 +896,15 @@ SdkVideoProfileResult DeviceFacade::SetVideoProfile(const AuthContext& auth_cont
 SdkTurnDetectResult DeviceFacade::SetTurnDetect(const AuthContext& auth_context,
                                                 const SdkTurnDetectRequest& request) const {
     SdkTurnDetectResult result;
-#if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
-    (void)auth_context;
-    return SetProviderTurnDetectWithCApi(request);
-#else
     const DeviceGetResult device_result = LookupDevice(auth_context, request.device_id);
     if (!IsOkStatusCode(device_result.code)) {
         result.code = device_result.code;
         result.message = device_result.message;
         return result;
     }
+#if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
+    return SetProviderTurnDetectWithCApi(request);
+#else
     return providers_.device_provider->SetTurnDetect(request);
 #endif
 }
