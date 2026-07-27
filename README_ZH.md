@@ -69,6 +69,17 @@ SDK Open Release 包包含 CZUR 提供的默认 Provider 能力。开发者可�
 - `ws://127.0.0.1:17091`
   - video channel
 
+启用 TLS 后，以上明文端点保持可用，并额外监听：
+
+- `https://127.0.0.1:18082`
+  - asset API 的 HTTPS 端点
+- `wss://127.0.0.1:18090`
+  - command channel 的 WSS 端点
+- `wss://127.0.0.1:18091`
+  - video channel 的 WSS 端点
+
+admin site 和 demo site 仍使用其现有 HTTP 端口；TLS 监听地址可独立配置，因此不会因为对外开放 WSS/HTTPS 而暴露这两个站点。
+
 ## 协议模型
 
 ### Command WS
@@ -136,6 +147,12 @@ SDK Open Release 包包含 CZUR 提供的默认 Provider 能力。开发者可�
 
 ```text
 ws://127.0.0.1:17091?session_token=ss-v2-xxxx&stream_id=stream-001
+```
+
+启用 TLS 时使用：
+
+```text
+wss://127.0.0.1:18091?session_token=ss-v2-xxxx&stream_id=stream-001
 ```
 
 ## 管理接口
@@ -209,6 +226,55 @@ sc.exe stop CZURSdkOpenApp
 - `SDK_COMMAND_WS_PORT`
 - `SDK_VIDEO_WS_PORT`
 - `SDK_AUTH_TOKEN`
+- `SDK_TLS_ENABLED`：设置为 `1` 时启用 HTTPS/WSS 双端口监听
+- `SDK_TLS_BIND_HOST`：TLS listener 的绑定地址，默认沿用 `bind_host`
+- `SDK_TLS_CERT_FILE`：包含服务端证书与中间证书的 PEM/fullchain 文件
+- `SDK_TLS_KEY_FILE`：服务端 PEM 私钥文件
+- `SDK_TLS_KEY_PASSWORD`：可选的 PEM 私钥口令
+- `SDK_ASSET_HTTPS_PORT`：默认 `18082`
+- `SDK_COMMAND_WSS_PORT`：默认 `18090`
+- `SDK_VIDEO_WSS_PORT`：默认 `18091`
+
+TLS 配置示例：
+
+```bash
+export SDK_TLS_ENABLED=1
+export SDK_TLS_BIND_HOST=0.0.0.0
+export SDK_TLS_CERT_FILE=/etc/czur-sdk/tls/fullchain.pem
+export SDK_TLS_KEY_FILE=/etc/czur-sdk/tls/privkey.pem
+export SDK_ASSET_BASE_URL=https://sdk.example.com:18082
+```
+
+### 本机 runtime 默认 TLS
+
+Windows 和 Linux 的官方 SDK Open 安装包会携带一组仅供本机 runtime 使用的默认
+证书与私钥，并在安装时完成以下配置：
+
+- 启用 `HTTPS 18082`、`WSS 18090` 与 `WSS 18091`，继续保留原有明文端口；
+- 将 `sdk-runtime.localhost` 映射到 `127.0.0.1`，服务只监听回环地址；
+- 将 Local Runtime Root CA 加入操作系统信任库，因此系统信任库客户端访问
+  `https://sdk-runtime.localhost:18082` 时不会出现默认自签名证书错误；
+- 默认 asset URL 为 `https://sdk-runtime.localhost:18082`。
+
+默认文件位置如下，升级安装不会覆盖已由客户替换的服务端证书和私钥：
+
+- Windows：`C:\ProgramData\CZUR\sdk-open\tls\sdk-runtime.localhost.fullchain.pem` 和
+  `C:\ProgramData\CZUR\sdk-open\tls\sdk-runtime.localhost.key.pem`；配置文件为
+  `C:\ProgramData\CZUR\sdk-open\runtime.env`。
+- Linux：`/etc/czur/sdk-open/tls/sdk-runtime.localhost.fullchain.pem` 和
+  `/etc/czur/sdk-open/tls/sdk-runtime.localhost.key.pem`；配置文件为
+  `/etc/czur/sdk-open/runtime.env`。
+
+如需替换为客户自己的证书，请将证书链和私钥作为匹配的一对替换，并重启 `sdk-open`
+服务；如更改文件路径、域名或端口，再同步修改 `runtime.env`。私有 CA 的根证书必须
+由客户自行加入调用方的信任库。默认凭据和 `sdk-runtime.localhost` 回环映射仅适合本机
+runtime，不能用于互联网或跨客户部署。`SDK_TLS_BIND_HOST=0.0.0.0` 或 NAT/DNS
+部署时必须设置实际可访问的 `SDK_ASSET_BASE_URL`。TLS 只加密传输，不替代 API Key、
+session token、资产授权或防火墙策略。
+
+多数系统信任库客户端可直接使用安装器写入的根 CA；若 Linux 上的浏览器或 SDK 客户端
+维护独立的 NSS/Firefox 证书库，则还需要由该客户端按自身方式导入
+`local-runtime-root-ca.crt`。
 
 Asset API 需要使用会话授权访问：
 
@@ -216,6 +282,8 @@ Asset API 需要使用会话授权访问：
 curl -H "Authorization: Bearer <session_token>" \
   http://127.0.0.1:17082/api/assets/<task_id>/<asset_id>
 ```
+
+TLS 启用且未显式设置 `SDK_ASSET_BASE_URL` 时，SDK 返回的 asset URL 默认使用 `https://<host>:18082`；明文 asset API 仍兼容保留。
 
 ## 文档
 

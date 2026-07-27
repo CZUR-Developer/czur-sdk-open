@@ -74,14 +74,23 @@ export function resolveDemoHttpPort(): number {
 }
 
 export function resolveAssetHttpPort(): number {
+  if (window.location.protocol === 'https:') {
+    return 18082;
+  }
   return resolveDemoHttpPort() + 1;
 }
 
 export function resolveCommandWsPort(): number {
+  if (window.location.protocol === 'https:') {
+    return 18090;
+  }
   return resolveDemoHttpPort() + 9;
 }
 
 export function resolveVideoWsPort(): number {
+  if (window.location.protocol === 'https:') {
+    return 18091;
+  }
   return resolveDemoHttpPort() + 10;
 }
 

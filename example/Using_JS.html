@@ -554,7 +554,7 @@
     'use strict';
 
     // ===== 常量与页面状态 =====
-    // 这里参考 demo-site 的协议约定：命令通道 17090，视频通道 17091，资产下载 17082。
+    // 明文页面使用 17090/17091/17082；HTTPS 页面使用 18090/18091/18082。
     const STORAGE_KEYS = {
       apiKey: 'czur-sdk-single-html-api-key',
     };
@@ -659,20 +659,23 @@
 
     function commandWsUrl() {
       const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      return `${protocol}://${runtimeHost()}:17090`;
+      const port = protocol === 'wss' ? 18090 : 17090;
+      return `${protocol}://${runtimeHost()}:${port}`;
     }
 
     function videoWsUrl(sessionToken, streamId) {
       const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
       const params = new URLSearchParams({ session_token: sessionToken, stream_id: streamId });
-      return `${protocol}://${runtimeHost()}:17091?${params.toString()}`;
+      const port = protocol === 'wss' ? 18091 : 17091;
+      return `${protocol}://${runtimeHost()}:${port}?${params.toString()}`;
     }
 
     function assetHttpUrl(path) {
       if (!path) return '';
       if (/^https?:\/\//i.test(path)) return path;
       const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
-      return `${protocol}//${runtimeHost()}:17082${path.startsWith('/') ? path : `/${path}`}`;
+      const port = protocol === 'https:' ? 18082 : 17082;
+      return `${protocol}//${runtimeHost()}:${port}${path.startsWith('/') ? path : `/${path}`}`;
     }
 
     function nextId(prefix, counterName) {
@@ -769,7 +772,7 @@
       els.cleanupTempBtn.disabled = !state.commandConnected || !state.sessionToken || state.activeCaptureTasks.size > 0 || state.cleanupTempRunning;
 
       els.commandEndpoint.value = commandWsUrl();
-      els.videoEndpoint.value = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${runtimeHost()}:17091`;
+      els.videoEndpoint.value = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${runtimeHost()}:${window.location.protocol === 'https:' ? 18091 : 17091}`;
       els.profilePreview.value = safeStringify(buildCaptureProfile());
       renderDeviceTable();
       renderDeviceOptions();
@@ -1696,7 +1699,7 @@
     refreshUi();
     log('page.ready', {
       command_endpoint: commandWsUrl(),
-      video_endpoint: `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${runtimeHost()}:17091`,
+      video_endpoint: `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${runtimeHost()}:${window.location.protocol === 'https:' ? 18091 : 17091}`,
       capture_defaults: { page_processing: 'single_page', color_mode: 'auto_optimize', output_quality: 'optional jpg 1-100', output_target_size: 'optional device target_size' },
       render_video_default: false,
     });

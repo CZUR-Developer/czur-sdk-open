@@ -117,6 +117,9 @@
 默认地址：
 
 - `ws://127.0.0.1:17090`
+  - 保留的明文 command channel
+- `wss://127.0.0.1:18090`
+  - `SDK_TLS_ENABLED=1` 时额外监听的 TLS command channel
 
 请求结构：
 
@@ -205,6 +208,9 @@
 默认地址：
 
 - `ws://127.0.0.1:17091`
+  - 保留的明文 video channel
+- `wss://127.0.0.1:18091`
+  - `SDK_TLS_ENABLED=1` 时额外监听的 TLS video channel
 
 连接参数：
 
@@ -215,6 +221,12 @@ video WS 建连示例：
 
 ```text
 ws://127.0.0.1:17091?session_token=ss-v2-xxxx&stream_id=stream-001
+```
+
+TLS 模式下可使用：
+
+```text
+wss://127.0.0.1:18091?session_token=ss-v2-xxxx&stream_id=stream-001
 ```
 
 约束：

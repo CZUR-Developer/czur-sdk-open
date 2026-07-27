@@ -8,7 +8,9 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <vector>
 
+#include "sdk_config.h"
 #include "sdk_provider_types.h"
 #include "sdk_json_utils.h"
 
@@ -43,7 +45,8 @@ public:
                   int port,
                   const std::string& document_root,
                   const std::string& auth_token,
-                  bool mount_static_site = true);
+                  bool mount_static_site = true,
+                  const SdkTlsConfig& tls_config = SdkTlsConfig());
     ~SdkHttpServer();
 
     void SetHealthSupplier(JsonSupplier supplier);
@@ -63,8 +66,14 @@ public:
     void Stop();
 
 private:
+    struct Listener;
+
     bool IsAuthorized(const std::string& authorization) const;
-    bool ConfigureRoutes();
+    bool ConfigureRoutes(httplib::Server* server);
+    bool StartListener(std::unique_ptr<httplib::Server> server,
+                       const std::string& host,
+                       int port,
+                       bool tls);
 
     std::string site_name_;
     std::string host_;
@@ -72,6 +81,7 @@ private:
     std::string document_root_;
     std::string auth_token_;
     bool mount_static_site_;
+    SdkTlsConfig tls_config_;
     JsonSupplier health_supplier_;
     JsonSupplier status_supplier_;
     JsonSupplier system_supplier_;
@@ -85,8 +95,7 @@ private:
     AssetResolver asset_resolver_;
     ImageUploadHandler image_upload_handler_;
     std::atomic<bool> running_;
-    std::unique_ptr<httplib::Server> server_;
-    std::thread server_thread_;
+    std::vector<std::unique_ptr<Listener> > listeners_;
 };
 
 } // namespace sdk

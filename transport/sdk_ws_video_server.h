@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 
+#include "sdk_config.h"
 #include "sdk_provider_types.h"
 
 namespace editor {
@@ -33,7 +34,7 @@ public:
 
     using ConnectionAuthHandler = std::function<ConnectionAuthResult(const std::string&, const std::string&)>;
 
-    SdkWsVideoServer(const std::string& host, int port);
+    SdkWsVideoServer(const std::string& host, int port, const SdkTlsConfig& tls_config = SdkTlsConfig());
     ~SdkWsVideoServer();
 
     void SetConnectionAuthHandler(ConnectionAuthHandler handler);
@@ -48,6 +49,7 @@ private:
 
     std::string host_;
     int port_;
+    SdkTlsConfig tls_config_;
     std::atomic<bool> running_;
     ConnectionAuthHandler connection_auth_handler_;
     std::unique_ptr<Impl> impl_;

@@ -75,7 +75,8 @@ function buildCommandRequest(method: string, options: CommandRequestOptions = {}
 function buildCommandWsUrl(): string {
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
   const host = window.location.hostname || '127.0.0.1';
-  return `${protocol}://${host}:17090`;
+  const port = protocol === 'wss' ? 18090 : 17090;
+  return `${protocol}://${host}:${port}`;
 }
 
 function asObject(value: unknown): Record<string, unknown> {
