@@ -178,7 +178,7 @@ export async function loadDeviceDetail(): Promise<void> {
 
 export async function openSelectedDevice(): Promise<void> {
   const resolution = selectedResolution();
-  if (!state.selectedDeviceId || !resolution) {
+  if (!state.selectedDeviceId) {
     state.openState = 'blocked';
     return;
   }
@@ -207,7 +207,9 @@ export async function openSelectedDevice(): Promise<void> {
   state.closeState = 'idle';
   recordRuntimeEvent({
     title: 'device.opened',
-    detail: `device.open selected ${resolution.width}x${resolution.height}@${resolution.fps}fps.`,
+    detail: resolution
+      ? `device.open selected ${resolution.width}x${resolution.height}@${resolution.fps}fps.`
+      : 'device.open selected the automatic preview resolution.',
     tone: state.opened ? 'success' : 'warning',
   });
 }
@@ -260,7 +262,7 @@ export async function closeSelectedDevice(): Promise<void> {
 
 export async function startVideo(profile?: unknown, pipeline?: unknown): Promise<void> {
   const resolution = selectedResolution();
-  if (!state.selectedDeviceId || !state.opened || !resolution) {
+  if (!state.selectedDeviceId || !state.opened) {
     state.startState = 'blocked';
     return;
   }
@@ -475,13 +477,18 @@ export async function applyCaptureAcquisitionResolution(): Promise<void> {
   }
 }
 
-function buildVideoParams(resolution: DeviceResolution): Record<string, unknown> {
+function buildVideoParams(resolution: DeviceResolution | null): Record<string, unknown> {
   return {
     device_id: state.selectedDeviceId,
-    width: resolution.width,
-    height: resolution.height,
-    fps: resolution.fps,
     pixel_format: 'mjpeg',
+    // 自动模式不传宽高帧率，由设备 Provider 按默认能力选档。
+    ...(resolution
+      ? {
+          width: resolution.width,
+          height: resolution.height,
+          fps: resolution.fps,
+        }
+      : {}),
   };
 }
 
