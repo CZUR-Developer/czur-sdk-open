@@ -75,11 +75,7 @@ uint64_t FileSize(const std::string& path) {
 }
 
 std::string BuildDefaultAssetBaseUrl(const SdkConfig& config) {
-    if (!config.asset_base_url.empty()) {
-        return config.asset_base_url;
-    }
-    const std::string host = config.bind_host == "0.0.0.0" ? "127.0.0.1" : config.bind_host;
-    return "http://" + host + ":" + std::to_string(config.asset_http_port);
+    return BuildSdkAssetBaseUrl(config);
 }
 
 // 硬拍没有前端 request_id，使用设备和触发时间生成配额幂等 key；

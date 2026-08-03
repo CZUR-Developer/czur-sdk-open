@@ -27,6 +27,7 @@
 #include "sdk_logger.h"
 #include "sdk_runtime_paths.h"
 #include "sdk_open_version.h"
+#include "sdk_tls_utils.h"
 
 namespace editor {
 namespace sdk {
@@ -37,14 +38,6 @@ constexpr bool kSdkOpenHttpServerEnabled = true;
 #else
 constexpr bool kSdkOpenHttpServerEnabled = false;
 #endif
-
-std::string BuildAssetBaseUrl(const SdkConfig& config) {
-    if (!config.asset_base_url.empty()) {
-        return config.asset_base_url;
-    }
-    const std::string host = config.bind_host == "0.0.0.0" ? "127.0.0.1" : config.bind_host;
-    return "http://" + host + ":" + std::to_string(config.asset_http_port);
-}
 
 bool IsEnvConfigured(const char* name) {
     const char* value = std::getenv(name);
@@ -278,9 +271,9 @@ SdkApp::SdkApp(const SdkConfig& config, ProviderBundle providers)
       demo_http_server_(
           "demo-site", config_.bind_host, config_.demo_http_port, config_.web_root + "/demo", config_.auth_token),
       asset_http_server_(
-          "asset-api", config_.bind_host, config_.asset_http_port, "", config_.auth_token, false),
-      command_ws_server_(config_.bind_host, config_.command_ws_port),
-      video_ws_server_(config_.bind_host, config_.video_ws_port),
+          "asset-api", config_.bind_host, config_.asset_http_port, "", config_.auth_token, false, config_.tls),
+      command_ws_server_(config_.bind_host, config_.command_ws_port, config_.tls),
+      video_ws_server_(config_.bind_host, config_.video_ws_port, config_.tls),
       running_(false),
       start_time_(std::chrono::steady_clock::now()) {
 #if defined(SDK_USE_PRIVATE_PROVIDER) && defined(_WIN32)
@@ -482,6 +475,11 @@ bool SdkApp::Start() {
     }
 
     SDK_OPEN_LOG_INFO("[sdk_app] starting...");
+    std::string tls_error;
+    if (!ValidateSdkTlsConfig(config_.tls, &tls_error)) {
+        SDK_OPEN_LOG_ERROR("[sdk_app] TLS configuration validation failed: {}", tls_error);
+        return false;
+    }
     if (kSdkOpenHttpServerEnabled) {
         if (!admin_http_server_.Start()) {
             return false;
@@ -538,8 +536,8 @@ void SdkApp::Stop() {
     }
     video_ws_server_.Stop();
     command_ws_server_.Stop();
+    asset_http_server_.Stop();
     if (kSdkOpenHttpServerEnabled) {
-        asset_http_server_.Stop();
         demo_http_server_.Stop();
         admin_http_server_.Stop();
     }
@@ -575,12 +573,12 @@ Json SdkApp::BuildStatusJson() const {
          {
              {"enabled", kSdkOpenHttpServerEnabled},
              {"sites",
-              {
+             {
                   {"admin", config_.admin_http_port},
                   {"demo", config_.demo_http_port},
                   {"asset", config_.asset_http_port},
               }},
-             {"assetBaseUrl", BuildAssetBaseUrl(config_)},
+             {"assetBaseUrl", BuildSdkAssetBaseUrl(config_)},
          }},
         {"ports",
          {
@@ -589,7 +587,17 @@ Json SdkApp::BuildStatusJson() const {
              {"assetHttp", config_.asset_http_port},
              {"commandWs", config_.command_ws_port},
              {"videoWs", config_.video_ws_port},
+             {"assetHttps", config_.tls.asset_https_port},
+             {"commandWss", config_.tls.command_wss_port},
+             {"videoWss", config_.tls.video_wss_port},
          }},
+        {"tls",
+         {{"enabled", config_.tls.enabled},
+          {"bindHost", config_.tls.bind_host.empty() ? config_.bind_host : config_.tls.bind_host},
+          {"endpoints",
+           {{"assetHttps", {{"enabled", config_.tls.enabled}, {"scheme", "https"}, {"port", config_.tls.asset_https_port}}},
+            {"commandWss", {{"enabled", config_.tls.enabled}, {"scheme", "wss"}, {"port", config_.tls.command_wss_port}}},
+            {"videoWss", {{"enabled", config_.tls.enabled}, {"scheme", "wss"}, {"port", config_.tls.video_wss_port}}}}}}},
         {"providers", provider_names_},
         {"authDiagnostics",
          {
@@ -668,13 +676,20 @@ Json SdkApp::BuildSystemJson() const {
          Json{{"workDir", GetSdkOpenWorkDir()},
               {"logDir", GetSdkOpenLogDir()},
               {"webRoot", config_.web_root},
-              {"httpEnabled", kSdkOpenHttpServerEnabled}}},
+              {"httpEnabled", kSdkOpenHttpServerEnabled},
+              {"tlsEnabled", config_.tls.enabled}}},
         {"ports",
          Json{{"adminHttp", config_.admin_http_port},
               {"demoHttp", config_.demo_http_port},
               {"assetHttp", config_.asset_http_port},
               {"commandWs", config_.command_ws_port},
-              {"videoWs", config_.video_ws_port}}},
+              {"videoWs", config_.video_ws_port},
+              {"assetHttps", config_.tls.asset_https_port},
+              {"commandWss", config_.tls.command_wss_port},
+              {"videoWss", config_.tls.video_wss_port}}},
+        {"tls",
+         Json{{"enabled", config_.tls.enabled},
+              {"bindHost", config_.tls.bind_host.empty() ? config_.bind_host : config_.tls.bind_host}}},
     };
 }
 

@@ -12,6 +12,14 @@
 namespace editor {
 namespace sdk {
 
+struct SdkHttpServer::Listener {
+    std::unique_ptr<httplib::Server> server;
+    std::thread thread;
+    std::string host;
+    int port = 0;
+    bool tls = false;
+};
+
 namespace {
 
 const char* kJsonContentType = "application/json; charset=utf-8";
@@ -96,13 +104,15 @@ SdkHttpServer::SdkHttpServer(const std::string& site_name,
                              int port,
                              const std::string& document_root,
                              const std::string& auth_token,
-                             bool mount_static_site)
+                             bool mount_static_site,
+                             const SdkTlsConfig& tls_config)
     : site_name_(site_name),
       host_(host),
       port_(port),
       document_root_(document_root),
       auth_token_(auth_token),
       mount_static_site_(mount_static_site),
+      tls_config_(tls_config),
       running_(false) {}
 
 SdkHttpServer::~SdkHttpServer() {
@@ -184,19 +194,19 @@ bool SdkHttpServer::IsAuthorized(const std::string& authorization) const {
     return authorization == "Bearer " + auth_token_;
 }
 
-bool SdkHttpServer::ConfigureRoutes() {
-    if (!server_) {
+bool SdkHttpServer::ConfigureRoutes(httplib::Server* server) {
+    if (server == NULL) {
         return false;
     }
 
-    server_->Get("/healthz", [this](const httplib::Request&, httplib::Response& res) {
+    server->Get("/healthz", [this](const httplib::Request&, httplib::Response& res) {
         const Json body = health_supplier_ ? health_supplier_() : Json{{"ok", true}};
         res.status = ToHttpStatus(SdkHttpStatus::Ok);
         res.set_header("Cache-Control", "no-store");
         res.set_content(DumpJson(body), kJsonContentType);
     });
 
-    server_->Get("/api/status", [this](const httplib::Request& req, httplib::Response& res) {
+    server->Get("/api/status", [this](const httplib::Request& req, httplib::Response& res) {
         SetCorsHeaders(&res);
         if (!IsAuthorized(req.get_header_value("Authorization"))) {
             res.status = ToHttpStatus(SdkHttpStatus::Unauthorized);
@@ -209,7 +219,7 @@ bool SdkHttpServer::ConfigureRoutes() {
         res.set_content(DumpJson(body), kJsonContentType);
     });
 
-    server_->Get("/api/system", [this](const httplib::Request& req, httplib::Response& res) {
+    server->Get("/api/system", [this](const httplib::Request& req, httplib::Response& res) {
         SetCorsHeaders(&res);
         if (!IsAuthorized(req.get_header_value("Authorization"))) {
             res.status = ToHttpStatus(SdkHttpStatus::Unauthorized);
@@ -221,7 +231,7 @@ bool SdkHttpServer::ConfigureRoutes() {
         res.set_content(DumpJson(system_supplier_ ? system_supplier_() : Json::object()), kJsonContentType);
     });
 
-    server_->Get("/api/auth", [this](const httplib::Request& req, httplib::Response& res) {
+    server->Get("/api/auth", [this](const httplib::Request& req, httplib::Response& res) {
         SetCorsHeaders(&res);
         if (!IsAuthorized(req.get_header_value("Authorization"))) {
             res.status = ToHttpStatus(SdkHttpStatus::Unauthorized);
@@ -233,7 +243,7 @@ bool SdkHttpServer::ConfigureRoutes() {
         res.set_content(DumpJson(auth_supplier_ ? auth_supplier_() : Json::object()), kJsonContentType);
     });
 
-    server_->Post(R"(/api/auth/sessions/([^/]+)/offline-activation)", [this](const httplib::Request& req, httplib::Response& res) {
+    server->Post(R"(/api/auth/sessions/([^/]+)/offline-activation)", [this](const httplib::Request& req, httplib::Response& res) {
         SetCorsHeaders(&res);
         if (!IsAuthorized(req.get_header_value("Authorization"))) {
             res.status = ToHttpStatus(SdkHttpStatus::Unauthorized);
@@ -259,7 +269,7 @@ bool SdkHttpServer::ConfigureRoutes() {
         res.set_content(DumpJson(body), kJsonContentType);
     });
 
-    server_->Get("/api/logs", [this](const httplib::Request& req, httplib::Response& res) {
+    server->Get("/api/logs", [this](const httplib::Request& req, httplib::Response& res) {
         SetCorsHeaders(&res);
         if (!IsAuthorized(req.get_header_value("Authorization"))) {
             res.status = ToHttpStatus(SdkHttpStatus::Unauthorized);
@@ -271,7 +281,7 @@ bool SdkHttpServer::ConfigureRoutes() {
         res.set_content(DumpJson(logs_supplier_ ? logs_supplier_() : Json::object()), kJsonContentType);
     });
 
-    server_->Get(R"(/api/logs/([^/]+))", [this](const httplib::Request& req, httplib::Response& res) {
+    server->Get(R"(/api/logs/([^/]+))", [this](const httplib::Request& req, httplib::Response& res) {
         SetCorsHeaders(&res);
         if (!IsAuthorized(req.get_header_value("Authorization"))) {
             res.status = ToHttpStatus(SdkHttpStatus::Unauthorized);
@@ -291,7 +301,7 @@ bool SdkHttpServer::ConfigureRoutes() {
         res.set_content(DumpJson(body), kJsonContentType);
     });
 
-    server_->Get("/api/records", [this](const httplib::Request& req, httplib::Response& res) {
+    server->Get("/api/records", [this](const httplib::Request& req, httplib::Response& res) {
         SetCorsHeaders(&res);
         if (!IsAuthorized(req.get_header_value("Authorization"))) {
             res.status = ToHttpStatus(SdkHttpStatus::Unauthorized);
@@ -303,7 +313,7 @@ bool SdkHttpServer::ConfigureRoutes() {
         res.set_content(DumpJson(records_supplier_ ? records_supplier_() : Json::object()), kJsonContentType);
     });
 
-    server_->Get("/api/config", [this](const httplib::Request& req, httplib::Response& res) {
+    server->Get("/api/config", [this](const httplib::Request& req, httplib::Response& res) {
         SetCorsHeaders(&res);
         if (!IsAuthorized(req.get_header_value("Authorization"))) {
             res.status = ToHttpStatus(SdkHttpStatus::Unauthorized);
@@ -320,7 +330,7 @@ bool SdkHttpServer::ConfigureRoutes() {
         res.set_content(DumpJson(config_supplier_()), kJsonContentType);
     });
 
-    server_->Post("/api/config", [this](const httplib::Request& req, httplib::Response& res) {
+    server->Post("/api/config", [this](const httplib::Request& req, httplib::Response& res) {
         SetCorsHeaders(&res);
         if (!IsAuthorized(req.get_header_value("Authorization"))) {
             res.status = ToHttpStatus(SdkHttpStatus::Unauthorized);
@@ -346,7 +356,7 @@ bool SdkHttpServer::ConfigureRoutes() {
         res.set_content(DumpJson(body), kJsonContentType);
     });
 
-    server_->Post(R"(/api/uploads/(images|files))", [this](const httplib::Request& req, httplib::Response& res) {
+    server->Post(R"(/api/uploads/(images|files))", [this](const httplib::Request& req, httplib::Response& res) {
         SetCorsHeaders(&res);
         if (!image_upload_handler_) {
             res.status = 404;
@@ -376,7 +386,7 @@ bool SdkHttpServer::ConfigureRoutes() {
         res.set_content(DumpJson(result.body), kJsonContentType);
     });
 
-    server_->Get(R"(/api/assets/([^/]+)/([^/]+)/download)", [this](const httplib::Request& req, httplib::Response& res) {
+    server->Get(R"(/api/assets/([^/]+)/([^/]+)/download)", [this](const httplib::Request& req, httplib::Response& res) {
         SetCorsHeaders(&res);
         if (!asset_resolver_) {
             res.status = 404;
@@ -401,7 +411,7 @@ bool SdkHttpServer::ConfigureRoutes() {
         res.set_file_content(result.asset.path, result.asset.content_type.empty() ? "application/octet-stream" : result.asset.content_type);
     });
 
-    server_->Get(R"(/api/assets/([^/]+)/([^/]+))", [this](const httplib::Request& req, httplib::Response& res) {
+    server->Get(R"(/api/assets/([^/]+)/([^/]+))", [this](const httplib::Request& req, httplib::Response& res) {
         SetCorsHeaders(&res);
         if (!asset_resolver_) {
             res.status = 404;
@@ -426,28 +436,28 @@ bool SdkHttpServer::ConfigureRoutes() {
         res.set_file_content(result.asset.path, result.asset.content_type.empty() ? "application/octet-stream" : result.asset.content_type);
     });
 
-    server_->Options(R"(/api/assets/.*)", [](const httplib::Request&, httplib::Response& res) {
+    server->Options(R"(/api/assets/.*)", [](const httplib::Request&, httplib::Response& res) {
         SetCorsHeaders(&res);
         res.status = 204;
     });
 
-    server_->Options(R"(/api/uploads/.*)", [](const httplib::Request&, httplib::Response& res) {
+    server->Options(R"(/api/uploads/.*)", [](const httplib::Request&, httplib::Response& res) {
         SetCorsHeaders(&res);
         res.status = 204;
     });
 
-    server_->Options("/api/config", [](const httplib::Request&, httplib::Response& res) {
+    server->Options("/api/config", [](const httplib::Request&, httplib::Response& res) {
         SetCorsHeaders(&res);
         res.status = 204;
     });
 
-    server_->Options(R"(/api/(system|auth|logs|records).*)", [](const httplib::Request&, httplib::Response& res) {
+    server->Options(R"(/api/(system|auth|logs|records).*)", [](const httplib::Request&, httplib::Response& res) {
         SetCorsHeaders(&res);
         res.status = 204;
     });
 
     if (mount_static_site_) {
-        server_->Get(R"(/.*)", [this](const httplib::Request& req, httplib::Response& res) {
+        server->Get(R"(/.*)", [this](const httplib::Request& req, httplib::Response& res) {
             if (!ShouldServeSpaFallback(req.path, req.get_header_value("Accept"))) {
                 res.status = ToHttpStatus(SdkHttpStatus::NotFound);
                 res.set_content("Not Found", "text/plain; charset=utf-8");
@@ -464,13 +474,13 @@ bool SdkHttpServer::ConfigureRoutes() {
             res.set_file_content(index_path, "text/html");
         });
 
-        if (!server_->set_mount_point("/", document_root_)) {
+        if (!server->set_mount_point("/", document_root_)) {
             SDK_OPEN_LOG_ERROR("[sdk_http_server] {} set_mount_point failed, root={}", site_name_, document_root_);
             return false;
         }
     }
 
-    server_->set_error_handler([](const httplib::Request&, httplib::Response& res) {
+    server->set_error_handler([](const httplib::Request&, httplib::Response& res) {
         if (res.status == ToHttpStatus(SdkHttpStatus::NotFound) && res.body.empty()) {
             res.set_content("Not Found", "text/plain; charset=utf-8");
         }
@@ -478,45 +488,93 @@ bool SdkHttpServer::ConfigureRoutes() {
     return true;
 }
 
+bool SdkHttpServer::StartListener(std::unique_ptr<httplib::Server> server,
+                                  const std::string& host,
+                                  int port,
+                                  bool tls) {
+    if (!server || !ConfigureRoutes(server.get())) {
+        return false;
+    }
+    if (!server->is_valid()) {
+        SDK_OPEN_LOG_ERROR("[sdk_http_server] {} TLS server initialization failed", site_name_);
+        return false;
+    }
+    if (!server->bind_to_port(host, port)) {
+        SDK_OPEN_LOG_ERROR("[sdk_http_server] {} bind failed: {}:{}", site_name_, host, port);
+        return false;
+    }
+
+    std::unique_ptr<Listener> listener(new Listener());
+    listener->server = std::move(server);
+    listener->host = host;
+    listener->port = port;
+    listener->tls = tls;
+    Listener* raw_listener = listener.get();
+    raw_listener->thread = std::thread([this, raw_listener]() {
+        if (!raw_listener->server->listen_after_bind() && running_.load()) {
+            SDK_OPEN_LOG_ERROR("[sdk_http_server] {} {} listen failed",
+                               site_name_,
+                               raw_listener->tls ? "TLS" : "HTTP");
+        }
+    });
+    listeners_.push_back(std::move(listener));
+    SDK_OPEN_LOG_INFO("[sdk_http_server] {} listening on {}://{}:{}, root={}",
+                      site_name_,
+                      tls ? "https" : "http",
+                      host,
+                      port,
+                      document_root_);
+    return true;
+}
+
 bool SdkHttpServer::Start() {
     if (running_.load()) {
         return true;
     }
-    server_.reset(new httplib::Server());
-    if (!ConfigureRoutes()) {
-        server_.reset();
-        return false;
-    }
-
-    const int bound_port = server_->bind_to_port(host_, port_);
-    if (bound_port < 0) {
-        SDK_OPEN_LOG_ERROR("[sdk_http_server] {} bind failed: {}:{}", site_name_, host_, port_);
-        server_.reset();
-        return false;
-    }
 
     running_.store(true);
-    server_thread_ = std::thread([this]() {
-        if (!server_->listen_after_bind() && running_.load()) {
-            SDK_OPEN_LOG_ERROR("[sdk_http_server] {} listen failed", site_name_);
-        }
-        running_.store(false);
-    });
+    if (!StartListener(std::unique_ptr<httplib::Server>(new httplib::Server()), host_, port_, false)) {
+        Stop();
+        return false;
+    }
 
-    SDK_OPEN_LOG_INFO("[sdk_http_server] {} listening on http://{}:{}, root={}", site_name_, host_, port_, document_root_);
+    if (tls_config_.enabled) {
+#if SDK_OPEN_ENABLE_TLS
+        const char* password = tls_config_.private_key_password.empty() ? NULL : tls_config_.private_key_password.c_str();
+        std::unique_ptr<httplib::Server> tls_server(
+            new httplib::SSLServer(tls_config_.certificate_chain_file.c_str(),
+                                   tls_config_.private_key_file.c_str(),
+                                   NULL,
+                                   NULL,
+                                   password));
+        const std::string tls_host = tls_config_.bind_host.empty() ? host_ : tls_config_.bind_host;
+        if (!StartListener(std::move(tls_server), tls_host, tls_config_.asset_https_port, true)) {
+            Stop();
+            return false;
+        }
+#else
+        SDK_OPEN_LOG_ERROR("[sdk_http_server] {} requested TLS but this build has TLS disabled", site_name_);
+        Stop();
+        return false;
+#endif
+    }
     return true;
 }
 
 void SdkHttpServer::Stop() {
-    if (!server_) {
+    running_.store(false);
+    if (listeners_.empty()) {
         return;
     }
-    running_.store(false);
-    server_->stop();
-    if (server_thread_.joinable()) {
-        server_thread_.join();
+    for (std::vector<std::unique_ptr<Listener> >::iterator it = listeners_.begin(); it != listeners_.end(); ++it) {
+        (*it)->server->stop();
     }
-    server_.reset();
+    for (std::vector<std::unique_ptr<Listener> >::iterator it = listeners_.begin(); it != listeners_.end(); ++it) {
+        if ((*it)->thread.joinable()) {
+            (*it)->thread.join();
+        }
+    }
+    listeners_.clear();
     SDK_OPEN_LOG_INFO("[sdk_http_server] {} stopped", site_name_);
 }
 

@@ -19,6 +19,9 @@
 默认地址：
 
 - `ws://127.0.0.1:17090`
+  - 保留的明文 command channel
+- `wss://127.0.0.1:18090`
+  - `SDK_TLS_ENABLED=1` 时额外提供的 TLS command channel
 
 ## 建连模型
 
@@ -26,6 +29,12 @@
 
 ```text
 ws://127.0.0.1:17090
+```
+
+启用 TLS 时，客户端可改连：
+
+```text
+wss://127.0.0.1:18090
 ```
 
 连接建立后：
@@ -376,7 +385,7 @@ JPG/PNG 目标只支持 `export_type: "single-page"`。PDF/OFD/TIFF 文档来源
 }
 ```
 
-Demo 站点通过资源服务的 `POST /api/uploads/files` 上传浏览器选择的本地文件，默认地址为 `http://127.0.0.1:17082`。请求使用 multipart form-data，字段名为 `file`，并携带 `Authorization: Bearer <session_token>`。响应会返回 `upload_id` 和原始 asset。图像处理类方法可以使用图片 upload id；`file.convert` 可以使用图片、PDF、OFD 或 TIFF 的 upload id。
+Demo 站点通过资源服务的 `POST /api/uploads/files` 上传浏览器选择的本地文件，默认地址为 `http://127.0.0.1:17082`。启用 TLS 后，外部 HTTPS 调用方可使用 `https://127.0.0.1:18082`。请求使用 multipart form-data，字段名为 `file`，并携带 `Authorization: Bearer <session_token>`。响应会返回 `upload_id` 和原始 asset。图像处理类方法可以使用图片 upload id；`file.convert` 可以使用图片、PDF、OFD 或 TIFF 的 upload id。
 
 `selected_area` 模式下，前端把换算后的区域点传入 `params.selected_area.points`，并通过 `params.selected_area.source.width/height` 传入坐标基准尺寸。后端会再按实际输入图片尺寸缩放坐标后裁剪。响应里 `output_path` 指向第一页，`outputs[]` 返回单页或多页结果。
 
@@ -503,6 +512,12 @@ OCR 任务查询/取消示例：
 
 ```text
 ws://127.0.0.1:17091?session_token=ss-v1-xxxx&stream_id=stream-001
+```
+
+启用 TLS 时，video channel 的等价地址为：
+
+```text
+wss://127.0.0.1:18091?session_token=ss-v1-xxxx&stream_id=stream-001
 ```
 
 ## 时序示例

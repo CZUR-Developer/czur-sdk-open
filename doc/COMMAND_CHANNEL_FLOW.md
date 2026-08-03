@@ -19,6 +19,9 @@ Core rules:
 Default endpoint:
 
 - `ws://127.0.0.1:17090`
+  - retained plaintext command channel
+- `wss://127.0.0.1:18090`
+  - TLS command channel available when `SDK_TLS_ENABLED=1`
 
 ## Connection Model
 
@@ -26,6 +29,12 @@ The client first opens the command lane:
 
 ```text
 ws://127.0.0.1:17090
+```
+
+With TLS enabled, clients can instead connect to:
+
+```text
+wss://127.0.0.1:18090
 ```
 
 After the socket is ready:
@@ -376,7 +385,7 @@ Document split example:
 }
 ```
 
-The demo site uploads local browser-selected files with `POST /api/uploads/files` on the asset service (`http://127.0.0.1:17082` by default). The request must be multipart form-data with field `file` and `Authorization: Bearer <session_token>`. The response returns `upload_id` and an original asset. Image methods can use image upload IDs; `file.convert` can use image, PDF, OFD, or TIFF upload IDs.
+The demo site uploads local browser-selected files with `POST /api/uploads/files` on the asset service (`http://127.0.0.1:17082` by default). With TLS enabled, external HTTPS callers can use `https://127.0.0.1:18082`. The request must be multipart form-data with field `file` and `Authorization: Bearer <session_token>`. The response returns `upload_id` and an original asset. Image methods can use image upload IDs; `file.convert` can use image, PDF, OFD, or TIFF upload IDs.
 
 For `selected_area`, pass frontend-scaled points in `params.selected_area.points` and the coordinate basis in `params.selected_area.source.width/height`. The backend scales those points to the real input image size before cropping. The response returns `output_path` for the first page and `outputs[]` for single or multi-page results.
 
@@ -503,6 +512,12 @@ Example:
 
 ```text
 ws://127.0.0.1:17091?session_token=ss-v1-xxxx&stream_id=stream-001
+```
+
+With TLS enabled, the equivalent video endpoint is:
+
+```text
+wss://127.0.0.1:18091?session_token=ss-v1-xxxx&stream_id=stream-001
 ```
 
 ## Sequence Example
