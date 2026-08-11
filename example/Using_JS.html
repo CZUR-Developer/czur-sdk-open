@@ -554,7 +554,14 @@
     'use strict';
 
     // ===== 常量与页面状态 =====
-    // 明文页面使用 17090/17091/17082；HTTPS 页面使用 18090/18091/18082。
+    // 本机 TLS runtime 使用安装器配置的专用域名和 HTTPS/WSS 端口。
+    // 该域名会由安装器解析到 127.0.0.1，且默认服务证书仅包含此域名。
+    const TLS_RUNTIME = Object.freeze({
+      host: 'sdk-runtime.localhost',
+      commandWssPort: 18090,
+      videoWssPort: 18091,
+      assetHttpsPort: 18082,
+    });
     const STORAGE_KEYS = {
       apiKey: 'czur-sdk-single-html-api-key',
     };
@@ -654,28 +661,26 @@
 
     // ===== endpoint 与协议包构造 =====
     function runtimeHost() {
-      return window.location.hostname || '127.0.0.1';
+      return TLS_RUNTIME.host;
     }
 
     function commandWsUrl() {
-      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      const port = protocol === 'wss' ? 18090 : 17090;
-      return `${protocol}://${runtimeHost()}:${port}`;
+      return `wss://${runtimeHost()}:${TLS_RUNTIME.commandWssPort}`;
+    }
+
+    function videoWsEndpoint() {
+      return `wss://${runtimeHost()}:${TLS_RUNTIME.videoWssPort}`;
     }
 
     function videoWsUrl(sessionToken, streamId) {
-      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
       const params = new URLSearchParams({ session_token: sessionToken, stream_id: streamId });
-      const port = protocol === 'wss' ? 18091 : 17091;
-      return `${protocol}://${runtimeHost()}:${port}?${params.toString()}`;
+      return `${videoWsEndpoint()}?${params.toString()}`;
     }
 
     function assetHttpUrl(path) {
       if (!path) return '';
       if (/^https?:\/\//i.test(path)) return path;
-      const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
-      const port = protocol === 'https:' ? 18082 : 17082;
-      return `${protocol}//${runtimeHost()}:${port}${path.startsWith('/') ? path : `/${path}`}`;
+      return `https://${runtimeHost()}:${TLS_RUNTIME.assetHttpsPort}${path.startsWith('/') ? path : `/${path}`}`;
     }
 
     function nextId(prefix, counterName) {
@@ -772,7 +777,7 @@
       els.cleanupTempBtn.disabled = !state.commandConnected || !state.sessionToken || state.activeCaptureTasks.size > 0 || state.cleanupTempRunning;
 
       els.commandEndpoint.value = commandWsUrl();
-      els.videoEndpoint.value = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${runtimeHost()}:${window.location.protocol === 'https:' ? 18091 : 17091}`;
+      els.videoEndpoint.value = videoWsEndpoint();
       els.profilePreview.value = safeStringify(buildCaptureProfile());
       renderDeviceTable();
       renderDeviceOptions();
@@ -1699,7 +1704,7 @@
     refreshUi();
     log('page.ready', {
       command_endpoint: commandWsUrl(),
-      video_endpoint: `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${runtimeHost()}:${window.location.protocol === 'https:' ? 18091 : 17091}`,
+      video_endpoint: videoWsEndpoint(),
       capture_defaults: { page_processing: 'single_page', color_mode: 'auto_optimize', output_quality: 'optional jpg 1-100', output_target_size: 'optional device target_size' },
       render_video_default: false,
     });
