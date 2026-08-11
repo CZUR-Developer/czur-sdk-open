@@ -7,6 +7,7 @@ endif()
 
 option(SDK_OPEN_ENABLE_HTTP_SERVER "Start sdk_open embedded admin/demo HTTP servers" ON)
 option(SDK_OPEN_USE_PREBUILT_WEB "Use prebuilt sdk_open/web assets without running pnpm" OFF)
+option(SDK_OPEN_ENABLE_TLS "Enable HTTPS/WSS listeners for sdk_open transport services" ON)
 
 set(SDK_OPEN_VERSION_FILE_CANDIDATES
     "${CMAKE_SOURCE_DIR}/version/sdk-open/version.ini"
@@ -106,6 +107,44 @@ set(SDK_OPEN_ASIO_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/asio/asio/include")
 set(SDK_OPEN_NLOHMANN_JSON_DIR "${SDK_OPEN_THIRD_PARTY_DIR}")
 set(SDK_OPEN_SPDLOG_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/spdlog")
 set(SDK_OPEN_CGRAPH_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/CGraph")
+set(SDK_OPEN_OPENSSL3_DIR "${CMAKE_SOURCE_DIR}/third_party_repo/openssl3")
+
+add_library(sdk_open_tls_deps INTERFACE)
+if(SDK_OPEN_ENABLE_TLS)
+    if(APPLE)
+        message(FATAL_ERROR "SDK_OPEN_ENABLE_TLS=ON is not supported on macOS until OpenSSL 3 runtime artifacts are packaged")
+    elseif(WIN32)
+        set(SDK_OPEN_OPENSSL3_INCLUDE_DIR "${SDK_OPEN_OPENSSL3_DIR}/include/windows")
+        set(SDK_OPEN_OPENSSL3_SSL_LIB "${SDK_OPEN_OPENSSL3_DIR}/lib/${LIB_ARCH}/libssl.lib")
+        set(SDK_OPEN_OPENSSL3_CRYPTO_LIB "${SDK_OPEN_OPENSSL3_DIR}/lib/${LIB_ARCH}/libcrypto.lib")
+    elseif(UNIX)
+        set(SDK_OPEN_OPENSSL3_INCLUDE_DIR "${SDK_OPEN_OPENSSL3_DIR}/include/linux")
+        set(SDK_OPEN_OPENSSL3_SSL_LIB "${SDK_OPEN_OPENSSL3_DIR}/lib/${LIB_ARCH}/libssl.so.3")
+        set(SDK_OPEN_OPENSSL3_CRYPTO_LIB "${SDK_OPEN_OPENSSL3_DIR}/lib/${LIB_ARCH}/libcrypto.so.3")
+    else()
+        message(FATAL_ERROR "SDK_OPEN_ENABLE_TLS=ON has no OpenSSL 3 configuration for this platform")
+    endif()
+
+    foreach(_sdk_open_tls_file
+            "${SDK_OPEN_OPENSSL3_INCLUDE_DIR}/openssl/ssl.h"
+            "${SDK_OPEN_OPENSSL3_SSL_LIB}"
+            "${SDK_OPEN_OPENSSL3_CRYPTO_LIB}")
+        if(NOT EXISTS "${_sdk_open_tls_file}")
+            message(FATAL_ERROR "SDK Open TLS dependency is missing: ${_sdk_open_tls_file}")
+        endif()
+    endforeach()
+    target_include_directories(sdk_open_tls_deps BEFORE INTERFACE "${SDK_OPEN_OPENSSL3_INCLUDE_DIR}")
+    target_link_libraries(sdk_open_tls_deps INTERFACE
+        "${SDK_OPEN_OPENSSL3_SSL_LIB}"
+        "${SDK_OPEN_OPENSSL3_CRYPTO_LIB}"
+    )
+    target_compile_definitions(sdk_open_tls_deps INTERFACE
+        SDK_OPEN_ENABLE_TLS=1
+        CPPHTTPLIB_OPENSSL_SUPPORT
+    )
+else()
+    target_compile_definitions(sdk_open_tls_deps INTERFACE SDK_OPEN_ENABLE_TLS=0)
+endif()
 
 if(NOT EXISTS "${SDK_OPEN_CPP_HTTPLIB_DIR}/httplib.h")
     message(FATAL_ERROR "Missing third_party/cpp-httplib/httplib.h")
@@ -173,6 +212,7 @@ set(SDK_OPEN_RUNTIME_SRCS
     runtime/sdk_json_utils.cpp
     runtime/sdk_config.cpp
     transport/sdk_http_server.cpp
+    transport/sdk_tls_utils.cpp
     transport/sdk_ws_command_server.cpp
     transport/sdk_ws_video_server.cpp
     application/admin_application_service.cpp
@@ -223,6 +263,16 @@ target_include_directories(sdk_open_runtime PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/facade"
     "${CMAKE_CURRENT_SOURCE_DIR}/interfaces"
 )
+if(SDK_OPEN_ENABLE_TLS)
+    # 父工程全局 include path 中同时存在 OpenSSL 1.1；cpp-httplib 仅支持 OpenSSL 3，
+    # 因此必须从本目标移除旧路径并显式把 OpenSSL 3 放到最前面。
+    get_target_property(SDK_OPEN_RUNTIME_INCLUDE_DIRS sdk_open_runtime INCLUDE_DIRECTORIES)
+    list(REMOVE_ITEM SDK_OPEN_RUNTIME_INCLUDE_DIRS
+        "${CMAKE_SOURCE_DIR}/third_party_repo/openssl/include/${THIRD_PARTY_SYSTEM}"
+    )
+    set_property(TARGET sdk_open_runtime PROPERTY INCLUDE_DIRECTORIES "${SDK_OPEN_RUNTIME_INCLUDE_DIRS}")
+    target_include_directories(sdk_open_runtime BEFORE PRIVATE "${SDK_OPEN_OPENSSL3_INCLUDE_DIR}")
+endif()
 target_compile_definitions(sdk_open_runtime PUBLIC
     SDK_OPEN_ENABLE_HTTP_SERVER=$<IF:$<BOOL:${SDK_OPEN_ENABLE_HTTP_SERVER}>,1,0>
 )
@@ -232,9 +282,14 @@ target_link_libraries(sdk_open_runtime PUBLIC
     sdk_open_cgraph
     sdk_open_logging
     sdk_open_third_party
+    sdk_open_tls_deps
 )
 if(SDK_OPEN_USE_PRIVATE_PROVIDER)
     target_compile_definitions(sdk_open_runtime PRIVATE SDK_USE_PRIVATE_PROVIDER)
+endif()
+if(MSVC)
+    # WSS 的双 listener 模板实例会超过 MSVC 默认 COFF section 数量。
+    target_compile_options(sdk_open_runtime PRIVATE /bigobj)
 endif()
 if(NOT WIN32)
     target_link_libraries(sdk_open_runtime PUBLIC pthread)
@@ -356,6 +411,37 @@ if(UNIX AND NOT APPLE)
         INSTALL_RPATH "$ORIGIN"
         INSTALL_RPATH_USE_LINK_PATH FALSE
     )
+endif()
+
+if(SDK_OPEN_ENABLE_TLS)
+    if(WIN32)
+        if(LIB_ARCH STREQUAL "windows32")
+            set(SDK_OPEN_TLS_CRYPTO_DLL_NAME "libcrypto-3.dll")
+            set(SDK_OPEN_TLS_SSL_DLL_NAME "libssl-3.dll")
+        else()
+            set(SDK_OPEN_TLS_CRYPTO_DLL_NAME "libcrypto-3-x64.dll")
+            set(SDK_OPEN_TLS_SSL_DLL_NAME "libssl-3-x64.dll")
+        endif()
+        add_custom_command(TARGET sdk_open_app POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${SDK_OPEN_OPENSSL3_DIR}/lib/${LIB_ARCH}/${SDK_OPEN_TLS_CRYPTO_DLL_NAME}"
+                "$<TARGET_FILE_DIR:sdk_open_app>/${SDK_OPEN_TLS_CRYPTO_DLL_NAME}"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${SDK_OPEN_OPENSSL3_DIR}/lib/${LIB_ARCH}/${SDK_OPEN_TLS_SSL_DLL_NAME}"
+                "$<TARGET_FILE_DIR:sdk_open_app>/${SDK_OPEN_TLS_SSL_DLL_NAME}"
+            COMMENT "Copy OpenSSL 3 runtime DLLs for sdk_open TLS"
+        )
+    elseif(UNIX AND NOT APPLE)
+        add_custom_command(TARGET sdk_open_app POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${SDK_OPEN_OPENSSL3_SSL_LIB}"
+                "$<TARGET_FILE_DIR:sdk_open_app>/libssl.so.3"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${SDK_OPEN_OPENSSL3_CRYPTO_LIB}"
+                "$<TARGET_FILE_DIR:sdk_open_app>/libcrypto.so.3"
+            COMMENT "Copy OpenSSL 3 runtime libraries for sdk_open TLS"
+        )
+    endif()
 endif()
 
 if(BUILD_SDK_PRIVATE)

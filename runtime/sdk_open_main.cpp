@@ -273,25 +273,6 @@ bool UninstallWindowsService(const std::string& service_name) {
 
 } // namespace
 
-void ApplyEnvPortOverride(const char* env_key, int& target_port) {
-    const char* val = std::getenv(env_key);
-    if (val == nullptr) {
-        return;
-    }
-    const int parsed = std::atoi(val);
-    if (parsed > 0 && parsed <= 65535) {
-        target_port = parsed;
-    }
-}
-
-void ApplyEnvStringOverride(const char* env_key, std::string& target_value) {
-    const char* val = std::getenv(env_key);
-    if (val == nullptr) {
-        return;
-    }
-    target_value = val;
-}
-
 void ApplyDefaultSaneConfigDir() {
     const char* sane_config_dir = std::getenv("CZUR_SANE_CONFIG_DIR");
     if (sane_config_dir != nullptr && sane_config_dir[0] != '\0') {
@@ -312,13 +293,7 @@ std::unique_ptr<editor::sdk::SdkApp> CreateSdkOpenApp(const std::string& config_
     editor::sdk::InitializeSdkOpenLogger();
     editor::sdk::SdkConfig config = editor::sdk::SdkConfig::FromFile(config_path);
     config.web_root = GetExecutableDir() + "/web";
-    ApplyEnvPortOverride("SDK_ADMIN_HTTP_PORT", config.admin_http_port);
-    ApplyEnvPortOverride("SDK_DEMO_HTTP_PORT", config.demo_http_port);
-    ApplyEnvPortOverride("SDK_ASSET_HTTP_PORT", config.asset_http_port);
-    ApplyEnvPortOverride("SDK_COMMAND_WS_PORT", config.command_ws_port);
-    ApplyEnvPortOverride("SDK_VIDEO_WS_PORT", config.video_ws_port);
-    ApplyEnvStringOverride("SDK_ASSET_BASE_URL", config.asset_base_url);
-    ApplyEnvStringOverride("SDK_AUTH_TOKEN", config.auth_token);
+    editor::sdk::ApplySdkEnvironmentOverrides(&config);
 
 #if defined(SDK_USE_PRIVATE_PROVIDER) && defined(_WIN32)
     ApplyDefaultSaneConfigDir();
@@ -450,8 +425,13 @@ int main(int argc, char* argv[]) {
     }
 #endif
 #if !defined(_WIN32)
-    if (argc > 1 && argv[1] != nullptr) {
-        config_path = argv[1];
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i] != nullptr ? argv[i] : "";
+        if (arg == "--config" && i + 1 < argc) {
+            config_path = argv[++i];
+        } else if (!arg.empty() && arg[0] != '-' && config_path.empty()) {
+            config_path = arg;
+        }
     }
 #endif
 

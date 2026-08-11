@@ -19,6 +19,9 @@ Core rules:
 Default endpoint:
 
 - `ws://127.0.0.1:17090`
+  - retained plaintext command channel
+- `wss://127.0.0.1:18090`
+  - TLS command channel available when `SDK_TLS_ENABLED=1`
 
 ## Connection Model
 
@@ -26,6 +29,12 @@ The client first opens the command lane:
 
 ```text
 ws://127.0.0.1:17090
+```
+
+With TLS enabled, clients can instead connect to:
+
+```text
+wss://127.0.0.1:18090
 ```
 
 After the socket is ready:
@@ -376,7 +385,7 @@ Document split example:
 }
 ```
 
-The demo site uploads local browser-selected files with `POST /api/uploads/files` on the asset service (`http://127.0.0.1:17082` by default). The request must be multipart form-data with field `file` and `Authorization: Bearer <session_token>`. The response returns `upload_id` and an original asset. Image methods can use image upload IDs; `file.convert` can use image, PDF, OFD, or TIFF upload IDs.
+The demo site uploads local browser-selected files with `POST /api/uploads/files` on the asset service (`http://127.0.0.1:17082` by default). With TLS enabled, external HTTPS callers can use `https://127.0.0.1:18082`. The request must be multipart form-data with field `file` and `Authorization: Bearer <session_token>`. The response returns `upload_id` and an original asset. Image methods can use image upload IDs; `file.convert` can use image, PDF, OFD, or TIFF upload IDs.
 
 For `selected_area`, pass frontend-scaled points in `params.selected_area.points` and the coordinate basis in `params.selected_area.source.width/height`. The backend scales those points to the real input image size before cropping. The response returns `output_path` for the first page and `outputs[]` for single or multi-page results.
 
@@ -453,18 +462,18 @@ Supported lifecycle methods:
 ### Offline API key
 
 - license mode: `offline_api_key`
-- default state is `offline_trial` when `host_auth_mode=activation_required`; legacy keys without host activation use `offline_limited`
+- a compatible CZUR device can directly enter `offline_unlocked` without a Host code; otherwise the default state is `offline_trial` when `host_auth_mode=activation_required`, and legacy keys without Host activation use `offline_limited`
 - local machine code is exposed in `auth_context.machine_code`
 - `commercial_authorized` is preserved in `auth_context`, but does not block offline host activation
-- `capture.take`, image-processing methods, and `file.convert` are locally quota-limited before host activation
-- `auth.activate_offline` upgrades the current key to `offline_unlocked` after a valid host auth code
+- `capture.take`, image-processing methods, and `file.convert` are locally quota-limited before either CZUR-device automatic formalization or Host activation
+- `auth.activate_offline` upgrades the current key to `offline_unlocked` after a valid Host auth code; it remains available to persist Host activation after automatic formalization
 
 ### Online API key
 
 - license mode: `online_api_key`
 - validation is performed through the configured HTTP auth service
-- `commercialAuthorized=false` or a missing field becomes `online_trial`; successful commercial authorization becomes `online_validated`
-- CZUR-owned devices may locally activate VIP/SVIP, but never SVIP+
+- `commercialAuthorized=false` or a missing field becomes `online_trial` when no compatible CZUR device is connected; successful commercial authorization becomes `online_validated`
+- ordinary CZUR-owned devices may locally formalize VIP/SVIP; CZUR devices configured with `SpecialAuthorization=true` may also formalize SVIP+. Automatic formalization does not fabricate `commercial_authorized`
 - quota checks for `capture.take`, image-processing methods, and `file.convert` are delegated to the same remote auth service
 - the current build supports `http://...` online auth endpoints directly
 
@@ -473,6 +482,12 @@ Supported lifecycle methods:
 - `system.*` is anonymous
 - `auth.create_session` is anonymous
 - `auth.get_context`, `auth.refresh_session`, `auth.activate_offline`, and `auth.destroy_session` require a valid bound session
+
+## Device Scope Rules
+
+- An empty `device_scope` does not restrict business devices.
+- A non-empty `device_scope` is a `{vid,pid}` allowlist: `device.list` hides other devices, and `device.get/open`, capture, and video-control operations return `1105 DeviceNotInAuthScope` for an out-of-scope target.
+- The scope constrains the business-operation target only; it does not exclude a connected CZUR device from API Key automatic-formalization detection.
 - all other business methods require a valid bound session by default
 
 Common auth failures:
@@ -497,6 +512,12 @@ Example:
 
 ```text
 ws://127.0.0.1:17091?session_token=ss-v1-xxxx&stream_id=stream-001
+```
+
+With TLS enabled, the equivalent video endpoint is:
+
+```text
+wss://127.0.0.1:18091?session_token=ss-v1-xxxx&stream_id=stream-001
 ```
 
 ## Sequence Example

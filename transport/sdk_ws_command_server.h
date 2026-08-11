@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 
+#include "sdk_config.h"
 #include "sdk_json_utils.h"
 
 namespace editor {
@@ -25,7 +26,7 @@ public:
     using RequestHandler = std::function<Json(const std::string&, const Json&)>;
     using ConnectionHandler = std::function<void(const std::string&)>;
 
-    SdkWsCommandServer(const std::string& host, int port);
+    SdkWsCommandServer(const std::string& host, int port, const SdkTlsConfig& tls_config = SdkTlsConfig());
     ~SdkWsCommandServer();
 
     void SetRequestHandler(RequestHandler handler);
@@ -42,6 +43,7 @@ private:
 
     std::string host_;
     int port_;
+    SdkTlsConfig tls_config_;
     std::atomic<bool> running_;
     RequestHandler request_handler_;
     ConnectionHandler open_handler_;

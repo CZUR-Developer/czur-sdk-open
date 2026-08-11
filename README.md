@@ -70,6 +70,17 @@ Default runtime endpoints:
 - `ws://127.0.0.1:17091`
   - video channel
 
+When TLS is enabled, the plaintext endpoints remain available and these additional listeners are exposed:
+
+- `https://127.0.0.1:18082`
+  - HTTPS asset API
+- `wss://127.0.0.1:18090`
+  - WSS command channel
+- `wss://127.0.0.1:18091`
+  - WSS video channel
+
+The admin and demo sites keep their existing HTTP ports. TLS listeners use a separate bind address, so exposing WSS/HTTPS does not expose those sites.
+
 
 ## Protocol Model
 
@@ -138,6 +149,12 @@ Example:
 
 ```text
 ws://127.0.0.1:17091?session_token=ss-v2-xxxx&stream_id=stream-001
+```
+
+With TLS enabled, use:
+
+```text
+wss://127.0.0.1:18091?session_token=ss-v2-xxxx&stream_id=stream-001
 ```
 
 ## Admin APIs
@@ -211,6 +228,57 @@ Service mode is launched by SCM with `sdk_open_app.exe --service ...`; normal de
 - `SDK_COMMAND_WS_PORT`
 - `SDK_VIDEO_WS_PORT`
 - `SDK_AUTH_TOKEN`
+- `SDK_TLS_ENABLED`: set to `1` to enable the HTTPS/WSS dual-port listeners
+- `SDK_TLS_BIND_HOST`: bind address for TLS listeners; defaults to `bind_host`
+- `SDK_TLS_CERT_FILE`: PEM/fullchain file containing the server certificate and intermediates
+- `SDK_TLS_KEY_FILE`: server PEM private key file
+- `SDK_TLS_KEY_PASSWORD`: optional private-key password
+- `SDK_ASSET_HTTPS_PORT`: defaults to `18082`
+- `SDK_COMMAND_WSS_PORT`: defaults to `18090`
+- `SDK_VIDEO_WSS_PORT`: defaults to `18091`
+
+Example TLS deployment:
+
+```bash
+export SDK_TLS_ENABLED=1
+export SDK_TLS_BIND_HOST=0.0.0.0
+export SDK_TLS_CERT_FILE=/etc/czur-sdk/tls/fullchain.pem
+export SDK_TLS_KEY_FILE=/etc/czur-sdk/tls/privkey.pem
+export SDK_ASSET_BASE_URL=https://sdk.example.com:18082
+```
+
+### Default TLS for the local runtime
+
+The official Windows and Linux SDK Open packages include a default certificate and private
+key intended only for the local runtime. During installation they:
+
+- enable `HTTPS 18082`, `WSS 18090`, and `WSS 18091` while retaining the plaintext ports;
+- map `sdk-runtime.localhost` to `127.0.0.1`, with the TLS listeners bound to loopback only;
+- add the Local Runtime Root CA to the operating-system trust store, so clients using that
+  store can access `https://sdk-runtime.localhost:18082` without a default self-signed warning;
+- use `https://sdk-runtime.localhost:18082` as the default asset URL.
+
+The service certificate and private key can be replaced without being overwritten by an
+upgrade:
+
+- Windows: `C:\ProgramData\CZUR\sdk-open\tls\sdk-runtime.localhost.fullchain.pem` and
+  `C:\ProgramData\CZUR\sdk-open\tls\sdk-runtime.localhost.key.pem`; configuration is in
+  `C:\ProgramData\CZUR\sdk-open\runtime.env`.
+- Linux: `/etc/czur/sdk-open/tls/sdk-runtime.localhost.fullchain.pem` and
+  `/etc/czur/sdk-open/tls/sdk-runtime.localhost.key.pem`; configuration is in
+  `/etc/czur/sdk-open/runtime.env`.
+
+Replace the certificate chain and private key as a matching pair, then restart `sdk-open`.
+If paths, host name, or ports change, update `runtime.env` too. A replacement private CA
+must be trusted by the calling client. The default credentials and loopback mapping are for
+the local runtime only, never for internet-facing or cross-customer use. When using
+`SDK_TLS_BIND_HOST=0.0.0.0` or NAT/DNS, set `SDK_ASSET_BASE_URL` to the actual public HTTPS
+address. TLS encrypts transport only; API keys, session tokens, asset authorization, and
+firewall controls remain required.
+
+Most clients using the operating-system trust store work immediately with the installed root
+CA. A Linux browser or SDK client that maintains an independent NSS/Firefox certificate store
+must import `local-runtime-root-ca.crt` into that store as well.
 
 Asset API responses require session authorization:
 
@@ -218,6 +286,8 @@ Asset API responses require session authorization:
 curl -H "Authorization: Bearer <session_token>" \
   http://127.0.0.1:17082/api/assets/<task_id>/<asset_id>
 ```
+
+When TLS is enabled and `SDK_ASSET_BASE_URL` is not set, returned asset URLs default to `https://<host>:18082`; the plaintext asset API remains available for existing clients.
 
 ## Documentation
 
