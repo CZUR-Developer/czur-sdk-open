@@ -4,6 +4,16 @@
 
 All notable changes to the CZUR Open SDK are documented in this file.
 
+## [0.0.5] - 2026-08-11
+
+### Added
+
+- Added TLS support for HTTP and WebSocket connections.
+
+### Fixed
+
+- Fixed CZUR device entitlement checks to enforce the authorized device scope.
+
 ## [0.0.4] - 2026-07-24
 
 ### Added
