@@ -95,6 +95,13 @@ void SetCorsHeaders(httplib::Response* res) {
     res->set_header("Access-Control-Allow-Origin", "*");
     res->set_header("Access-Control-Allow-Headers", "Authorization, Content-Type");
     res->set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    // Chrome's Private Network Access (PNA) preflight adds
+    // Access-Control-Request-Private-Network when a public/less-private
+    // page accesses a local/private address.  Explicitly granting it keeps
+    // the asset endpoint usable from a secure production origin.  This
+    // header alone is not sufficient for an insecure page; production pages
+    // must still be served over HTTPS (or use a same-origin reverse proxy).
+    res->set_header("Access-Control-Allow-Private-Network", "true");
 }
 
 } // namespace
