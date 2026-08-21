@@ -4764,13 +4764,17 @@ Json CommandApplicationService::HandleImageApplyColorMode(const std::string& con
     output.index = 0;
     output.path = final_path;
     output.content_type = ContentTypeForImageExtension(source_output_extension);
-    output.size = FileSize(final_path);
+    output.width = color_result.width;
+    output.height = color_result.height;
+    output.size = color_result.size > 0 ? color_result.size : FileSize(final_path);
 
     SdkCaptureAsset asset;
     asset.asset_id = output.asset_id;
     asset.kind = "color_processed";
     asset.path = output.path;
     asset.content_type = output.content_type;
+    asset.width = output.width;
+    asset.height = output.height;
     asset.size = output.size;
     asset = AttachImageAssetUrls(image_task_id, asset);
     RegisterImageAsset(connection_id, image_task_id, asset);

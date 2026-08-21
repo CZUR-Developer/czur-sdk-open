@@ -548,6 +548,9 @@ struct SdkColorModeResult {
     bool processed = false;
     bool unsupported = false;
     std::string output_path;
+    int width = 0;
+    int height = 0;
+    uint64_t size = 0;
 };
 
 struct SdkFormatConvertRequest {
