@@ -120,6 +120,10 @@ bool ApplyConfigValue(const std::string& key, const std::string& value, SdkConfi
         config->auth_token = value;
         return true;
     }
+    if (key == "CZUR_TWAIN_WORK_DIR") {
+        config->twain_work_dir = value;
+        return true;
+    }
     if (key == "SDK_TLS_BIND_HOST") {
         config->tls.bind_host = value;
         return true;

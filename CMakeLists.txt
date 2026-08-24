@@ -352,6 +352,129 @@ if(WIN32 AND SDK_OPEN_USE_PRIVATE_PROVIDER)
     )
 endif()
 
+function(czur_configure_sdk_open_twain_runtime target_name)
+    if(NOT WIN32 OR NOT SDK_OPEN_USE_PRIVATE_PROVIDER OR
+       (NOT LIB_ARCH STREQUAL "windows64" AND NOT LIB_ARCH STREQUAL "windows32"))
+        return()
+    endif()
+    if(NOT TARGET ${target_name})
+        message(FATAL_ERROR "SDK Open TWAIN runtime target does not exist: ${target_name}")
+    endif()
+
+    set(_twain_dsm_x64_dir "${CMAKE_SOURCE_DIR}/third_party_repo/twain/windows/x64")
+    set(_twain_dsm_x86_dir "${CMAKE_SOURCE_DIR}/third_party_repo/twain/windows/x86")
+    set(_twain_dsm_x64 "${_twain_dsm_x64_dir}/TWAINDSM.dll")
+    set(_twain_dsm_x86 "${_twain_dsm_x86_dir}/TWAINDSM.dll")
+    set(_twain_dsm_x64_license "${_twain_dsm_x64_dir}/LICENSE-LGPL-2.1.txt")
+    set(_twain_dsm_x86_license "${_twain_dsm_x86_dir}/LICENSE-LGPL-2.1.txt")
+    set(_twain_dsm_x64_manifest
+        "${CMAKE_SOURCE_DIR}/packaging/windows/twain/TWAINDSM-x64-VERSION-SHA256.txt")
+    set(_twain_dsm_x86_manifest
+        "${CMAKE_SOURCE_DIR}/packaging/windows/twain/TWAINDSM-x86-VERSION-SHA256.txt")
+
+    set(_twain_runtime_files
+        "${_twain_dsm_x86}"
+        "${_twain_dsm_x86_license}"
+        "${_twain_dsm_x86_manifest}")
+    if(LIB_ARCH STREQUAL "windows64")
+        list(APPEND _twain_runtime_files
+            "${_twain_dsm_x64}"
+            "${_twain_dsm_x64_license}"
+            "${_twain_dsm_x64_manifest}")
+    endif()
+    foreach(_twain_runtime_file IN LISTS _twain_runtime_files)
+        if(NOT EXISTS "${_twain_runtime_file}")
+            message(FATAL_ERROR "SDK Open TWAIN runtime file is missing: ${_twain_runtime_file}")
+        endif()
+    endforeach()
+
+    if(LIB_ARCH STREQUAL "windows32")
+        add_custom_command(TARGET ${target_name} POST_BUILD
+            COMMAND "${CMAKE_COMMAND}"
+                -DTWAIN_VERIFY_INPUTS=ON
+                -DTWAIN_REQUIRE_X86_RUNTIME=ON
+                -DTWAIN_SDK_OPEN_ARCH=x86
+                "-DTWAIN_DSM_X86=${_twain_dsm_x86}"
+                "-DTWAIN_DSM_X86_LICENSE=${_twain_dsm_x86_license}"
+                "-DTWAIN_DSM_X86_MANIFEST=${_twain_dsm_x86_manifest}"
+                -P "${CMAKE_SOURCE_DIR}/cmake/VerifyTwainRuntime.cmake"
+            COMMAND "${CMAKE_COMMAND}" -E remove_directory
+                "$<TARGET_FILE_DIR:${target_name}>/twain"
+            COMMAND "${CMAKE_COMMAND}" -E rm -f
+                "$<TARGET_FILE_DIR:${target_name}>/TWAINDSM.dll"
+                "$<TARGET_FILE_DIR:${target_name}>/TWAINDSM-x64-LICENSE.txt"
+                "$<TARGET_FILE_DIR:${target_name}>/TWAINDSM-x64-VERSION-SHA256.txt"
+                "$<TARGET_FILE_DIR:${target_name}>/twain_helper_runtime/TWAINDSM.dll"
+                "$<TARGET_FILE_DIR:${target_name}>/twain_helper_runtime/twain_helper_x64.exe"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory
+                "$<TARGET_FILE_DIR:${target_name}>/twain_helper_runtime/twain/x86"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${_twain_dsm_x86}"
+                "$<TARGET_FILE_DIR:${target_name}>/twain_helper_runtime/twain/x86/TWAINDSM.dll"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${_twain_dsm_x86_license}"
+                "$<TARGET_FILE_DIR:${target_name}>/twain_helper_runtime/twain/x86/TWAINDSM-x86-LICENSE.txt"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${_twain_dsm_x86_manifest}"
+                "$<TARGET_FILE_DIR:${target_name}>/twain_helper_runtime/twain/x86/TWAINDSM-x86-VERSION-SHA256.txt"
+            COMMAND "${CMAKE_COMMAND}"
+                "-DTWAIN_RUNTIME_DIR=$<TARGET_FILE_DIR:${target_name}>"
+                -DTWAIN_SDK_OPEN_ISOLATED_RUNTIME=ON
+                -DTWAIN_SDK_OPEN_ARCH=x86
+                -P "${CMAKE_SOURCE_DIR}/cmake/VerifyTwainRuntime.cmake"
+            COMMENT "Copy and verify the Win32 sdk_open TWAIN runtime"
+            VERBATIM
+        )
+        return()
+    endif()
+
+    add_custom_command(TARGET ${target_name} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}"
+            -DTWAIN_VERIFY_INPUTS=ON
+            -DTWAIN_REQUIRE_X86_RUNTIME=ON
+            "-DTWAIN_DSM_X64=${_twain_dsm_x64}"
+            "-DTWAIN_DSM_X86=${_twain_dsm_x86}"
+            "-DTWAIN_DSM_X64_LICENSE=${_twain_dsm_x64_license}"
+            "-DTWAIN_DSM_X86_LICENSE=${_twain_dsm_x86_license}"
+            "-DTWAIN_DSM_X64_MANIFEST=${_twain_dsm_x64_manifest}"
+            "-DTWAIN_DSM_X86_MANIFEST=${_twain_dsm_x86_manifest}"
+            -P "${CMAKE_SOURCE_DIR}/cmake/VerifyTwainRuntime.cmake"
+        COMMAND "${CMAKE_COMMAND}" -E remove_directory
+            "$<TARGET_FILE_DIR:${target_name}>/twain"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory
+            "$<TARGET_FILE_DIR:${target_name}>/twain_helper_runtime/twain/x86"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${_twain_dsm_x64}"
+            "$<TARGET_FILE_DIR:${target_name}>/TWAINDSM.dll"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${_twain_dsm_x64_license}"
+            "$<TARGET_FILE_DIR:${target_name}>/TWAINDSM-x64-LICENSE.txt"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${_twain_dsm_x64_manifest}"
+            "$<TARGET_FILE_DIR:${target_name}>/TWAINDSM-x64-VERSION-SHA256.txt"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${_twain_dsm_x64}"
+            "$<TARGET_FILE_DIR:${target_name}>/twain_helper_runtime/TWAINDSM.dll"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${_twain_dsm_x86}"
+            "$<TARGET_FILE_DIR:${target_name}>/twain_helper_runtime/twain/x86/TWAINDSM.dll"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${_twain_dsm_x86_license}"
+            "$<TARGET_FILE_DIR:${target_name}>/twain_helper_runtime/twain/x86/TWAINDSM-x86-LICENSE.txt"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${_twain_dsm_x86_manifest}"
+            "$<TARGET_FILE_DIR:${target_name}>/twain_helper_runtime/twain/x86/TWAINDSM-x86-VERSION-SHA256.txt"
+        COMMAND "${CMAKE_COMMAND}"
+            "-DTWAIN_RUNTIME_DIR=$<TARGET_FILE_DIR:${target_name}>"
+            -DTWAIN_REQUIRE_X86_RUNTIME=ON
+            -DTWAIN_SDK_OPEN_ISOLATED_RUNTIME=ON
+            -DTWAIN_SDK_OPEN_ARCH=x64
+            -P "${CMAKE_SOURCE_DIR}/cmake/VerifyTwainRuntime.cmake"
+        COMMENT "Copy and verify the sdk_open TWAIN runtime"
+        VERBATIM
+    )
+endfunction()
+
 if(SDK_OPEN_USE_PRIVATE_PROVIDER)
     target_compile_definitions(sdk_open_app PRIVATE SDK_USE_PRIVATE_PROVIDER)
     if(WIN32)
@@ -403,6 +526,8 @@ if(SDK_OPEN_USE_PRIVATE_PROVIDER)
 else()
     target_link_libraries(sdk_open_app PRIVATE sdk_mock_providers)
 endif()
+
+czur_configure_sdk_open_twain_runtime(sdk_open_app)
 
 if(UNIX AND NOT APPLE)
     set_target_properties(sdk_open_app PROPERTIES
