@@ -268,7 +268,7 @@ public:
         {
             std::unique_lock<std::mutex> lock(state->mu);
             if (!state->completed) {
-                const int timeout_ms = request_.timeout_ms > 0 ? request_.timeout_ms : 15000;
+                const int timeout_ms = request_.timeout_ms > 0 ? request_.timeout_ms : kDefaultCaptureTimeoutMs;
                 if (!state->cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [state]() { return state->completed; })) {
                     state->completed = true;
                     state->result.code = ToCode(SdkStatusCode::CaptureTimeout);

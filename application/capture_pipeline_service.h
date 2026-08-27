@@ -20,7 +20,7 @@ struct CapturePipelineRequest {
     std::string device_id;
     std::string output_dir;
     bool include_base64 = false;
-    int timeout_ms = 15000;
+    int timeout_ms = kDefaultCaptureTimeoutMs;
     AuthContext auth_context;
     SdkCaptureProfile profile;
     // 硬拍已由 provider 取得原始图时使用。pipeline 直接写入当前 task

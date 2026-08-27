@@ -24,7 +24,7 @@ struct CaptureTaskStartRequest {
     std::string device_id;
     std::string output_dir;
     bool include_base64 = false;
-    int timeout_ms = 15000;
+    int timeout_ms = kDefaultCaptureTimeoutMs;
     AuthContext auth_context;
     SdkCaptureProfile profile;
     // 硬拍异步任务的原始输入；为空时仍按普通 capture.take 调用 provider。

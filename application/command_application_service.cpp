@@ -2751,7 +2751,7 @@ CommandApplicationService::BuildHardGrabPayload(const std::string& connection_id
     start_request.connection_id = connection_id;
     start_request.session_token = session_result.session_token;
     start_request.device_id = event.device_id;
-    start_request.timeout_ms = 15000;
+    start_request.timeout_ms = kDefaultCaptureTimeoutMs;
     start_request.auth_context = session_result.auth_context;
     start_request.profile = profile;
     if (capture_context.has_pipeline) {
@@ -3945,7 +3945,7 @@ Json CommandApplicationService::HandleCaptureTake(const std::string& connection_
                       profile_json.size(),
                       pipeline_steps,
                       GetOptionalBoolField(request.params, "include_base64", false),
-                      GetOptionalIntField(request.params, "timeout_ms", 15000));
+                      GetOptionalIntField(request.params, "timeout_ms", kDefaultCaptureTimeoutMs));
 
     CaptureTaskStartRequest start_request;
     try {
@@ -3954,7 +3954,7 @@ Json CommandApplicationService::HandleCaptureTake(const std::string& connection_
         start_request.device_id = device_id;
         start_request.output_dir = GetOptionalStringField(request.params, "output_dir");
         start_request.include_base64 = GetOptionalBoolField(request.params, "include_base64", false);
-        start_request.timeout_ms = GetOptionalIntField(request.params, "timeout_ms", 15000);
+        start_request.timeout_ms = GetOptionalIntField(request.params, "timeout_ms", kDefaultCaptureTimeoutMs);
         start_request.auth_context = session_result.auth_context;
         std::string profile_error;
         if (!TryParseCaptureProfile(request.params, device_id, &start_request.profile, &profile_error)) {
