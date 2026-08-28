@@ -4,6 +4,17 @@
 
 All notable changes to the CZUR Open SDK are documented in this file.
 
+## [0.0.6] - 2026-08-28
+
+### Added
+
+- Bundled the Microsoft Visual C++ Runtime with the Windows package to simplify deployment on target systems.
+
+### Fixed
+
+- Fixed an intermittent capture-time issue that could occur during the capture workflow.
+- Addressed Windows TWAIN driver runtime issues to improve driver startup and operation stability.
+
 ## [0.0.5] - 2026-08-11
 
 ### Added
