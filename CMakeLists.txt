@@ -343,6 +343,17 @@ if(WIN32)
         VERSION "${SDK_OPEN_VERSION}.${SDK_OPEN_BUILD}"
     )
 endif()
+
+if(BUILD_SDK_OPEN_TESTS)
+    add_executable(sdk_open_capture_task_service_test
+        test/capture_task_service_test.cpp
+    )
+    target_link_libraries(sdk_open_capture_task_service_test PRIVATE
+        sdk_open_runtime
+    )
+    add_test(NAME sdk_open.capture_task_service
+             COMMAND sdk_open_capture_task_service_test)
+endif()
 if(WIN32 AND SDK_OPEN_USE_PRIVATE_PROVIDER)
     target_sources(sdk_open_app PRIVATE
         providers/private_windows/private_windows_provider_factory.cpp
