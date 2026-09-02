@@ -374,19 +374,28 @@ function(czur_configure_sdk_open_twain_runtime target_name)
 
     set(_twain_dsm_x64_dir "${CMAKE_SOURCE_DIR}/third_party_repo/twain/windows/x64")
     set(_twain_dsm_x86_dir "${CMAKE_SOURCE_DIR}/third_party_repo/twain/windows/x86")
+    set(_twain_dsm_x86_compat_230_dir "${_twain_dsm_x86_dir}/compat/2.3.0")
     set(_twain_dsm_x64 "${_twain_dsm_x64_dir}/TWAINDSM.dll")
     set(_twain_dsm_x86 "${_twain_dsm_x86_dir}/TWAINDSM.dll")
+    set(_twain_dsm_x86_compat_230 "${_twain_dsm_x86_compat_230_dir}/TWAINDSM.dll")
     set(_twain_dsm_x64_license "${_twain_dsm_x64_dir}/LICENSE-LGPL-2.1.txt")
     set(_twain_dsm_x86_license "${_twain_dsm_x86_dir}/LICENSE-LGPL-2.1.txt")
+    set(_twain_dsm_x86_compat_230_license
+        "${_twain_dsm_x86_compat_230_dir}/LICENSE-LGPL-2.1.txt")
     set(_twain_dsm_x64_manifest
         "${CMAKE_SOURCE_DIR}/packaging/windows/twain/TWAINDSM-x64-VERSION-SHA256.txt")
     set(_twain_dsm_x86_manifest
         "${CMAKE_SOURCE_DIR}/packaging/windows/twain/TWAINDSM-x86-VERSION-SHA256.txt")
+    set(_twain_dsm_x86_compat_230_manifest
+        "${_twain_dsm_x86_compat_230_dir}/TWAINDSM-x86-2.3.0-VERSION-SHA256.txt")
 
     set(_twain_runtime_files
         "${_twain_dsm_x86}"
         "${_twain_dsm_x86_license}"
-        "${_twain_dsm_x86_manifest}")
+        "${_twain_dsm_x86_manifest}"
+        "${_twain_dsm_x86_compat_230}"
+        "${_twain_dsm_x86_compat_230_license}"
+        "${_twain_dsm_x86_compat_230_manifest}")
     if(LIB_ARCH STREQUAL "windows64")
         list(APPEND _twain_runtime_files
             "${_twain_dsm_x64}"
@@ -408,6 +417,9 @@ function(czur_configure_sdk_open_twain_runtime target_name)
                 "-DTWAIN_DSM_X86=${_twain_dsm_x86}"
                 "-DTWAIN_DSM_X86_LICENSE=${_twain_dsm_x86_license}"
                 "-DTWAIN_DSM_X86_MANIFEST=${_twain_dsm_x86_manifest}"
+                "-DTWAIN_DSM_X86_COMPAT_230=${_twain_dsm_x86_compat_230}"
+                "-DTWAIN_DSM_X86_COMPAT_230_LICENSE=${_twain_dsm_x86_compat_230_license}"
+                "-DTWAIN_DSM_X86_COMPAT_230_MANIFEST=${_twain_dsm_x86_compat_230_manifest}"
                 -P "${CMAKE_SOURCE_DIR}/cmake/VerifyTwainRuntime.cmake"
             COMMAND "${CMAKE_COMMAND}" -E remove_directory
                 "$<TARGET_FILE_DIR:${target_name}>/twain"
@@ -428,6 +440,17 @@ function(czur_configure_sdk_open_twain_runtime target_name)
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                 "${_twain_dsm_x86_manifest}"
                 "$<TARGET_FILE_DIR:${target_name}>/twain_helper_runtime/twain/x86/TWAINDSM-x86-VERSION-SHA256.txt"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory
+                "$<TARGET_FILE_DIR:${target_name}>/twain_helper_runtime/twain/x86/compat/2.3.0"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${_twain_dsm_x86_compat_230}"
+                "$<TARGET_FILE_DIR:${target_name}>/twain_helper_runtime/twain/x86/compat/2.3.0/TWAINDSM.dll"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${_twain_dsm_x86_compat_230_license}"
+                "$<TARGET_FILE_DIR:${target_name}>/twain_helper_runtime/twain/x86/compat/2.3.0/LICENSE-LGPL-2.1.txt"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${_twain_dsm_x86_compat_230_manifest}"
+                "$<TARGET_FILE_DIR:${target_name}>/twain_helper_runtime/twain/x86/compat/2.3.0/TWAINDSM-x86-2.3.0-VERSION-SHA256.txt"
             COMMAND "${CMAKE_COMMAND}"
                 "-DTWAIN_RUNTIME_DIR=$<TARGET_FILE_DIR:${target_name}>"
                 -DTWAIN_SDK_OPEN_ISOLATED_RUNTIME=ON
@@ -449,6 +472,9 @@ function(czur_configure_sdk_open_twain_runtime target_name)
             "-DTWAIN_DSM_X86_LICENSE=${_twain_dsm_x86_license}"
             "-DTWAIN_DSM_X64_MANIFEST=${_twain_dsm_x64_manifest}"
             "-DTWAIN_DSM_X86_MANIFEST=${_twain_dsm_x86_manifest}"
+            "-DTWAIN_DSM_X86_COMPAT_230=${_twain_dsm_x86_compat_230}"
+            "-DTWAIN_DSM_X86_COMPAT_230_LICENSE=${_twain_dsm_x86_compat_230_license}"
+            "-DTWAIN_DSM_X86_COMPAT_230_MANIFEST=${_twain_dsm_x86_compat_230_manifest}"
             -P "${CMAKE_SOURCE_DIR}/cmake/VerifyTwainRuntime.cmake"
         COMMAND "${CMAKE_COMMAND}" -E remove_directory
             "$<TARGET_FILE_DIR:${target_name}>/twain"
@@ -475,6 +501,17 @@ function(czur_configure_sdk_open_twain_runtime target_name)
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${_twain_dsm_x86_manifest}"
             "$<TARGET_FILE_DIR:${target_name}>/twain_helper_runtime/twain/x86/TWAINDSM-x86-VERSION-SHA256.txt"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory
+            "$<TARGET_FILE_DIR:${target_name}>/twain_helper_runtime/twain/x86/compat/2.3.0"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${_twain_dsm_x86_compat_230}"
+            "$<TARGET_FILE_DIR:${target_name}>/twain_helper_runtime/twain/x86/compat/2.3.0/TWAINDSM.dll"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${_twain_dsm_x86_compat_230_license}"
+            "$<TARGET_FILE_DIR:${target_name}>/twain_helper_runtime/twain/x86/compat/2.3.0/LICENSE-LGPL-2.1.txt"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${_twain_dsm_x86_compat_230_manifest}"
+            "$<TARGET_FILE_DIR:${target_name}>/twain_helper_runtime/twain/x86/compat/2.3.0/TWAINDSM-x86-2.3.0-VERSION-SHA256.txt"
         COMMAND "${CMAKE_COMMAND}"
             "-DTWAIN_RUNTIME_DIR=$<TARGET_FILE_DIR:${target_name}>"
             -DTWAIN_REQUIRE_X86_RUNTIME=ON
