@@ -200,8 +200,20 @@ export async function openSelectedDevice(): Promise<void> {
   state.captureOutput = asCaptureOutputCapabilities(openedDevice.capture_output);
   const openedResolutions = asResolutions(openedDevice.resolutions);
   if (openedResolutions.length > 0) {
-    state.resolutions = openedResolutions;
-    state.selectedResolutionKey = resolutionKey(openedResolutions[0]);
+    const openedResolution = openedResolutions[0];
+    const openedKey = resolutionKey(openedResolution);
+    const existingIndex = state.resolutions.findIndex(
+      (item) => resolutionKey(item) === openedKey,
+    );
+    if (existingIndex >= 0) {
+      state.resolutions.splice(existingIndex, 1, {
+        ...state.resolutions[existingIndex],
+        ...openedResolution,
+      });
+    } else if (state.resolutions.length === 0) {
+      state.resolutions = [openedResolution];
+    }
+    state.selectedResolutionKey = openedKey;
   }
   state.openState = state.opened ? 'success' : 'error';
   state.closeState = 'idle';

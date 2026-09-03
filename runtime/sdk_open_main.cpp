@@ -14,6 +14,12 @@
 #else
 #include <csignal>
 #include <unistd.h>
+#include <limits.h>
+#if defined(__APPLE__)
+#include <fcntl.h>
+#include <mach-o/dyld.h>
+#include <sys/stat.h>
+#endif
 #endif
 
 #if defined(SDK_USE_PRIVATE_PROVIDER) && !defined(_WIN32)
@@ -46,6 +52,16 @@ std::string GetExecutableDir() {
         return ".";
     }
     return exe_path.substr(0, pos);
+#elif defined(__APPLE__)
+    uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    if (size == 0) return ".";
+    std::unique_ptr<char[]> buffer(new char[size + 1]);
+    if (_NSGetExecutablePath(buffer.get(), &size) != 0) return ".";
+    buffer[size] = '\0';
+    std::string exe_path(buffer.get());
+    const size_t pos = exe_path.find_last_of('/');
+    return pos == std::string::npos ? "." : exe_path.substr(0, pos);
 #else
     char buffer[PATH_MAX];
     const ssize_t len = ::readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
@@ -62,14 +78,186 @@ std::string GetExecutableDir() {
 #endif
 }
 
+#if defined(__APPLE__)
+bool SetDefaultEnvironmentValue(const char* name, const std::string& value) {
+    const char* current = std::getenv(name);
+    if (current != nullptr && current[0] != '\0') {
+        return true;
+    }
+    return ::setenv(name, value.c_str(), 1) == 0;
+}
+
+bool CopyFileIfMissing(const std::string& source,
+                       const std::string& destination,
+                       mode_t mode) {
+    struct stat destination_stat;
+    if (::lstat(destination.c_str(), &destination_stat) == 0) {
+        if (!S_ISREG(destination_stat.st_mode)) {
+            errno = EINVAL;
+            return false;
+        }
+        return ::chmod(destination.c_str(), mode) == 0;
+    }
+    if (errno != ENOENT) {
+        return false;
+    }
+
+    const int source_fd = ::open(source.c_str(), O_RDONLY);
+    if (source_fd < 0) {
+        return false;
+    }
+
+    const int destination_fd = ::open(
+        destination.c_str(), O_WRONLY | O_CREAT | O_EXCL, mode);
+    if (destination_fd < 0) {
+        const int open_error = errno;
+        ::close(source_fd);
+        if (open_error == EEXIST) {
+            if (::lstat(destination.c_str(), &destination_stat) != 0 ||
+                !S_ISREG(destination_stat.st_mode)) {
+                errno = EINVAL;
+                return false;
+            }
+            return ::chmod(destination.c_str(), mode) == 0;
+        }
+        errno = open_error;
+        return false;
+    }
+
+    bool copied = true;
+    char buffer[16 * 1024];
+    while (copied) {
+        const ssize_t bytes_read = ::read(source_fd, buffer, sizeof(buffer));
+        if (bytes_read == 0) {
+            break;
+        }
+        if (bytes_read < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            copied = false;
+            break;
+        }
+
+        ssize_t written = 0;
+        while (written < bytes_read) {
+            const ssize_t result = ::write(
+                destination_fd, buffer + written,
+                static_cast<size_t>(bytes_read - written));
+            if (result < 0 && errno == EINTR) {
+                continue;
+            }
+            if (result <= 0) {
+                copied = false;
+                break;
+            }
+            written += result;
+        }
+    }
+
+    const int copy_error = errno;
+    if (::close(source_fd) != 0) {
+        copied = false;
+    }
+    if (::close(destination_fd) != 0) {
+        copied = false;
+    }
+    if (!copied) {
+        ::unlink(destination.c_str());
+        errno = copy_error;
+        return false;
+    }
+    return ::chmod(destination.c_str(), mode) == 0;
+}
+
+bool PrepareMacRuntimeEnvironment() {
+    const char* home = std::getenv("HOME");
+    if (home == nullptr || home[0] == '\0') {
+        std::cerr << "HOME is unavailable for the SDK Open LaunchAgent" << std::endl;
+        return false;
+    }
+
+    const char* runtime_override = std::getenv("CZUR_SDK_RUNTIME_DIR");
+    const std::string state_root =
+        runtime_override != nullptr && runtime_override[0] != '\0'
+            ? std::string(runtime_override)
+            : editor::sdk::JoinPath(
+                  editor::sdk::JoinPath(
+                      editor::sdk::JoinPath(
+                          editor::sdk::JoinPath(home, "Library"),
+                          "Application Support"),
+                      "CZUR"),
+                  "sdk-open");
+
+    const char* log_override = std::getenv("SDK_OPEN_LOG_DIR");
+    const std::string log_root =
+        log_override != nullptr && log_override[0] != '\0'
+            ? std::string(log_override)
+            : editor::sdk::JoinPath(
+                  editor::sdk::JoinPath(
+                      editor::sdk::JoinPath(
+                          editor::sdk::JoinPath(home, "Library"), "Logs"),
+                      "CZUR"),
+                  "sdk-open");
+    const std::string tls_root = editor::sdk::JoinPath(state_root, "tls");
+
+    if (!editor::sdk::EnsureDirectoryRecursive(state_root) ||
+        !editor::sdk::EnsureDirectoryRecursive(log_root) ||
+        !editor::sdk::EnsureDirectoryRecursive(tls_root)) {
+        std::cerr << "failed to create SDK Open user runtime directories: "
+                  << std::strerror(errno) << std::endl;
+        return false;
+    }
+
+    const std::string executable_dir = GetExecutableDir();
+    const std::string certificate_name = "sdk-runtime.localhost.fullchain.pem";
+    const std::string private_key_name = "sdk-runtime.localhost.key.pem";
+    const std::string packaged_tls_root =
+        editor::sdk::JoinPath(executable_dir, "tls");
+    const std::string certificate_path =
+        editor::sdk::JoinPath(tls_root, certificate_name);
+    const std::string private_key_path =
+        editor::sdk::JoinPath(tls_root, private_key_name);
+
+    if (!CopyFileIfMissing(
+            editor::sdk::JoinPath(packaged_tls_root, certificate_name),
+            certificate_path, 0644) ||
+        !CopyFileIfMissing(
+            editor::sdk::JoinPath(packaged_tls_root, private_key_name),
+            private_key_path, 0600)) {
+        std::cerr << "failed to initialize SDK Open TLS files: "
+                  << std::strerror(errno) << std::endl;
+        return false;
+    }
+
+    if (!SetDefaultEnvironmentValue("CZUR_SDK_RUNTIME_DIR", state_root) ||
+        !SetDefaultEnvironmentValue("SDK_OPEN_LOG_DIR", log_root) ||
+        !SetDefaultEnvironmentValue("SDK_TLS_ENABLED", "1") ||
+        !SetDefaultEnvironmentValue("SDK_TLS_BIND_HOST", "127.0.0.1") ||
+        !SetDefaultEnvironmentValue("SDK_TLS_CERT_FILE", certificate_path) ||
+        !SetDefaultEnvironmentValue("SDK_TLS_KEY_FILE", private_key_path)) {
+        std::cerr << "failed to initialize SDK Open environment: "
+                  << std::strerror(errno) << std::endl;
+        return false;
+    }
+
+    if (::chdir(executable_dir.c_str()) != 0) {
+        std::cerr << "failed to set SDK Open working directory: "
+                  << std::strerror(errno) << std::endl;
+        return false;
+    }
+    return true;
+}
+#endif
+
 #if !defined(_WIN32)
 bool BlockShutdownSignals(sigset_t* signal_set) {
     if (signal_set == nullptr) {
         return false;
     }
-    ::sigemptyset(signal_set);
-    ::sigaddset(signal_set, SIGINT);
-    ::sigaddset(signal_set, SIGTERM);
+    sigemptyset(signal_set);
+    sigaddset(signal_set, SIGINT);
+    sigaddset(signal_set, SIGTERM);
     return ::pthread_sigmask(SIG_BLOCK, signal_set, nullptr) == 0;
 }
 
@@ -381,6 +569,19 @@ int RunAsWindowsService(const std::string& service_name, const std::string& conf
 
 #if !defined(SDK_OPEN_MAIN_TESTING)
 int main(int argc, char* argv[]) {
+#if defined(__APPLE__)
+    bool run_as_launch_agent = false;
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i] != nullptr ? argv[i] : "";
+        if (arg == "--launch-agent") {
+            run_as_launch_agent = true;
+            break;
+        }
+    }
+    if (run_as_launch_agent && !PrepareMacRuntimeEnvironment()) {
+        return 1;
+    }
+#endif
     std::string config_path;
 #if defined(_WIN32)
     bool run_as_service = false;

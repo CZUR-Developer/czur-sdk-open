@@ -92,6 +92,15 @@ configure_file(
     "${SDK_OPEN_GENERATED_INCLUDE_DIR}/sdk_open_version.h"
     @ONLY
 )
+if(APPLE)
+    set(SDK_OPEN_MAC_INFO_PLIST
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/sdk-open-Info.plist")
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/runtime/sdk_open-Info.plist.in"
+        "${SDK_OPEN_MAC_INFO_PLIST}"
+        @ONLY
+    )
+endif()
 
 message(STATUS "SDK Open版本信息:")
 message(STATUS "  版本: ${SDK_OPEN_VERSION}")
@@ -112,7 +121,9 @@ set(SDK_OPEN_OPENSSL3_DIR "${CMAKE_SOURCE_DIR}/third_party_repo/openssl3")
 add_library(sdk_open_tls_deps INTERFACE)
 if(SDK_OPEN_ENABLE_TLS)
     if(APPLE)
-        message(FATAL_ERROR "SDK_OPEN_ENABLE_TLS=ON is not supported on macOS until OpenSSL 3 runtime artifacts are packaged")
+        set(SDK_OPEN_OPENSSL3_INCLUDE_DIR "${SDK_OPEN_OPENSSL3_DIR}/include/mac")
+        set(SDK_OPEN_OPENSSL3_SSL_LIB "${SDK_OPEN_OPENSSL3_DIR}/lib/${LIB_ARCH}/libssl.3.dylib")
+        set(SDK_OPEN_OPENSSL3_CRYPTO_LIB "${SDK_OPEN_OPENSSL3_DIR}/lib/${LIB_ARCH}/libcrypto.3.dylib")
     elseif(WIN32)
         set(SDK_OPEN_OPENSSL3_INCLUDE_DIR "${SDK_OPEN_OPENSSL3_DIR}/include/windows")
         set(SDK_OPEN_OPENSSL3_SSL_LIB "${SDK_OPEN_OPENSSL3_DIR}/lib/${LIB_ARCH}/libssl.lib")
@@ -548,6 +559,17 @@ if(UNIX AND NOT APPLE)
         INSTALL_RPATH_USE_LINK_PATH FALSE
     )
 endif()
+if(APPLE)
+    set_target_properties(sdk_open_app PROPERTIES
+        BUILD_WITH_INSTALL_RPATH TRUE
+        BUILD_RPATH "@executable_path"
+        INSTALL_RPATH "@executable_path"
+        INSTALL_RPATH_USE_LINK_PATH FALSE
+    )
+    target_link_options(sdk_open_app PRIVATE
+        "LINKER:-sectcreate,__TEXT,__info_plist,${SDK_OPEN_MAC_INFO_PLIST}"
+    )
+endif()
 
 if(SDK_OPEN_ENABLE_TLS)
     if(WIN32)
@@ -566,6 +588,16 @@ if(SDK_OPEN_ENABLE_TLS)
                 "${SDK_OPEN_OPENSSL3_DIR}/lib/${LIB_ARCH}/${SDK_OPEN_TLS_SSL_DLL_NAME}"
                 "$<TARGET_FILE_DIR:sdk_open_app>/${SDK_OPEN_TLS_SSL_DLL_NAME}"
             COMMENT "Copy OpenSSL 3 runtime DLLs for sdk_open TLS"
+        )
+    elseif(APPLE)
+        add_custom_command(TARGET sdk_open_app POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${SDK_OPEN_OPENSSL3_SSL_LIB}"
+                "$<TARGET_FILE_DIR:sdk_open_app>/libssl.3.dylib"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${SDK_OPEN_OPENSSL3_CRYPTO_LIB}"
+                "$<TARGET_FILE_DIR:sdk_open_app>/libcrypto.3.dylib"
+            COMMENT "Copy OpenSSL 3 runtime libraries for sdk_open TLS"
         )
     elseif(UNIX AND NOT APPLE)
         add_custom_command(TARGET sdk_open_app POST_BUILD
