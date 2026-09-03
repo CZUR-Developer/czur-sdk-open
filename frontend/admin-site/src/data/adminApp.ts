@@ -19,7 +19,7 @@ export const supportNavigationItems: NavigationItem[] = [
   },
   {
     key: 'documention',
-    href: 'https://www.czur.com/support',
+    href: 'https://open.czur.com/docs/',
     external: true,
     labelKey: 'nav.documention',
   },
