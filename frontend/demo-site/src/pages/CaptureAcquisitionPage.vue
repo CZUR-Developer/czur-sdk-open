@@ -577,6 +577,13 @@ interface CapturePreviewCard {
   thumbnailError: string;
 }
 
+interface CaptureSessionSummary {
+  captured_count: number;
+  processed_count: number;
+  failed_count: number;
+  pending_count: number;
+}
+
 const { t } = useI18n();
 
 const pageProcessingOptions = computed<Array<{ value: PageProcessingMode; label: string; description: string }>>(() => [
@@ -708,6 +715,12 @@ const profileInitializedAt = ref(timeLabel());
 const selectedEnhanceWorkflowId = ref('');
 const selectedEnhanceWorkflow = ref<EnhanceWorkflow | null>(null);
 const captureResults = ref<CaptureResult[]>([]);
+const captureSessionSummary = ref<CaptureSessionSummary>({
+  captured_count: 0,
+  processed_count: 0,
+  failed_count: 0,
+  pending_count: 0,
+});
 const activeCaptureTasks = new Set<string>();
 const thumbnailRequests = new Map<string, number>();
 let commandEventUnsubscribe: (() => void) | null = null;
@@ -839,32 +852,28 @@ const selectedAreaStatusLabel = computed(() => {
 
 const captureMetrics = computed(() => [
   {
-    label: t('pages.captureAcquisition.deviceState'),
-    value: deviceVideoState.opened
-      ? t('pages.captureAcquisition.opened')
-      : deviceVideoState.selectedDeviceId
-        ? t('pages.captureAcquisition.selected')
-        : t('pages.captureAcquisition.noDevice'),
-    detail: deviceVideoState.selectedDeviceId || t('pages.captureAcquisition.deviceCount', { count: deviceInventoryState.devices.length }),
-    tone: deviceVideoState.opened ? 'success' : 'neutral',
+    label: t('pages.captureAcquisition.capturedCount'),
+    value: String(captureSessionSummary.value.captured_count),
+    detail: t('pages.captureAcquisition.capturedCountDescription'),
+    tone: captureSessionSummary.value.captured_count > 0 ? 'success' : 'neutral',
   },
   {
-    label: t('labels.resolution'),
-    value: selectedResolutionLabel.value,
-    detail: t('pages.captureAcquisition.resolutionOptionCount', { count: deviceVideoState.resolutions.length }),
-    tone: selectedResolution.value ? 'success' : 'neutral',
+    label: t('pages.captureAcquisition.pendingCount'),
+    value: String(captureSessionSummary.value.pending_count),
+    detail: t('pages.captureAcquisition.pendingCountDescription'),
+    tone: captureSessionSummary.value.pending_count > 0 ? 'warning' : 'neutral',
   },
   {
-    label: t('pages.captureAcquisition.profileUpdatedAt'),
-    value: profileInitializedAt.value,
-    detail: t('pages.captureAcquisition.profileUpdatedAtDescription'),
-    tone: 'warning',
+    label: t('pages.captureAcquisition.processedCount'),
+    value: String(captureSessionSummary.value.processed_count),
+    detail: t('pages.captureAcquisition.processedCountDescription'),
+    tone: captureSessionSummary.value.processed_count > 0 ? 'success' : 'neutral',
   },
   {
-    label: t('pages.captureAcquisition.sessionFiles'),
-    value: String(captureResults.value.length),
-    detail: captureConfig.outputFormat.toUpperCase(),
-    tone: captureResults.value.length > 0 ? 'success' : 'neutral',
+    label: t('pages.captureAcquisition.failedCount'),
+    value: String(captureSessionSummary.value.failed_count),
+    detail: t('pages.captureAcquisition.failedCountDescription'),
+    tone: captureSessionSummary.value.failed_count > 0 ? 'danger' : 'neutral',
   },
 ]);
 
@@ -1020,8 +1029,10 @@ watch(
     if (state === 'success' && sessionToken) {
       commandEventUnsubscribe = onCommandEvent(handleCommandEvent);
       void loadDeviceInventory();
+      void loadCaptureSessionSummary();
       return;
     }
+    captureSessionSummary.value = emptyCaptureSessionSummary();
     resetDeviceInventory();
     resetDeviceVideo();
   },
@@ -1499,6 +1510,19 @@ async function pollCaptureTask(taskId: string): Promise<void> {
   }
 }
 
+async function loadCaptureSessionSummary(): Promise<void> {
+  try {
+    const response = await sendBoundCommand('capture.session.get');
+    if (response?.code !== 0 || !response.data || typeof response.data !== 'object') {
+      return;
+    }
+    const data = response.data as Record<string, unknown>;
+    captureSessionSummary.value = parseCaptureSessionSummary(data.summary);
+  } catch {
+    // The event stream will update the totals once a capture state changes.
+  }
+}
+
 function handleCommandEvent(event: CommandEvent<Record<string, unknown>>): void {
   if (event.event === 'device.added') {
     void loadDeviceInventory();
@@ -1535,6 +1559,10 @@ function handleCommandEvent(event: CommandEvent<Record<string, unknown>>): void 
     event: event.event,
     payload: event.payload,
   });
+  if (event.event === 'capture.session.updated') {
+    captureSessionSummary.value = parseCaptureSessionSummary(event.payload?.summary);
+    return;
+  }
   if (event.event === 'capture.turn_detected' || event.event === 'capture.hardgrab_detected') {
     if (event.event === 'capture.hardgrab_detected') {
       const payload = event.payload ?? {};
@@ -1962,6 +1990,28 @@ function asString(value: unknown): string {
 
 function asNumber(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function emptyCaptureSessionSummary(): CaptureSessionSummary {
+  return {
+    captured_count: 0,
+    processed_count: 0,
+    failed_count: 0,
+    pending_count: 0,
+  };
+}
+
+function parseCaptureSessionSummary(value: unknown): CaptureSessionSummary {
+  if (!value || typeof value !== 'object') {
+    return emptyCaptureSessionSummary();
+  }
+  const summary = value as Record<string, unknown>;
+  return {
+    captured_count: asNumber(summary.captured_count),
+    processed_count: asNumber(summary.processed_count),
+    failed_count: asNumber(summary.failed_count),
+    pending_count: asNumber(summary.pending_count),
+  };
 }
 
 function logCaptureDebug(label: string, payload: unknown): void {

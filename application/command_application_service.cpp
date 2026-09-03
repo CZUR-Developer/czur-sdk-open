@@ -1082,6 +1082,9 @@ Json BuildCaptureTaskJson(const CaptureTaskSnapshot& task) {
                 {"code", task.code},
                 {"message", task.message},
                 {"device_id", task.device_id},
+                {"capture_source", task.capture_source},
+                {"acquisition_status", task.acquisition_status},
+                {"processing_status", task.processing_status},
                 {"profile_revision", task.profile_revision},
                 {"stages", stages},
                 {"assets", assets},
@@ -2130,6 +2133,7 @@ CommandApplicationService::CommandApplicationService(const SdkConfig& config,
     methods_.push_back(MakeMethod("device.close", true, "Close a device and release active preview resources"));
     methods_.push_back(MakeMethod("capture.take", true, "Capture a still image"));
     methods_.push_back(MakeMethod("capture.get", true, "Get one capture task snapshot"));
+    methods_.push_back(MakeMethod("capture.session.get", true, "Get capture counts for the current command session"));
     methods_.push_back(MakeMethod("capture.set_turn_detect", true, "Enable or disable page-turn detection events"));
     methods_.push_back(MakeMethod("video.start", true, "Create one video stream session"));
     methods_.push_back(MakeMethod("video.stop", true, "Stop one video stream session"));
@@ -2307,6 +2311,9 @@ Json CommandApplicationService::HandleRequest(const std::string& connection_id, 
     }
     if (request.method == "capture.get") {
         return HandleCaptureGet(connection_id, request);
+    }
+    if (request.method == "capture.session.get") {
+        return HandleCaptureSessionGet(connection_id, request);
     }
     if (request.method == "capture.set_turn_detect") {
         return HandleCaptureSetTurnDetect(connection_id, request);
@@ -2732,26 +2739,11 @@ CommandApplicationService::BuildHardGrabPayload(const std::string& connection_id
         payload_result.message = profile_error;
         return payload_result;
     }
-    // 硬拍等价于一次 capture.take，必须同步扣减 capture 配额；
-    // 使用硬拍事件时间戳作为幂等 key，避免同一次事件重发时重复扣减。
-    session_result = ConsumeQuota(connection_id, "capture.take", BuildHardGrabQuotaRequestId(event));
-    if (!IsOkStatusCode(session_result.code)) {
-        payload["capture"] = BuildCaptureResultJson(event.capture);
-        payload["accepted"] = false;
-        payload["code"] = session_result.code;
-        payload["message"] = session_result.message;
-        payload["error"] = session_result.message;
-        payload["warning"] = "hardgrab image was not processed: " + session_result.message;
-        payload_result.code = session_result.code;
-        payload_result.message = session_result.message;
-        return payload_result;
-    }
-
     CaptureTaskStartRequest start_request;
     start_request.connection_id = connection_id;
     start_request.session_token = session_result.session_token;
     start_request.device_id = event.device_id;
-    start_request.timeout_ms = 15000;
+    start_request.timeout_ms = kDefaultCaptureTimeoutMs;
     start_request.auth_context = session_result.auth_context;
     start_request.profile = profile;
     if (capture_context.has_pipeline) {
@@ -2768,7 +2760,39 @@ CommandApplicationService::BuildHardGrabPayload(const std::string& connection_id
                       event.device_id,
                       profile.revision,
                       start_request.pipeline.steps.size());
-    const CaptureTaskStartResult result = capture_task_service_.StartTask(start_request);
+    CaptureTaskStartResult result = capture_task_service_.ReserveTask(start_request);
+    if (!IsOkStatusCode(result.code)) {
+        payload["capture"] = BuildCaptureResultJson(event.capture);
+        payload["accepted"] = false;
+        payload["code"] = result.code;
+        payload["message"] = result.message;
+        payload["error"] = result.message;
+        if (result.retry_after_ms > 0) {
+            payload["retry_after_ms"] = result.retry_after_ms;
+        }
+        payload["warning"] = "hardgrab image was not processed: " + result.message;
+        payload_result.code = result.code;
+        payload_result.message = result.message;
+        return payload_result;
+    }
+
+    // 只有物理采集窗口已成功占用并已登记 task 后才消耗配额；限频、
+    // 设备采集中或登记失败不会扣减 capture.take quota。
+    const AuthorizationService::SessionResult quota_result =
+        ConsumeQuota(connection_id, "capture.take", BuildHardGrabQuotaRequestId(event));
+    if (!IsOkStatusCode(quota_result.code)) {
+        capture_task_service_.AbortReservedTask(result.task.task_id);
+        payload["capture"] = BuildCaptureResultJson(event.capture);
+        payload["accepted"] = false;
+        payload["code"] = quota_result.code;
+        payload["message"] = quota_result.message;
+        payload["error"] = quota_result.message;
+        payload["warning"] = "hardgrab image was not processed: " + quota_result.message;
+        payload_result.code = quota_result.code;
+        payload_result.message = quota_result.message;
+        return payload_result;
+    }
+    result = capture_task_service_.StartReservedTask(result.task.task_id);
     payload["capture"] = BuildCaptureResultJson(event.capture);
     payload["accepted"] = result.accepted;
     payload["code"] = result.code;
@@ -3920,11 +3944,6 @@ Json CommandApplicationService::HandleCaptureTake(const std::string& connection_
     if (!IsOkStatusCode(session_result.code)) {
         return BuildWsResponse(request.request_id, session_result.code, session_result.message);
     }
-    const AuthorizationService::SessionResult quota_result = ConsumeQuota(connection_id, request.method, request.request_id);
-    if (!IsOkStatusCode(quota_result.code)) {
-        return BuildWsResponse(request.request_id, quota_result.code, quota_result.message);
-    }
-
     const std::string device_id = GetOptionalStringField(request.params, "device_id");
     if (device_id.empty()) {
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "device_id required");
@@ -3945,7 +3964,7 @@ Json CommandApplicationService::HandleCaptureTake(const std::string& connection_
                       profile_json.size(),
                       pipeline_steps,
                       GetOptionalBoolField(request.params, "include_base64", false),
-                      GetOptionalIntField(request.params, "timeout_ms", 15000));
+                      GetOptionalIntField(request.params, "timeout_ms", kDefaultCaptureTimeoutMs));
 
     CaptureTaskStartRequest start_request;
     try {
@@ -3954,7 +3973,7 @@ Json CommandApplicationService::HandleCaptureTake(const std::string& connection_
         start_request.device_id = device_id;
         start_request.output_dir = GetOptionalStringField(request.params, "output_dir");
         start_request.include_base64 = GetOptionalBoolField(request.params, "include_base64", false);
-        start_request.timeout_ms = GetOptionalIntField(request.params, "timeout_ms", 15000);
+        start_request.timeout_ms = GetOptionalIntField(request.params, "timeout_ms", kDefaultCaptureTimeoutMs);
         start_request.auth_context = session_result.auth_context;
         std::string profile_error;
         if (!TryParseCaptureProfile(request.params, device_id, &start_request.profile, &profile_error)) {
@@ -3984,25 +4003,38 @@ Json CommandApplicationService::HandleCaptureTake(const std::string& connection_
 
     CaptureTaskStartResult result;
     try {
-        SDK_OPEN_LOG_INFO("[command_application] capture.take start_task connection={} request_id={} profile_revision={} pipeline_steps={} quotas={}",
+        SDK_OPEN_LOG_INFO("[command_application] capture.take reserve_task connection={} request_id={} profile_revision={} pipeline_steps={} quotas={}",
                           connection_id,
                           request.request_id,
                           start_request.profile.revision,
                           start_request.pipeline.steps.size(),
                           start_request.auth_context.quota_buckets.size());
-        result = capture_task_service_.StartTask(start_request);
+        result = capture_task_service_.ReserveTask(start_request);
     } catch (const std::exception& e) {
-        SDK_OPEN_LOG_ERROR("[command_application] capture.take start_task failed connection={} request_id={} err={}",
+        SDK_OPEN_LOG_ERROR("[command_application] capture.take reserve_task failed connection={} request_id={} err={}",
                            connection_id,
                            request.request_id,
                            e.what());
         return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, e.what());
     } catch (...) {
-        SDK_OPEN_LOG_ERROR("[command_application] capture.take start_task failed connection={} request_id={} err=<unknown>",
+        SDK_OPEN_LOG_ERROR("[command_application] capture.take reserve_task failed connection={} request_id={} err=<unknown>",
                            connection_id,
                            request.request_id);
-        return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "capture.take start_task failed");
+        return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "capture.take reserve_task failed");
     }
+    if (!IsOkStatusCode(result.code)) {
+        Json error_data = Json::object();
+        if (result.retry_after_ms > 0) {
+            error_data["retry_after_ms"] = result.retry_after_ms;
+        }
+        return BuildWsResponse(request.request_id, result.code, result.message, error_data);
+    }
+    const AuthorizationService::SessionResult quota_result = ConsumeQuota(connection_id, request.method, request.request_id);
+    if (!IsOkStatusCode(quota_result.code)) {
+        capture_task_service_.AbortReservedTask(result.task.task_id);
+        return BuildWsResponse(request.request_id, quota_result.code, quota_result.message);
+    }
+    result = capture_task_service_.StartReservedTask(result.task.task_id);
     if (!IsOkStatusCode(result.code)) {
         return BuildWsResponse(request.request_id, result.code, result.message);
     }
@@ -4030,7 +4062,7 @@ Json CommandApplicationService::HandleCaptureGet(const std::string& connection_i
         return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "task_id required");
     }
     const CaptureTaskSnapshot task = capture_task_service_.GetTask(connection_id, task_id);
-    if (task.status.empty()) {
+    if (!IsOkStatusCode(task.code)) {
         return BuildWsResponse(request.request_id, task.code, task.message);
     }
     const Json task_json = BuildCaptureTaskJson(task);
@@ -4043,11 +4075,25 @@ Json CommandApplicationService::HandleCaptureGet(const std::string& connection_i
                                 {"code", task.code},
                                 {"message", task.message},
                                 {"device_id", task.device_id},
+                                {"capture_source", task.capture_source},
+                                {"acquisition_status", task.acquisition_status},
+                                {"processing_status", task.processing_status},
                                 {"profile_revision", task.profile_revision},
                                 {"stages", task_json.value("stages", Json::array())},
                                 {"assets", task_json.value("assets", Json::array())},
                                 {"warnings", task.warnings},
                                 {"error", task.error}});
+}
+
+Json CommandApplicationService::HandleCaptureSessionGet(const std::string& connection_id, const Request& request) {
+    const AuthorizationService::SessionResult session_result = RequireCapability(connection_id, request.method);
+    if (!IsOkStatusCode(session_result.code)) {
+        return BuildWsResponse(request.request_id, session_result.code, session_result.message);
+    }
+    return BuildWsResponse(request.request_id,
+                           SdkStatusCode::Ok,
+                           "ok",
+                           Json{{"summary", BuildCaptureSessionSummaryJson(capture_task_service_.GetSessionSummary(connection_id))}});
 }
 
 Json CommandApplicationService::HandleCaptureSetTurnDetect(const std::string& connection_id, const Request& request) {
@@ -4764,13 +4810,17 @@ Json CommandApplicationService::HandleImageApplyColorMode(const std::string& con
     output.index = 0;
     output.path = final_path;
     output.content_type = ContentTypeForImageExtension(source_output_extension);
-    output.size = FileSize(final_path);
+    output.width = color_result.width;
+    output.height = color_result.height;
+    output.size = color_result.size > 0 ? color_result.size : FileSize(final_path);
 
     SdkCaptureAsset asset;
     asset.asset_id = output.asset_id;
     asset.kind = "color_processed";
     asset.path = output.path;
     asset.content_type = output.content_type;
+    asset.width = output.width;
+    asset.height = output.height;
     asset.size = output.size;
     asset = AttachImageAssetUrls(image_task_id, asset);
     RegisterImageAsset(connection_id, image_task_id, asset);

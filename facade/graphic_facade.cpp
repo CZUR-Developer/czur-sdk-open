@@ -335,6 +335,9 @@ SdkColorModeResult GraphicFacade::ApplyColorMode(const SdkColorModeRequest& requ
     result.processed = BoolField(response, "processed");
     result.unsupported = BoolField(response, "unsupported");
     result.output_path = StringField(response, "output_path");
+    result.width = IntField(response, "width");
+    result.height = IntField(response, "height");
+    result.size = UInt64Field(response, "size");
     return result;
 #else
     if (!providers_.graphic_provider) {

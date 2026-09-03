@@ -295,6 +295,12 @@ std::unique_ptr<editor::sdk::SdkApp> CreateSdkOpenApp(const std::string& config_
     config.web_root = GetExecutableDir() + "/web";
     editor::sdk::ApplySdkEnvironmentOverrides(&config);
 
+#if defined(_WIN32)
+    if (!config.twain_work_dir.empty() && _putenv_s("CZUR_TWAIN_WORK_DIR", config.twain_work_dir.c_str()) != 0) {
+        SDK_OPEN_LOG_WARN("[sdk_open_app] failed to set CZUR_TWAIN_WORK_DIR");
+    }
+#endif
+
 #if defined(SDK_USE_PRIVATE_PROVIDER) && defined(_WIN32)
     ApplyDefaultSaneConfigDir();
     editor::sdk::ProviderBundle providers = editor::sdk::private_windows::CreateProviderBundle();

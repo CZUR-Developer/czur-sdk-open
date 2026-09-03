@@ -198,31 +198,58 @@ public:
     CStatus CaptureRaw() {
         StartStage("capture_raw");
         if (request_.raw_capture.captured) {
-            // 硬拍分支不再经过 provider 二次拍照；直接把事件携带的原始图
-            // 写入当前 task 目录，后续处理流程与普通 capture.take 保持一致。
+            // 采集阶段已完成时，处理 worker 不再二次触发设备拍照。硬拍通常
+            // 携带内存中的原图，普通拍照则可复用采集阶段返回的文件路径。
             const SdkCaptureResult& result = request_.raw_capture;
-            if (result.raw_payload.empty()) {
-                FinishStage("capture_raw", "failed", ProviderName(providers_device), "missing hardgrab original", {}, {});
-                pipeline_result_.code = ToCode(SdkStatusCode::CaptureFailed);
-                pipeline_result_.message = "missing hardgrab original";
-                pipeline_result_.status = "failed";
-                return CStatus(pipeline_result_.message);
-            }
             original_path_ = JoinPath(output_dir_, "original.jpg");
-            if (!WriteBytes(original_path_, result.raw_payload)) {
-                FinishStage("capture_raw", "failed", ProviderName(providers_device), "failed to write hardgrab original", {}, {});
-                pipeline_result_.code = ToCode(SdkStatusCode::ProviderCallFailed);
-                pipeline_result_.message = "failed to write hardgrab original";
-                pipeline_result_.status = "failed";
-                return CStatus(pipeline_result_.message);
+            if (!result.raw_payload.empty()) {
+                if (!WriteBytes(original_path_, result.raw_payload)) {
+                    FinishStage("capture_raw", "failed", ProviderName(providers_device), "failed to write captured original", {}, {});
+                    pipeline_result_.code = ToCode(SdkStatusCode::ProviderCallFailed);
+                    pipeline_result_.message = "failed to write captured original";
+                    pipeline_result_.status = "failed";
+                    return CStatus(pipeline_result_.message);
+                }
+            } else {
+                const std::string source_path = !result.original_path.empty() ? result.original_path : result.output_path;
+                if (source_path.empty()) {
+                    FinishStage("capture_raw", "failed", ProviderName(providers_device), "missing captured original", {}, {});
+                    pipeline_result_.code = ToCode(SdkStatusCode::CaptureFailed);
+                    pipeline_result_.message = "missing captured original";
+                    pipeline_result_.status = "failed";
+                    return CStatus(pipeline_result_.message);
+                }
+                if (source_path != original_path_ && !CopyFileBinary(source_path, original_path_)) {
+                    FinishStage("capture_raw", "failed", ProviderName(providers_device), "failed to stage captured original", {}, {});
+                    pipeline_result_.code = ToCode(SdkStatusCode::ProviderCallFailed);
+                    pipeline_result_.message = "failed to stage captured original";
+                    pipeline_result_.status = "failed";
+                    return CStatus(pipeline_result_.message);
+                }
+                if (source_path == original_path_ && !FileExists(original_path_)) {
+                    FinishStage("capture_raw", "failed", ProviderName(providers_device), "captured original does not exist", {}, {});
+                    pipeline_result_.code = ToCode(SdkStatusCode::CaptureFailed);
+                    pipeline_result_.message = "captured original does not exist";
+                    pipeline_result_.status = "failed";
+                    return CStatus(pipeline_result_.message);
+                }
             }
             laser_path_.clear();
             if (!result.raw_laser_payload.empty()) {
                 laser_path_ = JoinPath(output_dir_, "laser.jpg");
                 if (!WriteBytes(laser_path_, result.raw_laser_payload)) {
-                    FinishStage("capture_raw", "failed", ProviderName(providers_device), "failed to write hardgrab laser", {}, {});
+                    FinishStage("capture_raw", "failed", ProviderName(providers_device), "failed to write captured laser", {}, {});
                     pipeline_result_.code = ToCode(SdkStatusCode::ProviderCallFailed);
-                    pipeline_result_.message = "failed to write hardgrab laser";
+                    pipeline_result_.message = "failed to write captured laser";
+                    pipeline_result_.status = "failed";
+                    return CStatus(pipeline_result_.message);
+                }
+            } else if (!result.laser_path.empty()) {
+                laser_path_ = JoinPath(output_dir_, "laser.jpg");
+                if (result.laser_path != laser_path_ && !CopyFileBinary(result.laser_path, laser_path_)) {
+                    FinishStage("capture_raw", "failed", ProviderName(providers_device), "failed to stage captured laser", {}, {});
+                    pipeline_result_.code = ToCode(SdkStatusCode::ProviderCallFailed);
+                    pipeline_result_.message = "failed to stage captured laser";
                     pipeline_result_.status = "failed";
                     return CStatus(pipeline_result_.message);
                 }
@@ -241,7 +268,6 @@ public:
             FinishStage("capture_raw", "succeeded", ProviderName(providers_device), "ok", {}, {"asset-original"});
             return CStatus();
         }
-
         SdkCaptureRequest capture_request;
         capture_request.device_id = request_.device_id;
         capture_request.output_dir = output_dir_;
@@ -268,7 +294,7 @@ public:
         {
             std::unique_lock<std::mutex> lock(state->mu);
             if (!state->completed) {
-                const int timeout_ms = request_.timeout_ms > 0 ? request_.timeout_ms : 15000;
+                const int timeout_ms = request_.timeout_ms > 0 ? request_.timeout_ms : kDefaultCaptureTimeoutMs;
                 if (!state->cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [state]() { return state->completed; })) {
                     state->completed = true;
                     state->result.code = ToCode(SdkStatusCode::CaptureTimeout);

@@ -13,6 +13,8 @@
 namespace editor {
 namespace sdk {
 
+const int kDefaultCaptureTimeoutMs = 30000;
+
 struct SdkVideoResolution {
     int width = 0;
     int height = 0;
@@ -220,7 +222,7 @@ struct SdkCaptureRequest {
     std::string device_id;
     std::string output_dir;
     bool include_base64 = false;
-    int timeout_ms = 15000;
+    int timeout_ms = kDefaultCaptureTimeoutMs;
 };
 
 struct SdkPoint2f {
@@ -548,6 +550,9 @@ struct SdkColorModeResult {
     bool processed = false;
     bool unsupported = false;
     std::string output_path;
+    int width = 0;
+    int height = 0;
+    uint64_t size = 0;
 };
 
 struct SdkFormatConvertRequest {

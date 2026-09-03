@@ -128,6 +128,7 @@ private:
     Json HandleDeviceClose(const std::string& connection_id, const Request& request);
     Json HandleCaptureTake(const std::string& connection_id, const Request& request);
     Json HandleCaptureGet(const std::string& connection_id, const Request& request);
+    Json HandleCaptureSessionGet(const std::string& connection_id, const Request& request);
     Json HandleCaptureSetTurnDetect(const std::string& connection_id, const Request& request);
     Json HandleVideoStart(const std::string& connection_id, const Request& request);
     Json HandleVideoStop(const std::string& connection_id, const Request& request);

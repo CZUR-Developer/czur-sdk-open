@@ -1,0 +1,1704 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CZUR SDK HTTPS / Secure WebSocket 单页拍照 Demo</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #eef7fb;
+      --panel: rgba(255, 255, 255, 0.88);
+      --border: #d8e7ef;
+      --text: #102033;
+      --muted: #607083;
+      --primary: #0891b2;
+      --primary-dark: #0e7490;
+      --success: #059669;
+      --warning: #d97706;
+      --danger: #dc2626;
+      --code: #0f172a;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top left, rgba(34, 211, 238, 0.22), transparent 34rem),
+        linear-gradient(135deg, #f8fdff 0%, var(--bg) 46%, #f6fafc 100%);
+      color: var(--text);
+    }
+
+    main {
+      width: min(1440px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0 40px;
+    }
+
+    header.hero {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 22px;
+    }
+
+    h1, h2, h3, p { margin: 0; }
+
+    .eyebrow {
+      color: var(--primary-dark);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    h1 { font-size: clamp(30px, 4vw, 48px); line-height: 1.04; }
+    h2 { font-size: 18px; }
+    h3 { font-size: 15px; }
+
+    .hero p { max-width: 860px; color: var(--muted); line-height: 1.7; }
+
+    .grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    .layout {
+      grid-template-columns: minmax(0, 1fr) minmax(360px, 420px);
+      align-items: start;
+    }
+
+    .layout > .stack,
+    .layout > aside,
+    .panel,
+    .metric-card,
+    .result-grid,
+    .log-box {
+      min-width: 0;
+    }
+
+    .metrics {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin-bottom: 16px;
+    }
+
+    .panel, .metric-card {
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      background: var(--panel);
+      box-shadow: 0 18px 60px rgba(15, 23, 42, 0.08);
+      backdrop-filter: blur(14px);
+    }
+
+    .panel { padding: 18px; }
+    .metric-card { padding: 16px; }
+
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: start;
+      margin-bottom: 14px;
+    }
+
+    .panel-desc, .metric-detail, label small {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    .metric-value {
+      margin-top: 8px;
+      font-size: 24px;
+      font-weight: 850;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    .metric-label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .stack { display: grid; gap: 16px; }
+    .stack-sm { display: grid; gap: 10px; }
+
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    label {
+      display: grid;
+      gap: 7px;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      color: #465a6f;
+    }
+
+    input, select, textarea {
+      min-width: 0;
+      width: 100%;
+      border: 1px solid #cbdce5;
+      border-radius: 14px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+      font-size: 14px;
+      letter-spacing: normal;
+      outline: none;
+      padding: 10px 12px;
+      text-transform: none;
+    }
+
+    textarea { min-height: 80px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    input:focus, select:focus, textarea:focus { border-color: #22d3ee; box-shadow: 0 0 0 4px rgba(34, 211, 238, 0.13); }
+
+    button {
+      border: 0;
+      border-radius: 999px;
+      background: var(--primary);
+      color: white;
+      cursor: pointer;
+      font-weight: 800;
+      padding: 10px 15px;
+      transition: transform 140ms ease, background 140ms ease, opacity 140ms ease;
+    }
+
+    button:hover:not(:disabled) { background: var(--primary-dark); transform: translateY(-1px); }
+    button:disabled { cursor: not-allowed; opacity: 0.45; transform: none; }
+    button.secondary { background: #e6f3f8; color: #0e7490; }
+    button.secondary:hover:not(:disabled) { background: #d1eef7; }
+    button.danger { background: #fee2e2; color: #b91c1c; }
+    button.danger:hover:not(:disabled) { background: #fecaca; }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      border: 1px solid #d9e8ef;
+      background: #f8fbfd;
+      color: #4a6177;
+      font-size: 12px;
+      font-weight: 800;
+      padding: 6px 10px;
+    }
+
+    .pill::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #94a3b8;
+    }
+
+    .pill.success::before { background: var(--success); }
+    .pill.warning::before { background: var(--warning); }
+    .pill.danger::before { background: var(--danger); }
+    .pill.running::before { background: #0ea5e9; animation: pulse 1s infinite ease-in-out; }
+
+    @keyframes pulse { 50% { opacity: 0.35; } }
+
+    .preview-shell {
+      position: relative;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      height: 420px;
+      max-height: 55vh;
+      border: 1px solid #ccdde7;
+      border-radius: 24px;
+      background:
+        linear-gradient(45deg, rgba(15, 23, 42, 0.04) 25%, transparent 25%),
+        linear-gradient(-45deg, rgba(15, 23, 42, 0.04) 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, rgba(15, 23, 42, 0.04) 75%),
+        linear-gradient(-45deg, transparent 75%, rgba(15, 23, 42, 0.04) 75%),
+        #f8fafc;
+      background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+      background-size: 20px 20px;
+    }
+
+    canvas#videoCanvas {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    /* 不渲染时收起预览区域：只保留紧凑提示，不让空视频框占用高度。 */
+    .preview-shell.render-disabled {
+      display: none;
+    }
+
+    .compact-preview-note {
+      display: none;
+      border: 1px dashed #bad8e5;
+      border-radius: 16px;
+      background: #f8fbfd;
+      color: var(--muted);
+      padding: 12px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .compact-preview-note.visible {
+      display: block;
+    }
+
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border: 1px solid #dbeaf1;
+      border-radius: 16px;
+      background: #f8fbfd;
+      padding: 10px 12px;
+    }
+
+    .toggle-row input {
+      width: auto;
+      transform: scale(1.1);
+    }
+
+    .preview-empty {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      text-align: center;
+      color: var(--muted);
+      pointer-events: none;
+    }
+
+    .two-col { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .three-col { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+    table {
+      width: 100%;
+      table-layout: fixed;
+      border-collapse: collapse;
+      overflow: hidden;
+      border-radius: 16px;
+      font-size: 13px;
+    }
+
+    th, td {
+      border-bottom: 1px solid #e5eef4;
+      padding: 10px;
+      text-align: left;
+      vertical-align: top;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    th { background: #f4f8fb; color: #52687d; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+    tr.device-row { cursor: pointer; }
+    tr.device-row:hover, tr.device-row.selected { background: #ecfeff; }
+    code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+    .log-box {
+      max-height: 360px;
+      overflow: auto;
+      border-radius: 16px;
+      background: var(--code);
+      color: #dbeafe;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.55;
+      padding: 12px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    .result-grid { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+
+    .result-card {
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: #fff;
+    }
+
+    .result-card img {
+      display: block;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      object-fit: contain;
+      background: #f1f5f9;
+    }
+
+    .result-card .body {
+      min-width: 0;
+      padding: 12px;
+      display: grid;
+      gap: 6px;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    .notice {
+      border: 1px solid #fde68a;
+      border-radius: 16px;
+      background: #fffbeb;
+      color: #92400e;
+      padding: 12px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .hidden { display: none !important; }
+
+    @media (max-width: 980px) {
+      .layout, .metrics, .two-col, .three-col { grid-template-columns: 1fr; }
+      .preview-shell { height: 300px; max-height: 45vh; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="hero">
+      <div class="eyebrow">CZUR SDK HTTPS / Secure WebSocket Integration</div>
+      <h1>sdk-runtime.localhost WSS 拍照联调 Demo</h1>
+      <p>纯 HTML + 原生 JavaScript：固定通过 sdk-runtime.localhost 的 HTTPS / Secure WebSocket 端口连接 SDK，检测 CZUR 设备，开启视频流（可选择是否渲染到 Canvas），然后按“单页裁剪 + 自动优化”配置完成拍照并展示处理后的图片。</p>
+    </header>
+
+    <section class="grid metrics" aria-label="联调状态总览">
+      <article class="metric-card"><div class="metric-label">Command WS</div><div id="metricCommand" class="metric-value">idle</div><p id="metricCommandDetail" class="metric-detail">等待连接</p></article>
+      <article class="metric-card"><div class="metric-label">Session</div><div id="metricSession" class="metric-value">未创建</div><p id="metricSessionDetail" class="metric-detail">API Key 通过 auth.create_session 换取</p></article>
+      <article class="metric-card"><div class="metric-label">Device</div><div id="metricDevice" class="metric-value">0</div><p id="metricDeviceDetail" class="metric-detail">等待 device.list</p></article>
+      <article class="metric-card"><div class="metric-label">Video Frames</div><div id="metricFrames" class="metric-value">0 / 0</div><p id="metricFramesDetail" class="metric-detail">rendered / received</p></article>
+    </section>
+
+    <section class="grid layout">
+      <div class="stack">
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>实时视频流</h2>
+              <p id="previewDescription" class="panel-desc">完成连接、设备打开和 video.start 后，这里会渲染视频 WebSocket 收到的帧。</p>
+            </div>
+            <span id="videoStatePill" class="pill">video idle</span>
+          </div>
+          <div class="toggle-row" style="margin-bottom: 12px;">
+            <div>
+              <h3>视频预览渲染</h3>
+              <p class="panel-desc">默认不渲染视频，避免预览区域撑开页面；拍照前仍会启动视频流。</p>
+            </div>
+            <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;font-size:13px;">
+              <input id="renderVideoToggle" type="checkbox" />
+              渲染视频
+            </label>
+          </div>
+          <div id="compactPreviewNote" class="compact-preview-note visible">视频预览未渲染：页面仍会启动并接收视频流用于拍照，只是不解码绘制到页面。</div>
+          <div id="previewShell" class="preview-shell render-disabled">
+            <canvas id="videoCanvas"></canvas>
+            <div id="previewEmpty" class="preview-empty">
+              <div>
+                <h3>等待视频流</h3>
+                <p class="panel-desc">请先连接 SDK、选择设备并启动视频。</p>
+              </div>
+            </div>
+          </div>
+          <div class="row" style="margin-top: 12px;">
+            <span class="pill">received <b id="receivedCount">0</b></span>
+            <span class="pill success">rendered <b id="renderedCount">0</b></span>
+            <span class="pill warning">dropped <b id="droppedCount">0</b></span>
+            <span class="pill danger">decode failed <b id="decodeFailedCount">0</b></span>
+            <span class="pill">seq <b id="lastSeq">-</b></span>
+            <span class="pill">bytes <b id="lastBytes">-</b></span>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>拍照结果</h2>
+              <p class="panel-desc">capture.take 提交后，页面监听 capture.* 事件并轮询 capture.get，优先显示 final / final_thumbnail 等处理后图片。</p>
+            </div>
+            <div class="row">
+              <button id="clearResultsBtn" type="button" class="secondary">清空本地结果</button>
+              <button id="cleanupTempBtn" type="button" class="danger">清空 SDK 临时数据</button>
+            </div>
+          </div>
+          <div id="resultsGrid" class="grid result-grid"></div>
+          <p id="emptyResults" class="panel-desc">暂无拍照结果。</p>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>请求与事件日志</h2>
+              <p class="panel-desc">用于联调排查：会记录 request、response、runtime event、视频帧错误等关键步骤。</p>
+            </div>
+            <button id="clearLogBtn" type="button" class="secondary">清空日志</button>
+          </div>
+          <div id="logBox" class="log-box" aria-live="polite"></div>
+        </article>
+      </div>
+
+      <aside class="stack">
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>1. 连接 SDK</h2>
+              <p class="panel-desc">API Key 不写入源码；粘贴后保存到本机 localStorage 便于重复联调。</p>
+            </div>
+            <span id="commandStatePill" class="pill">idle</span>
+          </div>
+          <div class="stack-sm">
+            <label>API Key
+              <textarea id="apiKeyInput" placeholder="粘贴 sk-... API Key"></textarea>
+              <small>安全提示：密钥只保存在当前浏览器 localStorage，不会硬编码到 HTML。</small>
+            </label>
+            <div class="grid two-col">
+              <label>Command Endpoint<input id="commandEndpoint" class="mono" /></label>
+              <label>Video Endpoint<input id="videoEndpoint" class="mono" /></label>
+            </div>
+            <div class="row">
+              <button id="connectBtn" type="button">连接 SDK</button>
+              <button id="disconnectBtn" type="button" class="secondary">断开</button>
+              <button id="clearKeyBtn" type="button" class="danger">清除 Key</button>
+            </div>
+            <div class="notice">联调步骤：启动本机 SDK runtime → 粘贴 API Key → 连接 SDK → device.list → device.open → video.start → capture.take。</div>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>2. CZUR 设备检测</h2>
+              <p class="panel-desc">通过 device.list/device.get/device.open 检测并打开设备。</p>
+            </div>
+            <span id="deviceStatePill" class="pill">idle</span>
+          </div>
+          <div class="stack-sm">
+            <div class="row">
+              <button id="loadDevicesBtn" type="button" class="secondary">device.list</button>
+              <button id="openDeviceBtn" type="button" class="secondary">device.open</button>
+              <button id="closeDeviceBtn" type="button" class="secondary">device.close</button>
+            </div>
+            <label>设备列表
+              <select id="deviceSelect"><option value="">未检测到设备</option></select>
+            </label>
+            <label>预览分辨率
+              <select id="resolutionSelect"><option value="">自动 / 等待 device.get</option></select>
+              <small id="resolutionHint">支持 image_transfer_protocol 的设备会优先锁定 1536x1152@15。</small>
+            </label>
+            <div style="overflow:auto; max-height: 220px; border: 1px solid #e5eef4; border-radius: 16px;">
+              <table>
+                <thead><tr><th>device_id</th><th>model</th><th>status</th></tr></thead>
+                <tbody id="deviceTableBody"><tr><td colspan="3">暂无设备</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>3. 视频与拍照</h2>
+              <p class="panel-desc">拍照模式固定为单页裁剪，色彩模式固定为自动优化。</p>
+            </div>
+            <span id="captureStatePill" class="pill">idle</span>
+          </div>
+          <div class="stack-sm">
+            <div class="grid two-col">
+              <label>拍照模式<input value="single_page（单页裁剪）" readonly /></label>
+              <label>色彩模式<input value="auto_optimize（自动优化）" readonly /></label>
+            </div>
+            <div class="grid two-col">
+              <label>输出格式
+                <select id="outputFormatSelect"><option value="jpg">jpg</option><option value="png">png</option><option value="tiff">tiff</option></select>
+              </label>
+              <label>超时 ms<input id="captureTimeoutInput" type="number" min="3000" value="20000" /></label>
+            </div>
+            <div class="grid two-col">
+              <label>JPEG 质量
+                <input id="outputQualityInput" type="number" min="1" max="100" placeholder="留空则使用 SDK 默认值" />
+                <small>仅输出格式为 jpg 时写入 output.quality，合法范围 1-100。</small>
+              </label>
+              <label>输出大小
+                <select id="outputTargetSizeSelect"><option value="">不设置 / 等待 device.open</option></select>
+                <small id="outputTargetSizeHint">device.open 后，如设备支持，会列出 capture_output.target_sizes。</small>
+              </label>
+            </div>
+            <div class="row">
+              <button id="startVideoBtn" type="button">video.start</button>
+              <button id="stopVideoBtn" type="button" class="secondary">video.stop</button>
+              <button id="captureBtn" type="button">capture.take</button>
+            </div>
+            <label>当前 capture profile
+              <textarea id="profilePreview" readonly></textarea>
+            </label>
+          </div>
+        </article>
+      </aside>
+    </section>
+  </main>
+
+  <script>
+    'use strict';
+
+    // ===== 常量与页面状态 =====
+    // 明文页面使用 17090/17091/17082；HTTPS 页面使用 18090/18091/18082。
+    const STORAGE_KEYS = {
+      apiKey: 'czur-sdk-single-html-api-key',
+    };
+
+    const state = {
+      commandSocket: null,
+      commandConnected: false,
+      pendingRequests: new Map(),
+      sessionToken: '',
+      sessionExpiresIn: 0,
+      authContext: null,
+      devices: [],
+      selectedDeviceId: '',
+      resolutions: [],
+      selectedResolutionKey: '',
+      opened: false,
+      streamId: '',
+      streamSessionToken: '',
+      videoSocket: null,
+      frameMeta: null,
+      pendingFrame: null,
+      decodingFrame: false,
+      nextSyntheticFrameSeq: 1,
+      lastRenderedSeq: 0,
+      receivedFrameCount: 0,
+      renderedFrameCount: 0,
+      skippedRenderCount: 0,
+      droppedFrameCount: 0,
+      decodeFailedCount: 0,
+      lastFrameBytes: 0,
+      activeCaptureTasks: new Set(),
+      captureResults: [],
+      captureOutput: { target_size_supported: false, target_sizes: [] },
+      selectedOutputTargetSize: '',
+      cleanupTempRunning: false,
+      requestCounter: 0,
+      traceCounter: 0,
+      logs: [],
+      renderVideoPreview: false,
+    };
+
+    const els = {
+      apiKeyInput: document.getElementById('apiKeyInput'),
+      commandEndpoint: document.getElementById('commandEndpoint'),
+      videoEndpoint: document.getElementById('videoEndpoint'),
+      connectBtn: document.getElementById('connectBtn'),
+      disconnectBtn: document.getElementById('disconnectBtn'),
+      clearKeyBtn: document.getElementById('clearKeyBtn'),
+      loadDevicesBtn: document.getElementById('loadDevicesBtn'),
+      openDeviceBtn: document.getElementById('openDeviceBtn'),
+      closeDeviceBtn: document.getElementById('closeDeviceBtn'),
+      startVideoBtn: document.getElementById('startVideoBtn'),
+      renderVideoToggle: document.getElementById('renderVideoToggle'),
+      stopVideoBtn: document.getElementById('stopVideoBtn'),
+      captureBtn: document.getElementById('captureBtn'),
+      clearResultsBtn: document.getElementById('clearResultsBtn'),
+      cleanupTempBtn: document.getElementById('cleanupTempBtn'),
+      clearLogBtn: document.getElementById('clearLogBtn'),
+      deviceSelect: document.getElementById('deviceSelect'),
+      resolutionSelect: document.getElementById('resolutionSelect'),
+      outputFormatSelect: document.getElementById('outputFormatSelect'),
+      outputQualityInput: document.getElementById('outputQualityInput'),
+      outputTargetSizeSelect: document.getElementById('outputTargetSizeSelect'),
+      outputTargetSizeHint: document.getElementById('outputTargetSizeHint'),
+      captureTimeoutInput: document.getElementById('captureTimeoutInput'),
+      profilePreview: document.getElementById('profilePreview'),
+      previewShell: document.getElementById('previewShell'),
+      compactPreviewNote: document.getElementById('compactPreviewNote'),
+      deviceTableBody: document.getElementById('deviceTableBody'),
+      logBox: document.getElementById('logBox'),
+      videoCanvas: document.getElementById('videoCanvas'),
+      previewEmpty: document.getElementById('previewEmpty'),
+      previewDescription: document.getElementById('previewDescription'),
+      resultsGrid: document.getElementById('resultsGrid'),
+      emptyResults: document.getElementById('emptyResults'),
+      commandStatePill: document.getElementById('commandStatePill'),
+      deviceStatePill: document.getElementById('deviceStatePill'),
+      videoStatePill: document.getElementById('videoStatePill'),
+      captureStatePill: document.getElementById('captureStatePill'),
+      metricCommand: document.getElementById('metricCommand'),
+      metricCommandDetail: document.getElementById('metricCommandDetail'),
+      metricSession: document.getElementById('metricSession'),
+      metricSessionDetail: document.getElementById('metricSessionDetail'),
+      metricDevice: document.getElementById('metricDevice'),
+      metricDeviceDetail: document.getElementById('metricDeviceDetail'),
+      metricFrames: document.getElementById('metricFrames'),
+      metricFramesDetail: document.getElementById('metricFramesDetail'),
+      receivedCount: document.getElementById('receivedCount'),
+      renderedCount: document.getElementById('renderedCount'),
+      droppedCount: document.getElementById('droppedCount'),
+      decodeFailedCount: document.getElementById('decodeFailedCount'),
+      lastSeq: document.getElementById('lastSeq'),
+      lastBytes: document.getElementById('lastBytes'),
+    };
+
+    const videoContext = els.videoCanvas.getContext('2d');
+
+    // ===== endpoint 与协议包构造 =====
+    const RUNTIME_ENDPOINTS = Object.freeze({
+      command: 'wss://sdk-runtime.localhost:18090',
+      video: 'wss://sdk-runtime.localhost:18091',
+      asset: 'https://sdk-runtime.localhost:18082',
+    });
+
+    function commandWsUrl() {
+      return RUNTIME_ENDPOINTS.command;
+    }
+
+    function videoWsUrl(sessionToken, streamId) {
+      const params = new URLSearchParams({ session_token: sessionToken, stream_id: streamId });
+      return `${RUNTIME_ENDPOINTS.video}?${params.toString()}`;
+    }
+
+    function assetHttpUrl(path) {
+      if (!path) return '';
+      if (/^https?:\/\//i.test(path)) return path;
+      return `${RUNTIME_ENDPOINTS.asset}${path.startsWith('/') ? path : `/${path}`}`;
+    }
+
+    function nextId(prefix, counterName) {
+      state[counterName] += 1;
+      return `${prefix}-${Date.now().toString(36)}-${state[counterName].toString(36)}`;
+    }
+
+    function buildCommandRequest(method, params = {}) {
+      return {
+        request_id: nextId(method.replace(/[^a-z0-9]+/gi, '-').toLowerCase(), 'requestCounter'),
+        method,
+        params,
+        client: {
+          source: 'single-html-sdk-demo',
+          protocol_version: '2.0.0',
+          trace_id: nextId('trc-single-html', 'traceCounter'),
+        },
+      };
+    }
+
+    // ===== 日志和 UI 状态 =====
+    function log(title, payload, tone = 'info') {
+      const time = new Date().toLocaleTimeString();
+      const line = `[${time}] ${title}${payload === undefined ? '' : `\n${safeStringify(payload)}`}`;
+      state.logs.unshift({ line, tone });
+      state.logs = state.logs.slice(0, 160);
+      els.logBox.textContent = state.logs.map((item) => item.line).join('\n\n');
+      console[tone === 'error' ? 'error' : tone === 'warn' ? 'warn' : 'info'](`[CZUR demo] ${title}`, payload ?? '');
+    }
+
+    function safeStringify(value) {
+      try {
+        return JSON.stringify(value, null, 2);
+      } catch {
+        return String(value);
+      }
+    }
+
+    function maskSecret(value) {
+      if (!value) return '未创建';
+      if (value.length <= 16) return value;
+      return `${value.slice(0, 8)}...${value.slice(-8)}`;
+    }
+
+    function setPill(el, label, tone) {
+      el.textContent = label;
+      el.className = `pill ${tone || ''}`.trim();
+    }
+
+    function refreshUi() {
+      const commandTone = state.commandConnected ? 'success' : 'warning';
+      setPill(els.commandStatePill, state.commandConnected ? 'connected' : 'idle', commandTone);
+      setPill(els.deviceStatePill, state.opened ? 'opened' : state.selectedDeviceId ? 'selected' : 'idle', state.opened ? 'success' : '');
+      setPill(els.videoStatePill, state.streamId && state.videoSocket ? 'video running' : 'video idle', state.streamId ? 'success' : '');
+      setPill(els.captureStatePill, state.activeCaptureTasks.size ? 'capturing' : 'idle', state.activeCaptureTasks.size ? 'running' : '');
+
+      els.metricCommand.textContent = state.commandConnected ? 'connected' : 'idle';
+      els.metricCommandDetail.textContent = commandWsUrl();
+      els.metricSession.textContent = state.sessionToken ? 'ready' : '未创建';
+      els.metricSessionDetail.textContent = state.sessionToken ? `${maskSecret(state.sessionToken)} · ttl=${state.sessionExpiresIn || '-'}s` : '等待 auth.create_session';
+      els.metricDevice.textContent = String(state.devices.length);
+      els.metricDeviceDetail.textContent = state.selectedDeviceId || '等待 CZUR 设备';
+      els.metricFrames.textContent = `${state.renderedFrameCount} / ${state.receivedFrameCount}`;
+      els.metricFramesDetail.textContent = `skipped=${state.skippedRenderCount}, dropped=${state.droppedFrameCount}, decodeFailed=${state.decodeFailedCount}`;
+
+      els.receivedCount.textContent = state.receivedFrameCount;
+      els.renderedCount.textContent = state.renderedFrameCount;
+      els.droppedCount.textContent = state.droppedFrameCount;
+      els.decodeFailedCount.textContent = state.decodeFailedCount;
+      els.lastSeq.textContent = state.lastRenderedSeq || '-';
+      els.lastBytes.textContent = state.lastFrameBytes || '-';
+      els.previewShell.classList.toggle('render-disabled', !state.renderVideoPreview);
+      els.compactPreviewNote.classList.toggle('visible', !state.renderVideoPreview);
+      els.previewEmpty.classList.toggle('hidden', state.renderVideoPreview && state.renderedFrameCount > 0);
+      els.videoCanvas.classList.toggle('hidden', !state.renderVideoPreview);
+      els.renderVideoToggle.checked = state.renderVideoPreview;
+      els.previewDescription.textContent = state.streamId
+        ? (state.renderVideoPreview ? `正在接收并渲染 stream_id=${state.streamId}` : `正在接收 stream_id=${state.streamId}，当前不渲染视频预览`)
+        : '完成连接、设备打开和 video.start 后，可选择是否把视频帧渲染到页面。';
+
+      els.connectBtn.disabled = state.commandConnected;
+      els.disconnectBtn.disabled = !state.commandConnected;
+      els.loadDevicesBtn.disabled = !state.sessionToken;
+      els.openDeviceBtn.disabled = !state.selectedDeviceId || state.opened;
+      els.closeDeviceBtn.disabled = !state.selectedDeviceId || (!state.opened && !state.streamId);
+      els.startVideoBtn.disabled = !state.selectedDeviceId || !state.opened || Boolean(state.streamId);
+      els.stopVideoBtn.disabled = !state.streamId;
+      els.captureBtn.disabled = !state.selectedDeviceId || !state.opened || !state.streamId || !state.videoSocket;
+      els.outputQualityInput.disabled = els.outputFormatSelect.value !== 'jpg';
+      els.outputTargetSizeSelect.disabled = !targetSizeSupported();
+      els.outputTargetSizeHint.textContent = targetSizeSupported()
+        ? `当前设备支持 ${state.captureOutput.target_sizes.length} 个输出大小档位。`
+        : (state.opened ? '当前设备未声明 capture_output.target_sizes，target_size 不会写入 profile。' : 'device.open 后，如设备支持，会列出 capture_output.target_sizes。');
+      els.cleanupTempBtn.disabled = !state.commandConnected || !state.sessionToken || state.activeCaptureTasks.size > 0 || state.cleanupTempRunning;
+
+      els.commandEndpoint.value = commandWsUrl();
+      els.videoEndpoint.value = RUNTIME_ENDPOINTS.video;
+      els.profilePreview.value = safeStringify(buildCaptureProfile());
+      renderDeviceTable();
+      renderDeviceOptions();
+      renderResolutionOptions();
+      renderOutputTargetSizeOptions();
+      renderResults();
+    }
+
+    function renderDeviceTable() {
+      if (!state.devices.length) {
+        els.deviceTableBody.innerHTML = '<tr><td colspan="3">暂无设备</td></tr>';
+        return;
+      }
+      els.deviceTableBody.innerHTML = state.devices.map((device) => {
+        const id = escapeHtml(device.device_id || `${device.vid || 0}:${device.pid || 0}`);
+        const model = escapeHtml(device.model || device.display_name || '-');
+        const status = escapeHtml(device.status || '-');
+        const selected = device.device_id === state.selectedDeviceId ? ' selected' : '';
+        return `<tr class="device-row${selected}" data-device-id="${id}"><td><code>${id}</code></td><td>${model}</td><td>${status}</td></tr>`;
+      }).join('');
+      for (const row of els.deviceTableBody.querySelectorAll('tr[data-device-id]')) {
+        row.addEventListener('click', () => selectDevice(row.getAttribute('data-device-id')));
+      }
+    }
+
+    function renderDeviceOptions() {
+      if (!state.devices.length) {
+        els.deviceSelect.innerHTML = '<option value="">未检测到设备</option>';
+        return;
+      }
+      els.deviceSelect.innerHTML = state.devices.map((device) => {
+        const id = device.device_id || '';
+        const label = `${id || '-'} ${device.model ? `· ${device.model}` : ''} ${device.status ? `· ${device.status}` : ''}`;
+        return `<option value="${escapeHtml(id)}" ${id === state.selectedDeviceId ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+      }).join('');
+    }
+
+    function renderResolutionOptions() {
+      if (!state.resolutions.length) {
+        els.resolutionSelect.innerHTML = '<option value="">自动 / 等待 device.get</option>';
+        return;
+      }
+      els.resolutionSelect.innerHTML = state.resolutions.map((resolution) => {
+        const key = resolutionKey(resolution);
+        return `<option value="${escapeHtml(key)}" ${key === state.selectedResolutionKey ? 'selected' : ''}>${resolution.width} x ${resolution.height} @ ${resolution.fps} fps</option>`;
+      }).join('');
+    }
+
+    function renderOutputTargetSizeOptions() {
+      const options = ['<option value="">不设置 / 使用 SDK 默认输出大小</option>'];
+      if (targetSizeSupported()) {
+        for (const option of state.captureOutput.target_sizes) {
+          const value = String(option.target_size);
+          const suffix = option.is_device_default ? '（设备默认）' : '';
+          options.push(`<option value="${escapeHtml(value)}" ${value === state.selectedOutputTargetSize ? 'selected' : ''}>${escapeHtml(value)} · ${option.width} x ${option.height}${suffix}</option>`);
+        }
+      }
+      els.outputTargetSizeSelect.innerHTML = options.join('');
+    }
+
+    function renderResults() {
+      els.emptyResults.classList.toggle('hidden', state.captureResults.length > 0);
+      els.clearResultsBtn.disabled = state.captureResults.length === 0;
+      els.resultsGrid.innerHTML = state.captureResults.map((result) => {
+        const image = result.objectUrl
+          ? `<img src="${result.objectUrl}" alt="${escapeHtml(result.filename)}" />`
+          : `<div style="aspect-ratio:4/3;display:grid;place-items:center;background:#f1f5f9;color:#64748b;padding:16px;text-align:center;">${escapeHtml(result.status || '等待图片')}</div>`;
+        return `<article class="result-card">
+          ${image}
+          <div class="body">
+            <strong>${escapeHtml(result.filename || result.id)}</strong>
+            <span class="panel-desc">${escapeHtml(result.assetKind || '-')} · ${escapeHtml(result.status || '-')}</span>
+            ${result.error ? `<span class="panel-desc" style="color: var(--danger);">${escapeHtml(result.error)}</span>` : ''}
+          </div>
+        </article>`;
+      }).join('');
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
+    }
+
+    // ===== 1. 连接 SDK 并创建 session =====
+    async function connectSdk() {
+      const apiKey = els.apiKeyInput.value.trim();
+      if (!apiKey) {
+        log('API Key 为空：请先粘贴联调用 key。', undefined, 'warn');
+        return;
+      }
+      localStorage.setItem(STORAGE_KEYS.apiKey, apiKey);
+      disconnectCommand('reconnect');
+      resetSessionAndBusinessState();
+
+      log('command.connecting', { endpoint: commandWsUrl() });
+      const socket = new WebSocket(commandWsUrl());
+      state.commandSocket = socket;
+
+      await new Promise((resolve, reject) => {
+        let settled = false;
+        socket.addEventListener('open', () => {
+          settled = true;
+          state.commandConnected = true;
+          log('command.connected', { endpoint: commandWsUrl() });
+          resolve();
+        });
+        socket.addEventListener('message', (event) => handleCommandMessage(event.data));
+        socket.addEventListener('error', () => {
+          if (!settled) reject(new Error('websocket connect failed'));
+          log('command.websocket_error', undefined, 'error');
+        });
+        socket.addEventListener('close', (event) => {
+          state.commandConnected = false;
+          if (state.commandSocket === socket) state.commandSocket = null;
+          rejectPendingRequests(new Error(event.reason || 'websocket closed'));
+          if (!settled) reject(new Error(event.reason || `websocket closed: ${event.code}`));
+          log('command.closed', { code: event.code, reason: event.reason || '' }, event.code === 1000 ? 'info' : 'warn');
+          refreshUi();
+        });
+      });
+
+      // 步骤 A：先用 system.ping 确认 command lane 可用。
+      const ping = await sendCommand('system.ping');
+      if (ping.code !== 0 || !ping.data || ping.data.pong !== true) {
+        throw new Error(ping.message || 'system.ping failed');
+      }
+      log('system.ping ok', ping.data);
+
+      // 步骤 B：使用 API Key 创建绑定 session，后续 device/capture/video 都依赖 session。
+      const session = await sendCommand('auth.create_session', { token: apiKey });
+      if (session.code !== 0) {
+        throw new Error(session.message || 'auth.create_session failed');
+      }
+      state.sessionToken = asString(session.data && session.data.session_token);
+      state.sessionExpiresIn = asNumber(session.data && session.data.expires_in);
+      state.authContext = session.data && session.data.auth_context ? session.data.auth_context : null;
+      if (!state.sessionToken) throw new Error('auth.create_session response missing session_token');
+      log('auth.session_created', { session_token: maskSecret(state.sessionToken), expires_in: state.sessionExpiresIn });
+
+      // 步骤 C：连接成功后自动做一次设备检测。
+      await loadDevices();
+    }
+
+    function disconnectCommand(reason = 'manual disconnect') {
+      closeVideoSocket();
+      if (state.commandSocket && state.commandSocket.readyState < WebSocket.CLOSING) {
+        state.commandSocket.close(1000, reason);
+      }
+      state.commandSocket = null;
+      state.commandConnected = false;
+      rejectPendingRequests(new Error(reason));
+      refreshUi();
+    }
+
+    function resetSessionAndBusinessState() {
+      state.sessionToken = '';
+      state.sessionExpiresIn = 0;
+      state.authContext = null;
+      state.devices = [];
+      state.selectedDeviceId = '';
+      state.resolutions = [];
+      state.selectedResolutionKey = '';
+      state.opened = false;
+      resetCaptureOutputState();
+      resetVideoState();
+    }
+
+    function handleCommandMessage(data) {
+      if (typeof data !== 'string') return;
+      let payload;
+      try { payload = JSON.parse(data); } catch { return; }
+
+      // SDK 主动事件，例如 capture.completed / device.online / stream.*。
+      if (payload && typeof payload.event === 'string') {
+        log(`event.${payload.event}`, payload);
+        handleRuntimeEvent(payload);
+        return;
+      }
+
+      const requestId = payload && typeof payload.request_id === 'string' ? payload.request_id : '';
+      const pending = state.pendingRequests.get(requestId);
+      if (!pending) return;
+      state.pendingRequests.delete(requestId);
+      pending.resolve(payload);
+    }
+
+    function sendCommand(method, params = {}) {
+      if (!state.commandSocket || state.commandSocket.readyState !== WebSocket.OPEN) {
+        return Promise.reject(new Error('command channel not connected'));
+      }
+      const request = buildCommandRequest(method, params);
+      log(`request.${method}`, request);
+      return new Promise((resolve, reject) => {
+        const timeout = window.setTimeout(() => {
+          state.pendingRequests.delete(request.request_id);
+          reject(new Error(`${method} timeout`));
+        }, 30000);
+        state.pendingRequests.set(request.request_id, {
+          resolve: (response) => {
+            window.clearTimeout(timeout);
+            log(`response.${method}`, response, response.code === 0 ? 'info' : 'warn');
+            resolve(response);
+          },
+          reject: (error) => {
+            window.clearTimeout(timeout);
+            reject(error);
+          },
+        });
+        state.commandSocket.send(JSON.stringify(request));
+      });
+    }
+
+    function rejectPendingRequests(error) {
+      for (const pending of state.pendingRequests.values()) pending.reject(error);
+      state.pendingRequests.clear();
+    }
+
+    function handleRuntimeEvent(event) {
+      if (event.event && event.event.startsWith('capture.')) {
+        const task = asTaskPayload(event.payload);
+        if (task.task_id && state.activeCaptureTasks.has(task.task_id)) {
+          void applyCaptureTask(task);
+          if (isTerminalStatus(task.status) || event.event === 'capture.completed' || event.event === 'capture.failed') {
+            state.activeCaptureTasks.delete(task.task_id);
+          }
+        }
+      }
+    }
+
+    // ===== 2. CZUR 设备检测与打开 =====
+    async function loadDevices() {
+      ensureSession();
+      const response = await sendCommand('device.list');
+      if (response.code !== 0) throw new Error(response.message || 'device.list failed');
+      state.devices = Array.isArray(response.data && response.data.devices) ? response.data.devices : [];
+      log('device.inventory_loaded', { count: response.data && response.data.count, devices: state.devices });
+      const preferred = state.devices.find((device) => device.status === 'online' && device.device_id) || state.devices.find((device) => device.device_id);
+      if (preferred && !state.selectedDeviceId) {
+        await selectDevice(preferred.device_id);
+      }
+      refreshUi();
+    }
+
+    async function selectDevice(deviceId) {
+      if (!deviceId || deviceId === state.selectedDeviceId) {
+        state.selectedDeviceId = deviceId || '';
+        refreshUi();
+        return;
+      }
+      if (state.streamId || state.opened) {
+        await closeDevice();
+      }
+      state.selectedDeviceId = deviceId;
+      state.resolutions = [];
+      state.selectedResolutionKey = '';
+      resetCaptureOutputState();
+      state.opened = false;
+      await loadDeviceDetail();
+      refreshUi();
+    }
+
+    async function loadDeviceDetail() {
+      if (!state.selectedDeviceId) return;
+      const response = await sendCommand('device.get', { device_id: state.selectedDeviceId });
+      if (response.code !== 0) throw new Error(response.message || 'device.get failed');
+      state.resolutions = asResolutions(response.data && response.data.resolutions);
+      const features = response.data && response.data.features && typeof response.data.features === 'object' ? response.data.features : {};
+      if (features.image_transfer_protocol) {
+        const captureResolution = ensureCaptureResolution();
+        state.selectedResolutionKey = resolutionKey(captureResolution);
+      } else {
+        const defaultResolution = state.resolutions.find((item) => item.is_default) || state.resolutions[0];
+        state.selectedResolutionKey = defaultResolution ? resolutionKey(defaultResolution) : '';
+      }
+      log('device.detail_loaded', { device_id: state.selectedDeviceId, resolutions: state.resolutions, features });
+    }
+
+    async function openDevice() {
+      ensureSession();
+      if (!state.selectedDeviceId) throw new Error('no device selected');
+      if (!state.resolutions.length) await loadDeviceDetail();
+      const resolution = selectedResolution();
+      if (!resolution) throw new Error('no resolution selected');
+      const response = await sendCommand('device.open', buildVideoParams(resolution));
+      if (response.code !== 0) throw new Error(response.message || 'device.open failed');
+      state.opened = Boolean(response.data && response.data.opened) || response.code === 0;
+      state.captureOutput = asCaptureOutputCapabilities(response.data && response.data.capture_output);
+      state.selectedOutputTargetSize = '';
+      log('device.opened', { device_id: state.selectedDeviceId, resolution, opened: state.opened, capture_output: state.captureOutput });
+      refreshUi();
+    }
+
+    async function closeDevice() {
+      closeVideoSocket();
+      if (!state.selectedDeviceId) return;
+      if (state.opened || state.streamId) {
+        const response = await sendCommand('device.close', { device_id: state.selectedDeviceId });
+        if (response.code !== 0) throw new Error(response.message || 'device.close failed');
+        log('device.closed', { device_id: state.selectedDeviceId });
+      }
+      state.opened = false;
+      resetCaptureOutputState();
+      resetVideoState();
+      refreshUi();
+    }
+
+    // ===== 3. 开启视频流，并将二进制帧渲染到 canvas =====
+    async function startVideo() {
+      ensureSession();
+      if (!state.selectedDeviceId || !state.opened) throw new Error('device must be opened before video.start');
+      const resolution = selectedResolution();
+      if (!resolution) throw new Error('no resolution selected');
+      closeVideoSocket();
+      resetVideoState(false);
+      const response = await sendCommand('video.start', {
+        ...buildVideoParams(resolution),
+        profile: buildCaptureProfile(),
+      });
+      if (response.code !== 0) throw new Error(response.message || 'video.start failed');
+      state.streamId = asString(response.data && response.data.stream_id);
+      state.streamSessionToken = asString(response.data && response.data.session_token) || state.sessionToken;
+      if (!state.streamId || !state.streamSessionToken) throw new Error('video.start response missing stream_id/session_token');
+      connectVideoSocket();
+      log('video.started', { stream_id: state.streamId, session_token: maskSecret(state.streamSessionToken) });
+      refreshUi();
+    }
+
+    async function stopVideo() {
+      closeVideoSocket();
+      if (!state.selectedDeviceId || !state.streamId) {
+        resetVideoState();
+        refreshUi();
+        return;
+      }
+      const response = await sendCommand('video.stop', { device_id: state.selectedDeviceId });
+      if (response.code !== 0) throw new Error(response.message || 'video.stop failed');
+      log('video.stopped', response.data);
+      resetVideoState();
+      refreshUi();
+    }
+
+    function connectVideoSocket() {
+      const socket = new WebSocket(videoWsUrl(state.streamSessionToken, state.streamId));
+      socket.binaryType = 'arraybuffer';
+      state.videoSocket = socket;
+      socket.addEventListener('open', () => {
+        log('video.ws_connected', { stream_id: state.streamId });
+        refreshUi();
+      });
+      socket.addEventListener('message', (event) => {
+        if (typeof event.data === 'string') {
+          handleVideoText(event.data);
+        } else {
+          handleVideoBinary(event.data);
+        }
+      });
+      socket.addEventListener('close', (event) => {
+        if (state.videoSocket === socket) state.videoSocket = null;
+        log('video.ws_closed', { code: event.code, reason: event.reason || '' }, event.code === 1000 ? 'info' : 'warn');
+        refreshUi();
+      });
+      socket.addEventListener('error', () => {
+        log('video.ws_error', undefined, 'error');
+        refreshUi();
+      });
+    }
+
+    function closeVideoSocket() {
+      if (state.videoSocket && state.videoSocket.readyState < WebSocket.CLOSING) {
+        state.videoSocket.close(1000, 'manual close');
+      }
+      state.videoSocket = null;
+    }
+
+    function resetVideoState(clearCanvas = true) {
+      closeVideoSocket();
+      state.streamId = '';
+      state.streamSessionToken = '';
+      state.frameMeta = null;
+      state.pendingFrame = null;
+      state.decodingFrame = false;
+      state.nextSyntheticFrameSeq = 1;
+      state.lastRenderedSeq = 0;
+      state.receivedFrameCount = 0;
+      state.renderedFrameCount = 0;
+      state.droppedFrameCount = 0;
+      state.decodeFailedCount = 0;
+      state.skippedRenderCount = 0;
+      state.lastFrameBytes = 0;
+      if (clearCanvas && videoContext) videoContext.clearRect(0, 0, els.videoCanvas.width, els.videoCanvas.height);
+    }
+
+    function handleVideoText(payload) {
+      try {
+        const event = JSON.parse(payload);
+        if (event.event === 'stream.frame_meta' && event.payload) {
+          state.frameMeta = event.payload;
+        }
+      } catch {
+        // 视频通道可能发送非 JSON 控制文本，联调页面直接忽略。
+      }
+    }
+
+    function handleVideoBinary(data) {
+      if (data instanceof Blob) {
+        data.arrayBuffer().then(enqueueVideoFrame).catch((error) => log('video.blob_decode_failed', error.message, 'error'));
+        return;
+      }
+      enqueueVideoFrame(data);
+    }
+
+    function enqueueVideoFrame(buffer) {
+      state.receivedFrameCount += 1;
+      state.lastFrameBytes = buffer.byteLength;
+      if (!state.streamId || !buffer.byteLength) {
+        state.droppedFrameCount += 1;
+        refreshUi();
+        return;
+      }
+
+      const meta = state.frameMeta || {};
+      const frameStreamId = meta.stream_id || state.streamId;
+      if (frameStreamId !== state.streamId) {
+        state.droppedFrameCount += 1;
+        refreshUi();
+        return;
+      }
+
+      const frameSeq = Number.isFinite(meta.frame_seq) ? meta.frame_seq : state.nextSyntheticFrameSeq++;
+      if (frameSeq <= state.lastRenderedSeq) {
+        state.droppedFrameCount += 1;
+        refreshUi();
+        return;
+      }
+
+      if (!state.renderVideoPreview) {
+        // 用户场景可不渲染视频：仍接收视频流以满足拍照前置条件，但跳过解码绘制，避免撑开页面和消耗 CPU。
+        state.skippedRenderCount += 1;
+        refreshUi();
+        return;
+      }
+
+      const pixelFormat = normalizePixelFormat(meta.pixel_format);
+      const width = Number.isFinite(meta.width) ? meta.width : 0;
+      const height = Number.isFinite(meta.height) ? meta.height : 0;
+      state.pendingFrame = { streamId: frameStreamId, frameSeq, meta, width, height, pixelFormat, buffer: buffer.slice(0) };
+      processPendingFrame();
+      refreshUi();
+    }
+
+    function processPendingFrame() {
+      if (state.decodingFrame || !state.pendingFrame) return;
+      const frame = state.pendingFrame;
+      state.pendingFrame = null;
+      state.decodingFrame = true;
+      requestAnimationFrame(() => {
+        drawVideoFrame(frame)
+          .then((rendered) => {
+            if (!rendered) {
+              state.decodeFailedCount += 1;
+              state.droppedFrameCount += 1;
+              return;
+            }
+            state.lastRenderedSeq = frame.frameSeq;
+            state.renderedFrameCount += 1;
+          })
+          .catch((error) => {
+            state.decodeFailedCount += 1;
+            state.droppedFrameCount += 1;
+            log('video.frame_decode_failed', error.message || String(error), 'warn');
+          })
+          .finally(() => {
+            state.decodingFrame = false;
+            refreshUi();
+            processPendingFrame();
+          });
+      });
+    }
+
+    async function drawVideoFrame(frame) {
+      if (frame.pixelFormat === 'bgr24') {
+        return drawBgrFrame(frame.buffer, frame.width, frame.height);
+      }
+      return drawJpegFrame(frame.buffer, frame.meta);
+    }
+
+    function drawBgrFrame(buffer, width, height) {
+      const expectedBytes = width * height * 3;
+      if (!videoContext || width <= 0 || height <= 0 || buffer.byteLength < expectedBytes) return false;
+      if (els.videoCanvas.width !== width || els.videoCanvas.height !== height) {
+        els.videoCanvas.width = width;
+        els.videoCanvas.height = height;
+      }
+      const bgr = new Uint8Array(buffer, 0, expectedBytes);
+      const imageData = videoContext.createImageData(width, height);
+      const rgba = imageData.data;
+      for (let source = 0, target = 0; source < expectedBytes; source += 3, target += 4) {
+        rgba[target] = bgr[source + 2];
+        rgba[target + 1] = bgr[source + 1];
+        rgba[target + 2] = bgr[source];
+        rgba[target + 3] = 255;
+      }
+      videoContext.putImageData(imageData, 0, 0);
+      return true;
+    }
+
+    async function drawJpegFrame(buffer, meta) {
+      if (!videoContext || !buffer.byteLength) return false;
+      const blob = new Blob([buffer], { type: 'image/jpeg' });
+      if ('createImageBitmap' in window) {
+        const bitmap = await createImageBitmap(blob);
+        drawDecodedImage(bitmap, bitmap.width, bitmap.height, meta);
+        bitmap.close();
+        return true;
+      }
+      const image = await loadImage(blob);
+      drawDecodedImage(image, image.naturalWidth, image.naturalHeight, meta);
+      return true;
+    }
+
+    function drawDecodedImage(image, naturalWidth, naturalHeight, meta) {
+      const width = Number.isFinite(meta && meta.width) && meta.width > 0 ? meta.width : naturalWidth;
+      const height = Number.isFinite(meta && meta.height) && meta.height > 0 ? meta.height : naturalHeight;
+      if (els.videoCanvas.width !== width || els.videoCanvas.height !== height) {
+        els.videoCanvas.width = width;
+        els.videoCanvas.height = height;
+      }
+      videoContext.drawImage(image, 0, 0, width, height);
+    }
+
+    function loadImage(blob) {
+      return new Promise((resolve, reject) => {
+        const image = new Image();
+        const url = URL.createObjectURL(blob);
+        image.onload = () => { URL.revokeObjectURL(url); resolve(image); };
+        image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('jpeg decode failed')); };
+        image.src = url;
+      });
+    }
+
+    // ===== 4. 拍照：单页裁剪 + 自动优化 =====
+    function buildCaptureProfile() {
+      const resolution = selectedResolution();
+      return {
+        profile_version: 'capture.profile.v1',
+        revision: 1,
+        initialized_at: new Date().toISOString(),
+        device: {
+          device_id: state.selectedDeviceId || null,
+          resolution: resolution ? { width: resolution.width, height: resolution.height, fps: resolution.fps } : null,
+        },
+        capture: {
+          // 用户指定：拍照模式使用“单页裁剪”。SDK profile 字段沿用 demo-site 的 single_page。
+          page_processing: 'single_page',
+          single_page: {
+            realtime_detect_rects: true,
+            crop_border: { enabled: false, width: 0, height: 0 },
+            id_card_round_corner: false,
+            auto_rotate: false,
+            smart_black_edge_optimize: true,
+            multi_target_paging: false,
+          },
+          curved_book: {
+            remove_finger: { enabled: false, finger_type: 'with_sleeve' },
+            smart_paging: false,
+            crop_border: { enabled: false, width: 0, height: 0 },
+            auto_complete: false,
+          },
+          selected_area: null,
+          // 用户指定：色彩模式使用“自动优化”。
+          color_mode: 'auto_optimize',
+        },
+        output: buildCaptureOutputOptions(),
+      };
+    }
+
+    function buildCaptureOutputOptions() {
+      const output = {
+        format: els.outputFormatSelect.value || 'jpg',
+        thumbnails: { original: false, page_processed: false, color_processed: false, final: false },
+      };
+      const quality = Number(els.outputQualityInput.value);
+      if (output.format === 'jpg' && Number.isInteger(quality) && quality >= 1 && quality <= 100) {
+        output.quality = quality;
+      }
+      if (targetSizeSupported() && state.selectedOutputTargetSize) {
+        output.target_size = Number(state.selectedOutputTargetSize);
+      }
+      return output;
+    }
+
+    async function takeCapture() {
+      ensureSession();
+      if (!state.selectedDeviceId || !state.opened || !state.streamId) {
+        throw new Error('需要先打开设备并启动视频流，才能拍照。');
+      }
+      const index = state.captureResults.length + 1;
+      const result = {
+        id: `capture-${Date.now()}-${index}`,
+        taskId: '',
+        filename: `capture-${String(index).padStart(3, '0')}.${els.outputFormatSelect.value || 'jpg'}`,
+        status: 'pending',
+        assetKind: '',
+        objectUrl: '',
+        error: '',
+      };
+      state.captureResults.unshift(result);
+      refreshUi();
+
+      const response = await sendCommand('capture.take', {
+        device_id: state.selectedDeviceId,
+        profile: buildCaptureProfile(),
+        timeout_ms: Number(els.captureTimeoutInput.value) || 20000,
+      });
+      if (response.code !== 0) {
+        result.status = response.message || 'failed';
+        result.error = response.message || 'capture.take failed';
+        refreshUi();
+        return;
+      }
+
+      const task = asTaskPayload(response.data);
+      result.taskId = task.task_id;
+      result.status = task.status || 'queued';
+      log('capture.submitted', { task_id: result.taskId, status: result.status });
+      if (task.task_id) {
+        state.activeCaptureTasks.add(task.task_id);
+        await applyCaptureTask(task);
+        void pollCaptureTask(task.task_id);
+      }
+      refreshUi();
+    }
+
+    async function cleanupSdkTempData() {
+      ensureSession();
+      if (state.activeCaptureTasks.size > 0) {
+        throw new Error('当前页面仍有拍照任务未结束，请等待任务完成后再清空 SDK 临时数据。');
+      }
+      state.cleanupTempRunning = true;
+      refreshUi();
+      try {
+        const response = await sendCommand('storage.cleanup_temp');
+        if (response.code !== 0) throw new Error(response.message || 'storage.cleanup_temp failed');
+        clearLocalCaptureResults();
+        log('storage.cleanup_temp_completed', response.data);
+      } finally {
+        state.cleanupTempRunning = false;
+        refreshUi();
+      }
+    }
+
+    function clearLocalCaptureResults() {
+      for (const result of state.captureResults) if (result.objectUrl) URL.revokeObjectURL(result.objectUrl);
+      state.captureResults = [];
+      state.activeCaptureTasks.clear();
+    }
+
+    async function pollCaptureTask(taskId) {
+      for (let attempt = 0; attempt < 40 && state.activeCaptureTasks.has(taskId); attempt += 1) {
+        await delay(750);
+        try {
+          const response = await sendCommand('capture.get', { task_id: taskId });
+          if (response.code !== 0) {
+            log('capture.get non-ok', { task_id: taskId, code: response.code, message: response.message }, 'warn');
+            continue;
+          }
+          const task = asTaskPayload(response.data);
+          if (!task.task_id) continue;
+          await applyCaptureTask(task);
+          if (isTerminalStatus(task.status)) {
+            state.activeCaptureTasks.delete(taskId);
+            break;
+          }
+        } catch (error) {
+          log('capture.get polling error', error.message || String(error), 'warn');
+        } finally {
+          refreshUi();
+        }
+      }
+      if (state.activeCaptureTasks.has(taskId)) {
+        state.activeCaptureTasks.delete(taskId);
+        const row = state.captureResults.find((item) => item.taskId === taskId);
+        if (row) row.status = 'poll timeout';
+        refreshUi();
+      }
+    }
+
+    async function applyCaptureTask(task) {
+      const row = state.captureResults.find((item) => item.taskId === task.task_id) || state.captureResults[0];
+      if (!row) return;
+      row.taskId = task.task_id || row.taskId;
+      row.status = task.status || row.status;
+      row.error = task.error || task.message || '';
+      const asset = selectDisplayAsset(task.assets);
+      if (!asset) return;
+      row.assetKind = asset.kind;
+      const accessPath = asset.url || asset.downloadUrl;
+      if (!accessPath) return;
+      try {
+        const objectUrl = await fetchAssetAsObjectUrl(accessPath, asset.contentType);
+        if (row.objectUrl) URL.revokeObjectURL(row.objectUrl);
+        row.objectUrl = objectUrl;
+        row.filename = asset.path ? asset.path.split('/').pop() || row.filename : row.filename;
+        log('capture.image_ready', { task_id: task.task_id, kind: asset.kind, url: accessPath });
+      } catch (error) {
+        row.error = error.message || String(error);
+        log('capture.asset_fetch_failed', { asset, error: row.error }, 'warn');
+      }
+    }
+
+    async function fetchAssetAsObjectUrl(path, contentType) {
+      const response = await fetch(assetHttpUrl(path), {
+        headers: state.sessionToken ? { Authorization: `Bearer ${state.sessionToken}` } : {},
+      });
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`.trim());
+      let blob = await response.blob();
+      if (contentType && !blob.type) blob = blob.slice(0, blob.size, contentType);
+      if (blob.type && !blob.type.toLowerCase().startsWith('image/')) {
+        throw new Error(`unexpected content-type: ${blob.type}`);
+      }
+      return URL.createObjectURL(blob);
+    }
+
+    function selectDisplayAsset(assets) {
+      const preferred = [
+        'final_thumbnail',
+        'final',
+        'color_processed_thumbnail',
+        'color_processed',
+        'page_processed_thumbnail',
+        'page_processed',
+        'original_thumbnail',
+        'original',
+      ];
+      return preferred.map((kind) => assets.find((asset) => asset.kind === kind && isRenderableImage(asset))).find(Boolean)
+        || assets.find(isRenderableImage)
+        || assets[0];
+    }
+
+    // ===== 数据转换与小工具 =====
+    function ensureSession() {
+      if (!state.sessionToken) throw new Error('session_token missing, please connect SDK first');
+    }
+
+    function buildVideoParams(resolution) {
+      return {
+        device_id: state.selectedDeviceId,
+        width: resolution.width,
+        height: resolution.height,
+        fps: resolution.fps,
+        pixel_format: 'mjpeg',
+      };
+    }
+
+    function targetSizeSupported() {
+      return state.opened && state.captureOutput.target_size_supported && state.captureOutput.target_sizes.length > 0;
+    }
+
+    function resetCaptureOutputState() {
+      state.captureOutput = { target_size_supported: false, target_sizes: [] };
+      state.selectedOutputTargetSize = '';
+    }
+
+    function selectedResolution() {
+      return state.resolutions.find((item) => resolutionKey(item) === state.selectedResolutionKey) || state.resolutions[0] || null;
+    }
+
+    function ensureCaptureResolution() {
+      const existing = state.resolutions.find((item) => item.width === 1536 && item.height === 1152);
+      if (existing) return existing;
+      const fallback = { width: 1536, height: 1152, real_width: 1536, real_height: 1152, fps: 15, pixel_format: 'mjpeg', is_default: false };
+      state.resolutions.unshift(fallback);
+      return fallback;
+    }
+
+    function resolutionKey(resolution) {
+      return `${resolution.width}x${resolution.height}@${resolution.fps}`;
+    }
+
+    function asResolutions(value) {
+      if (!Array.isArray(value)) return [];
+      return value.filter((item) => item && typeof item === 'object').map((item) => ({
+        width: asNumber(item.width),
+        height: asNumber(item.height),
+        real_width: asNumber(item.real_width),
+        real_height: asNumber(item.real_height),
+        fps: asNumber(item.fps) || 15,
+        pixel_format: normalizePixelFormat(asString(item.pixel_format)),
+        is_default: Boolean(item.is_default),
+      })).filter((item) => item.width > 0 && item.height > 0);
+    }
+
+    function normalizePixelFormat(value) {
+      if (value === 'bgr24') return 'bgr24';
+      if (value === 'jpeg' || value === 'mjpeg') return value;
+      return 'mjpeg';
+    }
+
+    function asCaptureOutputCapabilities(value) {
+      const record = value && typeof value === 'object' ? value : {};
+      const targetSizes = Array.isArray(record.target_sizes)
+        ? record.target_sizes.filter((item) => item && typeof item === 'object').map((item) => ({
+          target_size: asNumber(item.target_size),
+          width: asNumber(item.width),
+          height: asNumber(item.height),
+          is_device_default: Boolean(item.is_device_default),
+        })).filter((item) => item.target_size > 0 && item.width > 0 && item.height > 0)
+        : [];
+      return {
+        target_size_supported: Boolean(record.target_size_supported) && targetSizes.length > 0,
+        target_sizes: targetSizes,
+      };
+    }
+
+    function asTaskPayload(value) {
+      const record = value && typeof value === 'object' ? value : {};
+      const taskId = asString(record.task_id);
+      return {
+        task_id: taskId,
+        status: asString(record.status),
+        message: asString(record.message),
+        error: asString(record.error),
+        assets: asAssets(record.assets, taskId),
+      };
+    }
+
+    function asAssets(value, taskId) {
+      if (!Array.isArray(value)) return [];
+      return value.filter((item) => item && typeof item === 'object').map((item) => {
+        const assetId = asString(item.asset_id);
+        const synthesizedUrl = taskId && assetId ? `/api/assets/${encodeURIComponent(taskId)}/${encodeURIComponent(assetId)}` : '';
+        return {
+          assetId,
+          kind: asString(item.kind),
+          path: asString(item.path),
+          contentType: asString(item.content_type),
+          size: asNumber(item.size),
+          url: asString(item.url) || synthesizedUrl,
+          downloadUrl: asString(item.download_url) || (synthesizedUrl ? `${synthesizedUrl}/download` : ''),
+        };
+      });
+    }
+
+    function isRenderableImage(asset) {
+      const contentType = (asset.contentType || '').toLowerCase();
+      return !contentType || contentType.startsWith('image/') || asset.kind.includes('thumbnail') || ['final', 'original', 'page_processed', 'color_processed'].includes(asset.kind);
+    }
+
+    function isTerminalStatus(status) {
+      const normalized = String(status || '').toLowerCase();
+      return ['succeeded', 'success', 'completed', 'done', 'failed', 'error'].includes(normalized)
+        || normalized.includes('fail') || normalized.includes('error') || normalized.includes('quota') || normalized.includes('exhausted');
+    }
+
+    function asString(value) { return typeof value === 'string' ? value : ''; }
+    function asNumber(value) { return typeof value === 'number' && Number.isFinite(value) ? value : 0; }
+    function delay(ms) { return new Promise((resolve) => window.setTimeout(resolve, ms)); }
+
+    async function runAction(label, action) {
+      try {
+        log(`${label}.started`);
+        await action();
+        log(`${label}.finished`);
+      } catch (error) {
+        log(`${label}.failed`, error.message || String(error), 'error');
+      } finally {
+        refreshUi();
+      }
+    }
+
+    function setRenderVideoPreview(enabled) {
+      state.renderVideoPreview = Boolean(enabled);
+      if (!state.renderVideoPreview && videoContext) {
+        videoContext.clearRect(0, 0, els.videoCanvas.width, els.videoCanvas.height);
+      }
+      log(state.renderVideoPreview ? 'video.render_enabled' : 'video.render_disabled');
+      refreshUi();
+    }
+
+    // ===== 事件绑定 =====
+    els.connectBtn.addEventListener('click', () => runAction('connectSdk', connectSdk));
+    els.disconnectBtn.addEventListener('click', () => disconnectCommand());
+    els.clearKeyBtn.addEventListener('click', () => {
+      els.apiKeyInput.value = '';
+      localStorage.removeItem(STORAGE_KEYS.apiKey);
+      disconnectCommand('api key cleared');
+      resetSessionAndBusinessState();
+      log('api_key.cleared');
+      refreshUi();
+    });
+    els.loadDevicesBtn.addEventListener('click', () => runAction('device.list', loadDevices));
+    els.openDeviceBtn.addEventListener('click', () => runAction('device.open', openDevice));
+    els.closeDeviceBtn.addEventListener('click', () => runAction('device.close', closeDevice));
+    els.startVideoBtn.addEventListener('click', () => runAction('video.start', startVideo));
+    els.renderVideoToggle.addEventListener('change', () => setRenderVideoPreview(els.renderVideoToggle.checked));
+    els.stopVideoBtn.addEventListener('click', () => runAction('video.stop', stopVideo));
+    els.captureBtn.addEventListener('click', () => runAction('capture.take', takeCapture));
+    els.clearLogBtn.addEventListener('click', () => { state.logs = []; els.logBox.textContent = ''; });
+    els.clearResultsBtn.addEventListener('click', () => {
+      clearLocalCaptureResults();
+      log('capture.local_results_cleared');
+      refreshUi();
+    });
+    els.cleanupTempBtn.addEventListener('click', () => runAction('storage.cleanup_temp', cleanupSdkTempData));
+    els.deviceSelect.addEventListener('change', () => runAction('device.select', () => selectDevice(els.deviceSelect.value)));
+    els.resolutionSelect.addEventListener('change', () => {
+      state.selectedResolutionKey = els.resolutionSelect.value;
+      if (state.opened || state.streamId) log('resolution.changed_after_open', '如需应用新分辨率，请先关闭设备后重新打开。', 'warn');
+      refreshUi();
+    });
+    els.outputFormatSelect.addEventListener('change', refreshUi);
+    els.outputQualityInput.addEventListener('input', refreshUi);
+    els.outputTargetSizeSelect.addEventListener('change', () => {
+      state.selectedOutputTargetSize = els.outputTargetSizeSelect.value;
+      refreshUi();
+    });
+    els.captureTimeoutInput.addEventListener('input', refreshUi);
+    window.addEventListener('beforeunload', () => {
+      clearLocalCaptureResults();
+      disconnectCommand('page unload');
+    });
+
+    // ===== 初始化 =====
+    els.apiKeyInput.value = localStorage.getItem(STORAGE_KEYS.apiKey) || '';
+    refreshUi();
+    log('page.ready', {
+      command_endpoint: commandWsUrl(),
+      video_endpoint: RUNTIME_ENDPOINTS.video,
+      capture_defaults: { page_processing: 'single_page', color_mode: 'auto_optimize', output_quality: 'optional jpg 1-100', output_target_size: 'optional device target_size' },
+      render_video_default: false,
+    });
+  </script>
+</body>
+</html>

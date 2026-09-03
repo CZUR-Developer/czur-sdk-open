@@ -4,6 +4,25 @@
 
 All notable changes to the CZUR Open SDK are documented in this file.
 
+## [0.0.6] - 2026-08-28
+
+### Added
+
+- Bundled the Microsoft Visual C++ Runtime with the Windows package to simplify deployment on target systems.
+- Added `capture.session.get` and `capture.session.updated` to read and push capture statistics for the current Command WS connection.
+- Added `capture_source`, `acquisition_status`, and `processing_status` to `capture.get` to distinguish capture origin, original-image acquisition state, and processing state.
+
+### Changed
+
+- Later image processing on a device no longer blocks manual capture or hard-grab. The per-device capture interval is 1500 ms; rate-limited requests return `RateLimited (1004)` and `retry_after_ms`.
+- The external SDK enables TLS by default. Asset, Command, and Video use the HTTPS/WSS endpoints on `sdk-runtime.localhost` by default.
+- Trial quota for restricted capabilities before commercial authorization is now limited to 200 calls.
+
+### Fixed
+
+- Fixed an intermittent capture-time issue that could occur during the capture workflow.
+- Addressed Windows TWAIN driver runtime issues to improve driver startup and operation stability.
+
 ## [0.0.5] - 2026-08-11
 
 ### Added

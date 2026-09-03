@@ -4,6 +4,25 @@
 
 本文档记录 CZUR Open SDK 项目的重要版本变更。
 
+## [0.0.6] - 2026-08-28
+
+### 新增
+
+- Windows 安装包内置 Microsoft Visual C++ Runtime，简化目标系统上的部署。
+- 新增 `capture.session.get` 和 `capture.session.updated`，用于读取并推送当前 Command WS 连接的采集统计。
+- `capture.get` 新增 `capture_source`、`acquisition_status` 和 `processing_status`，用于区分采集来源、原图采集状态和处理状态。
+
+### 变更
+
+- 同一设备的后续图片处理不再阻塞拍照或硬拍；同设备采集触发间隔为 1500ms，限频时返回 `RateLimited (1004)` 和 `retry_after_ms`。
+- 对外 SDK 默认启用 TLS，Asset、Command 和 Video 默认使用 `sdk-runtime.localhost` 的 HTTPS/WSS 端点。
+- 未完成商务授权的受限能力试用额度调整为最多 200 次调用。
+
+### 修复
+
+- 修复采集流程中偶现的采集时间异常问题。
+- 处理 Windows TWAIN 驱动运行问题，提升驱动启动和运行稳定性。
+
 ## [0.0.5] - 2026-08-11
 
 ### 新增

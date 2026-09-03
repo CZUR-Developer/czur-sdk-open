@@ -31,6 +31,7 @@ struct SdkConfig {
     std::string auth_token;
     std::string online_image_enhance_base_url;
     std::string authz_base_url;
+    std::string twain_work_dir;
     SdkTlsConfig tls;
 
     static SdkConfig FromFile(const std::string& path);

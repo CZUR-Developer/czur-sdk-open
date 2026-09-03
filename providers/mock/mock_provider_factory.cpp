@@ -270,6 +270,7 @@ public:
             "device.close",
             "capture.take",
             "capture.get",
+            "capture.session.get",
             "capture.set_turn_detect",
             "video.start",
             "video.stop",
