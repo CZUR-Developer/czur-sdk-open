@@ -4,6 +4,20 @@
 
 All notable changes to the CZUR Open SDK are documented in this file.
 
+## [0.0.7] - 2026-09-08
+
+### Added
+
+- Added support for macOS 11 and later.
+
+### Changed
+
+- Reduced the package size.
+
+### Fixed
+
+- Fixed known issues to improve runtime stability.
+
 ## [0.0.6] - 2026-08-28
 
 ### Added
