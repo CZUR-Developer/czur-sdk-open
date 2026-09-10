@@ -258,6 +258,9 @@ target_include_directories(sdk_open_logging PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/runtime"
     "${SDK_OPEN_GENERATED_INCLUDE_DIR}"
 )
+target_include_directories(sdk_open_logging PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/module"
+)
 target_link_libraries(sdk_open_logging PUBLIC
     sdk_open_third_party
 )
