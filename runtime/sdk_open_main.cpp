@@ -477,11 +477,24 @@ void ApplyDefaultSaneConfigDir() {
     }
 }
 
-std::unique_ptr<editor::sdk::SdkApp> CreateSdkOpenApp(const std::string& config_path) {
-    editor::sdk::InitializeSdkOpenLogger();
+editor::sdk::SdkConfig LoadSdkOpenConfig(const std::string& config_path,
+                                      bool use_local_tls_asset_url) {
     editor::sdk::SdkConfig config = editor::sdk::SdkConfig::FromFile(config_path);
     config.web_root = GetExecutableDir() + "/web";
     editor::sdk::ApplySdkEnvironmentOverrides(&config);
+    // The macOS package certificate names sdk-runtime.localhost, not the bind IP.
+    // Apply the default after explicit configuration and environment overrides.
+    if (use_local_tls_asset_url && config.tls.enabled && config.asset_base_url.empty()) {
+        config.asset_base_url = "https://sdk-runtime.localhost:" +
+                                std::to_string(config.tls.asset_https_port);
+    }
+    return config;
+}
+
+std::unique_ptr<editor::sdk::SdkApp> CreateSdkOpenApp(
+    const std::string& config_path, bool use_local_tls_asset_url = false) {
+    editor::sdk::InitializeSdkOpenLogger();
+    editor::sdk::SdkConfig config = LoadSdkOpenConfig(config_path, use_local_tls_asset_url);
 
 #if defined(_WIN32)
     if (!config.twain_work_dir.empty() && _putenv_s("CZUR_TWAIN_WORK_DIR", config.twain_work_dir.c_str()) != 0) {
@@ -569,8 +582,8 @@ int RunAsWindowsService(const std::string& service_name, const std::string& conf
 
 #if !defined(SDK_OPEN_MAIN_TESTING)
 int main(int argc, char* argv[]) {
-#if defined(__APPLE__)
     bool run_as_launch_agent = false;
+#if defined(__APPLE__)
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i] != nullptr ? argv[i] : "";
         if (arg == "--launch-agent") {
@@ -642,7 +655,7 @@ int main(int argc, char* argv[]) {
     }
 #endif
 
-    std::unique_ptr<editor::sdk::SdkApp> app = CreateSdkOpenApp(config_path);
+    std::unique_ptr<editor::sdk::SdkApp> app = CreateSdkOpenApp(config_path, run_as_launch_agent);
     if (!app->Start()) {
         SDK_OPEN_LOG_ERROR("[sdk_open_app] failed to start");
 #if defined(_WIN32)
