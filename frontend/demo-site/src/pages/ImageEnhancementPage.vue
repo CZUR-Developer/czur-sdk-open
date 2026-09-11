@@ -138,6 +138,14 @@
                     <input v-model="step.provider" class="field-input" />
                   </label>
                 </div>
+                <label v-if="step.type === 'blank_page_detect'" class="field-label mt-3">
+                  {{ t('pages.imageEnhancement.blankPageMode') }}
+                  <select :value="step.params.mode ?? 'standard'" class="field-input" @change="changeBlankPageMode(step, $event)">
+                    <option value="strict">{{ t('pages.imageEnhancement.blankPageStrict') }}</option>
+                    <option value="standard">{{ t('pages.imageEnhancement.blankPageStandard') }}</option>
+                    <option value="loose">{{ t('pages.imageEnhancement.blankPageLoose') }}</option>
+                  </select>
+                </label>
                 <label class="field-label mt-3">
                   {{ t('pages.imageEnhancement.paramsJson') }}
                   <textarea v-model="step.paramText" class="field-input min-h-24 font-mono text-xs" @blur="syncStepParams(step)" />
@@ -447,6 +455,13 @@ function syncStepParams(step: EditableStep): void {
   } catch {
     step.paramText = JSON.stringify(step.params, null, 2);
   }
+}
+
+function changeBlankPageMode(step: EditableStep, event: Event): void {
+  // 先接收 JSON 编辑，再同步档位，保留 action 等现有参数。
+  syncStepParams(step);
+  step.params = { ...step.params, mode: (event.target as HTMLSelectElement).value };
+  step.paramText = JSON.stringify(step.params, null, 2);
 }
 
 async function saveWorkflow(): Promise<void> {
