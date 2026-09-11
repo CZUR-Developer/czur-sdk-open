@@ -14,7 +14,6 @@
 #include "sdk_runtime_paths.h"
 #include "spdlog/sinks/rotating_file_sink.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
-#include "utils/spdlog_filename.h"
 
 namespace editor {
 namespace sdk {
@@ -81,8 +80,7 @@ std::shared_ptr<spdlog::logger> BuildSdkOpenLogger(std::string* init_warning) {
         g_sdk_open_log_path = JoinPath(g_sdk_open_log_dir, kSdkOpenLogFileName);
         try {
             sinks.push_back(std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-                ::editor::utils::SpdlogFilenameFromUtf8(g_sdk_open_log_path),
-                kSdkOpenMaxLogFileSize, kSdkOpenMaxLogFiles));
+                g_sdk_open_log_path, kSdkOpenMaxLogFileSize, kSdkOpenMaxLogFiles));
         } catch (const spdlog::spdlog_ex& ex) {
             g_sdk_open_log_path.clear();
             if (init_warning != NULL) {
