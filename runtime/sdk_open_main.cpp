@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cerrno>
 #include <cstring>
+#include <vector>
 #if defined(_WIN32)
 #include <windows.h>
 #else
@@ -39,19 +40,69 @@ namespace {
 const char kDefaultWindowsServiceName[] = "CZURSdkOpenApp";
 const char kDefaultWindowsServiceDisplayName[] = "CZUR SDK Open App";
 
+#if defined(_WIN32)
+std::string WideToUtf8(const std::wstring& value) {
+    if (value.empty()) {
+        return std::string();
+    }
+
+    const int required = ::WideCharToMultiByte(CP_UTF8,
+                                                WC_ERR_INVALID_CHARS,
+                                                value.data(),
+                                                static_cast<int>(value.size()),
+                                                NULL,
+                                                0,
+                                                NULL,
+                                                NULL);
+    if (required <= 0) {
+        return std::string();
+    }
+
+    std::string utf8(static_cast<std::size_t>(required), '\0');
+    if (::WideCharToMultiByte(CP_UTF8,
+                              WC_ERR_INVALID_CHARS,
+                              value.data(),
+                              static_cast<int>(value.size()),
+                              &utf8[0],
+                              required,
+                              NULL,
+                              NULL) != required) {
+        return std::string();
+    }
+    return utf8;
+}
+#endif
+
 std::string GetExecutableDir() {
 #if defined(_WIN32)
-    char buffer[MAX_PATH] = {0};
-    const DWORD length = ::GetModuleFileNameA(NULL, buffer, MAX_PATH);
-    if (length == 0) {
+    // cpp-httplib treats file paths as UTF-8 on Windows. GetModuleFileNameA
+    // returns bytes in the system ANSI code page, which makes non-ASCII
+    // installation directories (for example, Chinese paths) unreadable by
+    // the UTF-8 path conversion used by cpp-httplib. Keep the path in UTF-16
+    // until it is converted explicitly to UTF-8.
+    std::vector<wchar_t> buffer(MAX_PATH);
+    std::wstring exe_path;
+    for (;;) {
+        const DWORD length = ::GetModuleFileNameW(NULL, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (length == 0) {
+            return ".";
+        }
+        if (length < buffer.size()) {
+            exe_path.assign(buffer.data(), length);
+            break;
+        }
+        if (buffer.size() >= 32768) {
+            return ".";
+        }
+        buffer.resize(buffer.size() * 2);
+    }
+
+    const std::wstring::size_type pos = exe_path.find_last_of(L"/\\");
+    if (pos == std::wstring::npos) {
         return ".";
     }
-    std::string exe_path(buffer, length);
-    const size_t pos = exe_path.find_last_of("/\\");
-    if (pos == std::string::npos) {
-        return ".";
-    }
-    return exe_path.substr(0, pos);
+    const std::string executable_dir = WideToUtf8(exe_path.substr(0, pos));
+    return executable_dir.empty() ? "." : executable_dir;
 #elif defined(__APPLE__)
     uint32_t size = 0;
     _NSGetExecutablePath(nullptr, &size);
@@ -348,6 +399,9 @@ std::string QuoteWindowsArg(const std::string& value) {
 }
 
 std::string GetExecutablePath() {
+    // Service installation uses the ANSI CreateServiceA API below, so keep
+    // this path in the matching system code page. Runtime file paths use
+    // GetExecutableDir(), which is converted to UTF-8 separately.
     char buffer[MAX_PATH] = {0};
     const DWORD length = ::GetModuleFileNameA(NULL, buffer, MAX_PATH);
     return length == 0 ? std::string() : std::string(buffer, length);
