@@ -5,6 +5,8 @@
 #include <thread>
 #include <iostream>
 #include <memory>
+#include <atomic>
+#include <chrono>
 #include <utility>
 #include <cstdlib>
 #include <cerrno>
@@ -19,6 +21,7 @@
 #include <fcntl.h>
 #include <mach-o/dyld.h>
 #include <sys/stat.h>
+#include <CoreFoundation/CoreFoundation.h>
 #endif
 #endif
 
@@ -679,7 +682,36 @@ int main(int argc, char* argv[]) {
     CleanupWindowsShutdownEvent(shutdown_event);
 #else
     SDK_OPEN_LOG_INFO("[sdk_open_app] running. waiting for SIGINT/SIGTERM...");
+#if defined(__APPLE__)
+    // AVFoundation publishes device changes through Cocoa's main run loop.
+    // A LaunchAgent has no NSApplication event loop and previously blocked
+    // this thread in sigwait(), so AVFoundation never advanced its device
+    // inventory after a USB unplug/replug.  Keep signal handling on a helper
+    // thread while the main thread pumps Cocoa.  Stop() still runs on the
+    // original main thread after the loop exits.
+    std::atomic<bool> shutdown_requested(false);
+    std::atomic<int> shutdown_signal(0);
+    std::thread signal_waiter([&shutdown_signals, &shutdown_requested, &shutdown_signal]() {
+        const int signal_number = WaitForShutdownSignal(shutdown_signals);
+        shutdown_signal.store(signal_number, std::memory_order_release);
+        shutdown_requested.store(true, std::memory_order_release);
+    });
+
+    SDK_OPEN_LOG_INFO("[sdk_open_app] pumping Cocoa main run loop for AVFoundation notifications");
+    while (!shutdown_requested.load(std::memory_order_acquire)) {
+        const SInt32 run_result =
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.25, false);
+        // A run loop with no registered sources can return immediately. Keep
+        // the LaunchAgent from spinning while still checking shutdown often.
+        if (run_result == kCFRunLoopRunFinished) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(25));
+        }
+    }
+    signal_waiter.join();
+    const int signal_number = shutdown_signal.load(std::memory_order_acquire);
+#else
     const int signal_number = WaitForShutdownSignal(shutdown_signals);
+#endif
     SDK_OPEN_LOG_INFO("[sdk_open_app] shutdown requested, signal={}", signal_number);
     app->Stop();
 #endif
