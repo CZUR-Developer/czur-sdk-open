@@ -345,6 +345,13 @@ target_include_directories(sdk_open_app PRIVATE
 target_link_libraries(sdk_open_app PRIVATE
     sdk_open_runtime
 )
+if(APPLE)
+    # sdk_open_main pumps the Cocoa run loop so AVFoundation can publish
+    # camera hotplug changes while the LaunchAgent is serving requests.
+    target_link_libraries(sdk_open_app PRIVATE
+        "-framework CoreFoundation"
+    )
+endif()
 set_target_properties(sdk_open_app PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CZUR_TARGET_OUTPUT_DIR}"
 )
