@@ -1,0 +1,3 @@
+# Python bytecode caches (including tests/).
+__pycache__/
+*.py[cod]

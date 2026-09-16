@@ -52,11 +52,55 @@ int CurrentProcessId() {
 #endif
 }
 
+#if defined(_WIN32)
+std::string WideToUtf8(const std::wstring& value) {
+    if (value.empty()) {
+        return std::string();
+    }
+
+    const int required = ::WideCharToMultiByte(CP_UTF8,
+                                                WC_ERR_INVALID_CHARS,
+                                                value.data(),
+                                                static_cast<int>(value.size()),
+                                                NULL,
+                                                0,
+                                                NULL,
+                                                NULL);
+    if (required <= 0) {
+        return std::string();
+    }
+
+    std::string utf8(static_cast<std::size_t>(required), '\0');
+    if (::WideCharToMultiByte(CP_UTF8,
+                              WC_ERR_INVALID_CHARS,
+                              value.data(),
+                              static_cast<int>(value.size()),
+                              &utf8[0],
+                              required,
+                              NULL,
+                              NULL) != required) {
+        return std::string();
+    }
+    return utf8;
+}
+#endif
+
 std::string CurrentExecutablePath() {
 #if defined(_WIN32)
-    char buffer[MAX_PATH] = {0};
-    const DWORD length = GetModuleFileNameA(NULL, buffer, MAX_PATH);
-    return length == 0 ? std::string() : std::string(buffer, length);
+    std::vector<wchar_t> buffer(MAX_PATH);
+    for (;;) {
+        const DWORD length = ::GetModuleFileNameW(NULL, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (length == 0) {
+            return std::string();
+        }
+        if (length < buffer.size()) {
+            return WideToUtf8(std::wstring(buffer.data(), length));
+        }
+        if (buffer.size() >= 32768) {
+            return std::string();
+        }
+        buffer.resize(buffer.size() * 2);
+    }
 #elif defined(__APPLE__)
     uint32_t size = 0;
     _NSGetExecutablePath(NULL, &size);

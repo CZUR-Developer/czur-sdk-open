@@ -1115,7 +1115,7 @@ public:
         result.capabilities.push_back(MakeCapability("crop_enhance", "Crop enhancement", "cleanup", "offline", "transform", R"({"mode":"crop","top_percent":0,"bottom_percent":0,"left_percent":0,"right_percent":0})"));
         result.capabilities.push_back(MakeCapability("normalize_spec", "Normalize specification", "normalize", "offline", "transform", R"json({"auto":true,"format":"A4-auto","width":210,"height":297,"dpi":300,"color":"rgb(255, 255, 255)","horizontal":1,"vertical":1,"fill":1,"fillValue":1.0,"useOriginalPaperScale":false,"originalWidth":0,"originalHeight":0,"quality":95})json"));
         result.capabilities.push_back(MakeCapability("rotate", "Rotate", "normalize", "offline", "transform", R"({"mode":"auto","angle":0,"deskew":true,"max_angle":20,"border_mode":1,"border_val":0,"dl_flag":0})"));
-        result.capabilities.push_back(MakeCapability("blank_page_detect", "Blank page detection", "detect", "offline", "filter", R"({"action":"drop","threshold":0.98})"));
+        result.capabilities.push_back(MakeCapability("blank_page_detect", "Blank page detection", "detect", "offline", "filter", R"({"action":"drop","mode":"standard"})"));
         result.capabilities.push_back(MakeCapability("red_green_head", "Red/green head enhancement", "enhance", "offline", "transform", R"({"auto_flag":true,"rois":[],"stroke_width":0,"blur_level":0,"color_thresh":50,"texture_degree":1.2,"specify_color":false,"src_color":[0,0,0],"target_color":[67,67,222]})"));
         SdkImageEnhanceCapability online = MakeCapability("doc_crop_enhance", "Document rectification enhancement", "enhance", "online", "transform", "{}");
         online.available = false;
@@ -1187,6 +1187,7 @@ private:
             capability->title_zh_cn = "旋转";
             capability->description_zh_cn = "支持任意手动角度旋转，也可按文字方向自动转正并纠偏。";
         } else if (capability->type == "blank_page_detect") {
+            capability->schema_json = R"({"action":{"type":"enum","values":["mark","drop"],"default":"drop"},"mode":{"type":"enum","values":["strict","standard","loose"],"default":"standard"}})";
             capability->description = "Detects blank pages and can mark or remove them from the output sequence.";
             capability->title_zh_cn = "空白页检测";
             capability->description_zh_cn = "检测空白页，可选择标记空白页或从输出序列中移除。";

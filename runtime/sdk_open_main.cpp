@@ -5,10 +5,13 @@
 #include <thread>
 #include <iostream>
 #include <memory>
+#include <atomic>
+#include <chrono>
 #include <utility>
 #include <cstdlib>
 #include <cerrno>
 #include <cstring>
+#include <vector>
 #if defined(_WIN32)
 #include <windows.h>
 #else
@@ -19,6 +22,7 @@
 #include <fcntl.h>
 #include <mach-o/dyld.h>
 #include <sys/stat.h>
+#include <CoreFoundation/CoreFoundation.h>
 #endif
 #endif
 
@@ -39,19 +43,69 @@ namespace {
 const char kDefaultWindowsServiceName[] = "CZURSdkOpenApp";
 const char kDefaultWindowsServiceDisplayName[] = "CZUR SDK Open App";
 
+#if defined(_WIN32)
+std::string WideToUtf8(const std::wstring& value) {
+    if (value.empty()) {
+        return std::string();
+    }
+
+    const int required = ::WideCharToMultiByte(CP_UTF8,
+                                                WC_ERR_INVALID_CHARS,
+                                                value.data(),
+                                                static_cast<int>(value.size()),
+                                                NULL,
+                                                0,
+                                                NULL,
+                                                NULL);
+    if (required <= 0) {
+        return std::string();
+    }
+
+    std::string utf8(static_cast<std::size_t>(required), '\0');
+    if (::WideCharToMultiByte(CP_UTF8,
+                              WC_ERR_INVALID_CHARS,
+                              value.data(),
+                              static_cast<int>(value.size()),
+                              &utf8[0],
+                              required,
+                              NULL,
+                              NULL) != required) {
+        return std::string();
+    }
+    return utf8;
+}
+#endif
+
 std::string GetExecutableDir() {
 #if defined(_WIN32)
-    char buffer[MAX_PATH] = {0};
-    const DWORD length = ::GetModuleFileNameA(NULL, buffer, MAX_PATH);
-    if (length == 0) {
+    // cpp-httplib treats file paths as UTF-8 on Windows. GetModuleFileNameA
+    // returns bytes in the system ANSI code page, which makes non-ASCII
+    // installation directories (for example, Chinese paths) unreadable by
+    // the UTF-8 path conversion used by cpp-httplib. Keep the path in UTF-16
+    // until it is converted explicitly to UTF-8.
+    std::vector<wchar_t> buffer(MAX_PATH);
+    std::wstring exe_path;
+    for (;;) {
+        const DWORD length = ::GetModuleFileNameW(NULL, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (length == 0) {
+            return ".";
+        }
+        if (length < buffer.size()) {
+            exe_path.assign(buffer.data(), length);
+            break;
+        }
+        if (buffer.size() >= 32768) {
+            return ".";
+        }
+        buffer.resize(buffer.size() * 2);
+    }
+
+    const std::wstring::size_type pos = exe_path.find_last_of(L"/\\");
+    if (pos == std::wstring::npos) {
         return ".";
     }
-    std::string exe_path(buffer, length);
-    const size_t pos = exe_path.find_last_of("/\\");
-    if (pos == std::string::npos) {
-        return ".";
-    }
-    return exe_path.substr(0, pos);
+    const std::string executable_dir = WideToUtf8(exe_path.substr(0, pos));
+    return executable_dir.empty() ? "." : executable_dir;
 #elif defined(__APPLE__)
     uint32_t size = 0;
     _NSGetExecutablePath(nullptr, &size);
@@ -348,6 +402,9 @@ std::string QuoteWindowsArg(const std::string& value) {
 }
 
 std::string GetExecutablePath() {
+    // Service installation uses the ANSI CreateServiceA API below, so keep
+    // this path in the matching system code page. Runtime file paths use
+    // GetExecutableDir(), which is converted to UTF-8 separately.
     char buffer[MAX_PATH] = {0};
     const DWORD length = ::GetModuleFileNameA(NULL, buffer, MAX_PATH);
     return length == 0 ? std::string() : std::string(buffer, length);
@@ -477,11 +534,24 @@ void ApplyDefaultSaneConfigDir() {
     }
 }
 
-std::unique_ptr<editor::sdk::SdkApp> CreateSdkOpenApp(const std::string& config_path) {
-    editor::sdk::InitializeSdkOpenLogger();
+editor::sdk::SdkConfig LoadSdkOpenConfig(const std::string& config_path,
+                                      bool use_local_tls_asset_url) {
     editor::sdk::SdkConfig config = editor::sdk::SdkConfig::FromFile(config_path);
     config.web_root = GetExecutableDir() + "/web";
     editor::sdk::ApplySdkEnvironmentOverrides(&config);
+    // The macOS package certificate names sdk-runtime.localhost, not the bind IP.
+    // Apply the default after explicit configuration and environment overrides.
+    if (use_local_tls_asset_url && config.tls.enabled && config.asset_base_url.empty()) {
+        config.asset_base_url = "https://sdk-runtime.localhost:" +
+                                std::to_string(config.tls.asset_https_port);
+    }
+    return config;
+}
+
+std::unique_ptr<editor::sdk::SdkApp> CreateSdkOpenApp(
+    const std::string& config_path, bool use_local_tls_asset_url = false) {
+    editor::sdk::InitializeSdkOpenLogger();
+    editor::sdk::SdkConfig config = LoadSdkOpenConfig(config_path, use_local_tls_asset_url);
 
 #if defined(_WIN32)
     if (!config.twain_work_dir.empty() && _putenv_s("CZUR_TWAIN_WORK_DIR", config.twain_work_dir.c_str()) != 0) {
@@ -569,8 +639,8 @@ int RunAsWindowsService(const std::string& service_name, const std::string& conf
 
 #if !defined(SDK_OPEN_MAIN_TESTING)
 int main(int argc, char* argv[]) {
-#if defined(__APPLE__)
     bool run_as_launch_agent = false;
+#if defined(__APPLE__)
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i] != nullptr ? argv[i] : "";
         if (arg == "--launch-agent") {
@@ -642,7 +712,7 @@ int main(int argc, char* argv[]) {
     }
 #endif
 
-    std::unique_ptr<editor::sdk::SdkApp> app = CreateSdkOpenApp(config_path);
+    std::unique_ptr<editor::sdk::SdkApp> app = CreateSdkOpenApp(config_path, run_as_launch_agent);
     if (!app->Start()) {
         SDK_OPEN_LOG_ERROR("[sdk_open_app] failed to start");
 #if defined(_WIN32)
@@ -666,7 +736,36 @@ int main(int argc, char* argv[]) {
     CleanupWindowsShutdownEvent(shutdown_event);
 #else
     SDK_OPEN_LOG_INFO("[sdk_open_app] running. waiting for SIGINT/SIGTERM...");
+#if defined(__APPLE__)
+    // AVFoundation publishes device changes through Cocoa's main run loop.
+    // A LaunchAgent has no NSApplication event loop and previously blocked
+    // this thread in sigwait(), so AVFoundation never advanced its device
+    // inventory after a USB unplug/replug.  Keep signal handling on a helper
+    // thread while the main thread pumps Cocoa.  Stop() still runs on the
+    // original main thread after the loop exits.
+    std::atomic<bool> shutdown_requested(false);
+    std::atomic<int> shutdown_signal(0);
+    std::thread signal_waiter([&shutdown_signals, &shutdown_requested, &shutdown_signal]() {
+        const int signal_number = WaitForShutdownSignal(shutdown_signals);
+        shutdown_signal.store(signal_number, std::memory_order_release);
+        shutdown_requested.store(true, std::memory_order_release);
+    });
+
+    SDK_OPEN_LOG_INFO("[sdk_open_app] pumping Cocoa main run loop for AVFoundation notifications");
+    while (!shutdown_requested.load(std::memory_order_acquire)) {
+        const SInt32 run_result =
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.25, false);
+        // A run loop with no registered sources can return immediately. Keep
+        // the LaunchAgent from spinning while still checking shutdown often.
+        if (run_result == kCFRunLoopRunFinished) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(25));
+        }
+    }
+    signal_waiter.join();
+    const int signal_number = shutdown_signal.load(std::memory_order_acquire);
+#else
     const int signal_number = WaitForShutdownSignal(shutdown_signals);
+#endif
     SDK_OPEN_LOG_INFO("[sdk_open_app] shutdown requested, signal={}", signal_number);
     app->Stop();
 #endif
