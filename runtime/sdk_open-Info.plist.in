@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>sdk_open_app</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.czur.sdk-open</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleDisplayName</key>
+    <string>CZUR SDK Open</string>
+    <key>CFBundleName</key>
+    <string>CZUR SDK Open</string>
+    <key>CFBundlePackageType</key>
+    <string>BNDL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>@SDK_OPEN_VERSION@</string>
+    <key>CFBundleVersion</key>
+    <string>@SDK_OPEN_VERSION@.@SDK_OPEN_BUILD@</string>
+    <key>NSCameraUsageDescription</key>
+    <string>CZUR SDK Open needs camera access to connect to document cameras and provide video preview.</string>
+    <key>LSBackgroundOnly</key>
+    <true/>
+</dict>
+</plist>

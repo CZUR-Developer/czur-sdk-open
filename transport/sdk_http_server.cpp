@@ -5,7 +5,6 @@
 
 #include <cstdlib>
 #include <httplib.h>
-#include <sys/stat.h>
 
 #include "sdk_logger.h"
 
@@ -25,8 +24,14 @@ namespace {
 const char* kJsonContentType = "application/json; charset=utf-8";
 
 bool FileExists(const std::string& path) {
-    struct stat st;
-    return !path.empty() && ::stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+    if (path.empty()) {
+        return false;
+    }
+    // cpp-httplib converts UTF-8 paths to UTF-16 before querying Windows
+    // filesystem APIs. Using its FileStat here keeps Chinese installation
+    // directories working for SPA fallback and asset existence checks too.
+    httplib::detail::FileStat stat(path);
+    return stat.is_file();
 }
 
 std::string JoinPath(const std::string& base, const std::string& child) {

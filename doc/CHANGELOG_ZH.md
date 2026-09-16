@@ -4,6 +4,28 @@
 
 本文档记录 CZUR Open SDK 项目的重要版本变更。
 
+## [Unreleased]
+
+### 变更
+
+- `image.enhance` 的 `blank_page_detect` 步骤改用采编王的空白页检测算法，新增 `mode`：`strict`（严格）、`standard`（标准，默认）、`loose`（宽松）。保留 `action`：`mark`（标记）、`drop`（移除，默认）。例如：`{"type":"blank_page_detect","params":{"mode":"standard","action":"mark"}}`。
+- 移除空白页检测的 `threshold` 参数及 `white_ratio`/`threshold` 结果字段，不提供兼容；携带旧参数的请求返回 `InvalidParams`。结果元数据改为返回实际使用的 `mode`，页面仍返回 `blank`，步骤仍返回 `action` 和 `dropped_pages`。
+
+## [0.0.7] - 2026-09-16
+
+### 新增
+
+- 支持 macOS 11 及以上版本。
+
+### 变更
+
+- 精简安装包体积。
+
+### 修复
+
+- 修复 Windows 版本中文安装目录问题。
+- 修复已知问题，提升运行稳定性。
+
 ## [0.0.6] - 2026-08-28
 
 ### 新增
