@@ -4,14 +4,7 @@
 
 All notable changes to the CZUR Open SDK are documented in this file.
 
-## [Unreleased]
-
-### Changed
-
-- The `image.enhance` step `blank_page_detect` now uses CapEditor's blank-page algorithm with `mode`: `strict`, `standard` (default), or `loose`. The existing `action` remains `mark` or `drop` (default). Example: `{"type":"blank_page_detect","params":{"mode":"standard","action":"mark"}}`.
-- Removed the blank-page `threshold` parameter and the `white_ratio`/`threshold` result fields without compatibility support. Requests containing the old parameter return `InvalidParams`. Result metadata reports the effective `mode`; page metadata retains `blank`, and step metadata retains `action` and `dropped_pages`.
-
-## [0.0.7] - 2026-09-08
+## [0.0.7] - 2026-09-16
 
 ### Added
 
@@ -23,6 +16,7 @@ All notable changes to the CZUR Open SDK are documented in this file.
 
 ### Fixed
 
+- Fixed an issue with Chinese installation paths in the Windows version.
 - Fixed known issues to improve runtime stability.
 
 ## [0.0.6] - 2026-08-28
