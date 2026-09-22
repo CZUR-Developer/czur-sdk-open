@@ -98,20 +98,6 @@ bool CopyFileBinary(const std::string& input_path, const std::string& output_pat
     return output.good();
 }
 
-// 硬拍 raw_capture 已经在 provider 层拿到 JPEG 字节，这里只负责写入当前
-// capture task 输出目录，避免引入额外临时文件生命周期。
-bool WriteBytes(const std::string& output_path, const std::vector<uint8_t>& bytes) {
-    if (output_path.empty() || bytes.empty()) {
-        return false;
-    }
-    std::ofstream output(output_path.c_str(), std::ios::binary | std::ios::trunc);
-    if (!output.is_open()) {
-        return false;
-    }
-    output.write(reinterpret_cast<const char*>(&bytes[0]), static_cast<std::streamsize>(bytes.size()));
-    return output.good();
-}
-
 std::string SanitizeAssetToken(const std::string& value, const std::string& fallback) {
     std::string token;
     for (std::string::const_iterator it = value.begin(); it != value.end(); ++it) {
@@ -198,53 +184,34 @@ public:
     CStatus CaptureRaw() {
         StartStage("capture_raw");
         if (request_.raw_capture.captured) {
-            // 采集阶段已完成时，处理 worker 不再二次触发设备拍照。硬拍通常
-            // 携带内存中的原图，普通拍照则可复用采集阶段返回的文件路径。
+            // 采集阶段已完成时，处理 worker 不再二次触发设备拍照。Provider
+            // 已经把原图写入任务 raw 目录或硬拍临时目录，这里只做路径转存。
             const SdkCaptureResult& result = request_.raw_capture;
             original_path_ = JoinPath(output_dir_, "original.jpg");
-            if (!result.raw_payload.empty()) {
-                if (!WriteBytes(original_path_, result.raw_payload)) {
-                    FinishStage("capture_raw", "failed", ProviderName(providers_device), "failed to write captured original", {}, {});
-                    pipeline_result_.code = ToCode(SdkStatusCode::ProviderCallFailed);
-                    pipeline_result_.message = "failed to write captured original";
-                    pipeline_result_.status = "failed";
-                    return CStatus(pipeline_result_.message);
-                }
-            } else {
-                const std::string source_path = !result.original_path.empty() ? result.original_path : result.output_path;
-                if (source_path.empty()) {
-                    FinishStage("capture_raw", "failed", ProviderName(providers_device), "missing captured original", {}, {});
-                    pipeline_result_.code = ToCode(SdkStatusCode::CaptureFailed);
-                    pipeline_result_.message = "missing captured original";
-                    pipeline_result_.status = "failed";
-                    return CStatus(pipeline_result_.message);
-                }
-                if (source_path != original_path_ && !CopyFileBinary(source_path, original_path_)) {
-                    FinishStage("capture_raw", "failed", ProviderName(providers_device), "failed to stage captured original", {}, {});
-                    pipeline_result_.code = ToCode(SdkStatusCode::ProviderCallFailed);
-                    pipeline_result_.message = "failed to stage captured original";
-                    pipeline_result_.status = "failed";
-                    return CStatus(pipeline_result_.message);
-                }
-                if (source_path == original_path_ && !FileExists(original_path_)) {
-                    FinishStage("capture_raw", "failed", ProviderName(providers_device), "captured original does not exist", {}, {});
-                    pipeline_result_.code = ToCode(SdkStatusCode::CaptureFailed);
-                    pipeline_result_.message = "captured original does not exist";
-                    pipeline_result_.status = "failed";
-                    return CStatus(pipeline_result_.message);
-                }
+            const std::string source_path = !result.original_path.empty() ? result.original_path : result.output_path;
+            if (source_path.empty()) {
+                FinishStage("capture_raw", "failed", ProviderName(providers_device), "missing captured original", {}, {});
+                pipeline_result_.code = ToCode(SdkStatusCode::CaptureFailed);
+                pipeline_result_.message = "missing captured original";
+                pipeline_result_.status = "failed";
+                return CStatus(pipeline_result_.message);
+            }
+            if (source_path != original_path_ && !CopyFileBinary(source_path, original_path_)) {
+                FinishStage("capture_raw", "failed", ProviderName(providers_device), "failed to stage captured original", {}, {});
+                pipeline_result_.code = ToCode(SdkStatusCode::ProviderCallFailed);
+                pipeline_result_.message = "failed to stage captured original";
+                pipeline_result_.status = "failed";
+                return CStatus(pipeline_result_.message);
+            }
+            if (source_path == original_path_ && !FileExists(original_path_)) {
+                FinishStage("capture_raw", "failed", ProviderName(providers_device), "captured original does not exist", {}, {});
+                pipeline_result_.code = ToCode(SdkStatusCode::CaptureFailed);
+                pipeline_result_.message = "captured original does not exist";
+                pipeline_result_.status = "failed";
+                return CStatus(pipeline_result_.message);
             }
             laser_path_.clear();
-            if (!result.raw_laser_payload.empty()) {
-                laser_path_ = JoinPath(output_dir_, "laser.jpg");
-                if (!WriteBytes(laser_path_, result.raw_laser_payload)) {
-                    FinishStage("capture_raw", "failed", ProviderName(providers_device), "failed to write captured laser", {}, {});
-                    pipeline_result_.code = ToCode(SdkStatusCode::ProviderCallFailed);
-                    pipeline_result_.message = "failed to write captured laser";
-                    pipeline_result_.status = "failed";
-                    return CStatus(pipeline_result_.message);
-                }
-            } else if (!result.laser_path.empty()) {
+            if (!result.laser_path.empty()) {
                 laser_path_ = JoinPath(output_dir_, "laser.jpg");
                 if (result.laser_path != laser_path_ && !CopyFileBinary(result.laser_path, laser_path_)) {
                     FinishStage("capture_raw", "failed", ProviderName(providers_device), "failed to stage captured laser", {}, {});

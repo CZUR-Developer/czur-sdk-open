@@ -86,18 +86,6 @@ bool CopyFileBinary(const std::string& input_path, const std::string& output_pat
     return output.good();
 }
 
-bool WriteBytes(const std::string& output_path, const std::vector<uint8_t>& bytes) {
-    if (output_path.empty() || bytes.empty()) {
-        return false;
-    }
-    std::ofstream output(output_path.c_str(), std::ios::binary | std::ios::trunc);
-    if (!output.is_open()) {
-        return false;
-    }
-    output.write(reinterpret_cast<const char*>(&bytes[0]), static_cast<std::streamsize>(bytes.size()));
-    return output.good();
-}
-
 bool FileExists(const std::string& path) {
     struct stat st;
     return !path.empty() && ::stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
@@ -299,7 +287,17 @@ CaptureAssetResult CaptureTaskService::GetAsset(const std::string& connection_id
 
 std::size_t CaptureTaskService::ActiveTaskCount() const {
     std::lock_guard<std::mutex> lock(mu_);
-    return active_worker_task_ids_.size();
+    // A reserved task is already a storage owner even before its worker thread
+    // starts. Count queued and running tasks as active so cleanup cannot remove
+    // a hard-grab provider temporary file in the ReserveTask/StartReservedTask
+    // hand-off window.
+    std::size_t active_count = 0;
+    for (std::map<std::string, CaptureTaskSnapshot>::const_iterator it = tasks_.begin(); it != tasks_.end(); ++it) {
+        if (it->second.status != "succeeded" && it->second.status != "failed") {
+            ++active_count;
+        }
+    }
+    return active_count;
 }
 
 std::size_t CaptureTaskService::ClearFinishedTasks() {
@@ -505,43 +503,48 @@ bool CaptureTaskService::StageCapturedRaw(const std::string& task_id,
     }
 
     const std::string original_path = JoinPath(raw_dir, "original.jpg");
-    if (!raw_capture->raw_payload.empty()) {
-        if (!WriteBytes(original_path, raw_capture->raw_payload)) {
-            if (error != NULL) {
-                *error = "failed to persist captured original";
-            }
-            return false;
+    // Provider 写入任务 raw 目录时，路径理论上会随结果返回。为兼容已经部署的
+    // Provider 版本以及跨 DLL 边界的字段缺失，若响应未带路径但目标文件已经存在，
+    // 直接接管该文件；绝不回退到原图 Base64 解码。
+    std::string source_path = !raw_capture->original_path.empty()
+                                  ? raw_capture->original_path
+                                  : raw_capture->output_path;
+    if (source_path.empty() && FileExists(original_path)) {
+        source_path = original_path;
+    }
+    const bool source_exists = !source_path.empty() && FileExists(source_path);
+    bool original_persisted = false;
+    if (source_exists) {
+        original_persisted = source_path == original_path || CopyFileBinary(source_path, original_path);
+    }
+    if (!original_persisted || !FileExists(original_path)) {
+        SDK_OPEN_LOG_ERROR(
+            "[capture_task] persist original failed task_id={} source={} source_exists={} target={} target_exists={} "
+            "captured={} code={} output_path={} original_path={} laser_path={}",
+            task_id,
+            source_path,
+            source_exists,
+            original_path,
+            FileExists(original_path),
+            raw_capture->captured,
+            raw_capture->code,
+            raw_capture->output_path,
+            raw_capture->original_path,
+            raw_capture->laser_path);
+        if (error != NULL) {
+            *error = "failed to persist captured original";
         }
-        raw_capture->raw_payload.clear();
-    } else {
-        const std::string source_path = !raw_capture->original_path.empty()
-                                            ? raw_capture->original_path
-                                            : raw_capture->output_path;
-        if (source_path.empty() || (source_path != original_path && !CopyFileBinary(source_path, original_path)) ||
-            (source_path == original_path && !FileExists(original_path))) {
-            if (error != NULL) {
-                *error = "failed to persist captured original";
-            }
-            return false;
-        }
+        return false;
     }
     raw_capture->original_path = original_path;
     raw_capture->output_path = original_path;
 
-    if (raw_capture->raw_laser_payload.empty() && raw_capture->laser_path.empty()) {
+    if (raw_capture->laser_path.empty()) {
         return true;
     }
     const std::string laser_path = JoinPath(raw_dir, "laser.jpg");
-    if (!raw_capture->raw_laser_payload.empty()) {
-        if (!WriteBytes(laser_path, raw_capture->raw_laser_payload)) {
-            if (error != NULL) {
-                *error = "failed to persist captured laser image";
-            }
-            return false;
-        }
-        raw_capture->raw_laser_payload.clear();
-    } else if ((raw_capture->laser_path != laser_path && !CopyFileBinary(raw_capture->laser_path, laser_path)) ||
-               (raw_capture->laser_path == laser_path && !FileExists(laser_path))) {
+    if ((raw_capture->laser_path != laser_path && !CopyFileBinary(raw_capture->laser_path, laser_path)) ||
+        (raw_capture->laser_path == laser_path && !FileExists(laser_path))) {
         if (error != NULL) {
             *error = "failed to persist captured laser image";
         }

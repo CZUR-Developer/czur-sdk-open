@@ -1045,6 +1045,17 @@ Json BuildCaptureResultJson(const SdkCaptureResult& result) {
                 {"scan_device_type", result.scan_device_type}};
 }
 
+Json BuildHardGrabEventCaptureJson(const SdkCaptureResult& result) {
+    // Provider 临时文件路径只供内部任务转存使用，不暴露到硬拍事件，避免客户端
+    // 依赖会被 storage cleanup 清理的临时文件；最终路径仍通过 task assets 返回。
+    Json capture = BuildCaptureResultJson(result);
+    capture["path"] = "";
+    capture["output_path"] = "";
+    capture["original_path"] = "";
+    capture["laser_path"] = "";
+    return capture;
+}
+
 Json BuildStageJson(const SdkCaptureStageResult& stage) {
     return Json{{"name", stage.name},
                 {"status", stage.status},
@@ -2694,7 +2705,7 @@ CommandApplicationService::BuildHardGrabPayload(const std::string& connection_id
                    {"ts_ms", event.timestamp_ms}};
     if (!event.capture.captured) {
         if (event.auto_capture) {
-            payload["capture"] = BuildCaptureResultJson(event.capture);
+            payload["capture"] = BuildHardGrabEventCaptureJson(event.capture);
         }
         payload_result.code = event.capture.code;
         payload_result.message = event.capture.message.empty() ? "hardgrab image was not captured" : event.capture.message;
@@ -2715,7 +2726,7 @@ CommandApplicationService::BuildHardGrabPayload(const std::string& connection_id
     // capture.take 的鉴权和配额检查；失败时不创建 task，直接在事件中回传原因。
     AuthorizationService::SessionResult session_result = RequireCapability(connection_id, "capture.take");
     if (!IsOkStatusCode(session_result.code)) {
-        payload["capture"] = BuildCaptureResultJson(event.capture);
+        payload["capture"] = BuildHardGrabEventCaptureJson(event.capture);
         payload["accepted"] = false;
         payload["code"] = session_result.code;
         payload["message"] = session_result.message;
@@ -2729,7 +2740,7 @@ CommandApplicationService::BuildHardGrabPayload(const std::string& connection_id
     const int output_profile_code =
         ApplyCaptureOutputCapabilities(session_result.auth_context, &profile, &profile_error);
     if (!IsOkStatusCode(output_profile_code)) {
-        payload["capture"] = BuildCaptureResultJson(event.capture);
+        payload["capture"] = BuildHardGrabEventCaptureJson(event.capture);
         payload["accepted"] = false;
         payload["code"] = output_profile_code;
         payload["message"] = profile_error;
@@ -2762,7 +2773,7 @@ CommandApplicationService::BuildHardGrabPayload(const std::string& connection_id
                       start_request.pipeline.steps.size());
     CaptureTaskStartResult result = capture_task_service_.ReserveTask(start_request);
     if (!IsOkStatusCode(result.code)) {
-        payload["capture"] = BuildCaptureResultJson(event.capture);
+        payload["capture"] = BuildHardGrabEventCaptureJson(event.capture);
         payload["accepted"] = false;
         payload["code"] = result.code;
         payload["message"] = result.message;
@@ -2782,7 +2793,7 @@ CommandApplicationService::BuildHardGrabPayload(const std::string& connection_id
         ConsumeQuota(connection_id, "capture.take", BuildHardGrabQuotaRequestId(event));
     if (!IsOkStatusCode(quota_result.code)) {
         capture_task_service_.AbortReservedTask(result.task.task_id);
-        payload["capture"] = BuildCaptureResultJson(event.capture);
+        payload["capture"] = BuildHardGrabEventCaptureJson(event.capture);
         payload["accepted"] = false;
         payload["code"] = quota_result.code;
         payload["message"] = quota_result.message;
@@ -2793,7 +2804,7 @@ CommandApplicationService::BuildHardGrabPayload(const std::string& connection_id
         return payload_result;
     }
     result = capture_task_service_.StartReservedTask(result.task.task_id);
-    payload["capture"] = BuildCaptureResultJson(event.capture);
+    payload["capture"] = BuildHardGrabEventCaptureJson(event.capture);
     payload["accepted"] = result.accepted;
     payload["code"] = result.code;
     payload["message"] = result.message;
