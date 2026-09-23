@@ -11,6 +11,12 @@
 - `image.enhance` 的 `blank_page_detect` 步骤改用采编王的空白页检测算法，新增 `mode`：`strict`（严格）、`standard`（标准，默认）、`loose`（宽松）。保留 `action`：`mark`（标记）、`drop`（移除，默认）。例如：`{"type":"blank_page_detect","params":{"mode":"standard","action":"mark"}}`。
 - 移除空白页检测的 `threshold` 参数及 `white_ratio`/`threshold` 结果字段，不提供兼容；携带旧参数的请求返回 `InvalidParams`。结果元数据改为返回实际使用的 `mode`，页面仍返回 `blank`，步骤仍返回 `action` 和 `dropped_pages`。
 
+## [0.0.8] - 2026-09-23
+
+### 变更
+
+- 优化拍照流程 Pipeline，支持采集流异步处理。
+
 ## [0.0.7] - 2026-09-16
 
 ### 新增

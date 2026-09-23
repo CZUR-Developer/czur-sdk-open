@@ -4,6 +4,12 @@
 
 All notable changes to the CZUR Open SDK are documented in this file.
 
+## [0.0.8] - 2026-09-23
+
+### Changed
+
+- Optimized the capture pipeline to support asynchronous processing of capture streams.
+
 ## [0.0.7] - 2026-09-16
 
 ### Added
