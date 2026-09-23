@@ -196,52 +196,6 @@ std::vector<std::string> StringArrayField(const Json& object, const char* key) {
     return values;
 }
 
-int Base64DecodeValue(char ch) {
-    if (ch >= 'A' && ch <= 'Z') {
-        return ch - 'A';
-    }
-    if (ch >= 'a' && ch <= 'z') {
-        return ch - 'a' + 26;
-    }
-    if (ch >= '0' && ch <= '9') {
-        return ch - '0' + 52;
-    }
-    if (ch == '+') {
-        return 62;
-    }
-    if (ch == '/') {
-        return 63;
-    }
-    return -1;
-}
-
-std::vector<uint8_t> Base64Decode(const std::string& input) {
-    std::vector<uint8_t> output;
-    int value = 0;
-    int bits = -8;
-    for (std::string::const_iterator it = input.begin(); it != input.end(); ++it) {
-        const char ch = *it;
-        if (ch == '=') {
-            break;
-        }
-        if (ch == '\r' || ch == '\n' || ch == '\t' || ch == ' ') {
-            continue;
-        }
-        const int decoded = Base64DecodeValue(ch);
-        if (decoded < 0) {
-            output.clear();
-            return output;
-        }
-        value = (value << 6) | decoded;
-        bits += 6;
-        if (bits >= 0) {
-            output.push_back(static_cast<uint8_t>((value >> bits) & 0xFF));
-            bits -= 8;
-        }
-    }
-    return output;
-}
-
 Json ImageEnhancePageToJson(const SdkImageEnhancePage& page) {
     return Json{{"source_index", page.source_index},
                 {"output_index", page.output_index},
@@ -283,8 +237,6 @@ SdkCaptureResult CaptureResultFromJson(const Json& value) {
     result.detected_rects_source_width = IntField(value, "detected_rects_source_width");
     result.detected_rects_source_height = IntField(value, "detected_rects_source_height");
     result.scan_device_type = IntField(value, "scan_device_type");
-    result.raw_payload = Base64Decode(StringField(value, "raw_payload_base64"));
-    result.raw_laser_payload = Base64Decode(StringField(value, "raw_laser_payload_base64"));
     return result;
 }
 

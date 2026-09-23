@@ -395,7 +395,6 @@ void TestFifoRateLimitHardGrabAndSummary() {
     Require(rate_limited.retry_after_ms > 0, "rate limit should report retry_after_ms");
     CaptureTaskStartRequest rate_limited_hardgrab = MakeRequest("connection-a");
     rate_limited_hardgrab.raw_capture.captured = true;
-    rate_limited_hardgrab.raw_capture.raw_payload.assign(8, static_cast<uint8_t>('R'));
     const CaptureTaskStartResult hardgrab_rate_limited = service.ReserveTask(rate_limited_hardgrab);
     Require(hardgrab_rate_limited.code == ToCode(SdkStatusCode::RateLimited),
             "hardgrab inside 1500ms should use the same rate limit");
@@ -413,16 +412,38 @@ void TestFifoRateLimitHardGrabAndSummary() {
     CaptureTaskStartRequest hardgrab = MakeRequest("connection-a");
     hardgrab.raw_capture.captured = true;
     hardgrab.raw_capture.content_type = "image/jpeg";
-    hardgrab.raw_capture.raw_payload.assign(8, static_cast<uint8_t>('J'));
+    const std::string hardgrab_path = JoinPath(GetSdkOpenCaptureDir(), "test-hardgrab-original.jpg");
+    Require(EnsureDirectoryRecursive(GetSdkOpenCaptureDir()), "hardgrab test directory should exist");
+    {
+        std::ofstream output(hardgrab_path.c_str(), std::ios::binary | std::ios::trunc);
+        output << "test hardgrab original";
+        Require(output.good(), "hardgrab test original should be writable");
+    }
+    hardgrab.raw_capture.original_path = hardgrab_path;
+    hardgrab.raw_capture.output_path = hardgrab_path;
+    hardgrab.raw_capture.size = 22;
     const CaptureTaskStartResult hardgrab_task = ReserveAndStart(&service, hardgrab);
     Require(WaitForTerminal(&service, "connection-a", hardgrab_task.task.task_id), "hardgrab task should finish");
     Require(device->CaptureStillCount() == 2, "hardgrab must not call CaptureStill a second time");
     const CaptureTaskSnapshot hardgrab_snapshot = service.GetTask("connection-a", hardgrab_task.task.task_id);
     Require(hardgrab_snapshot.capture_source == "hardgrab", "hardgrab task source should be visible");
 
+    std::this_thread::sleep_for(std::chrono::milliseconds(1550));
+    CaptureTaskStartRequest missing_hardgrab = MakeRequest("connection-a");
+    missing_hardgrab.raw_capture.captured = true;
+    missing_hardgrab.raw_capture.content_type = "image/jpeg";
+    missing_hardgrab.raw_capture.original_path = JoinPath(GetSdkOpenCaptureDir(), "missing-hardgrab.jpg");
+    missing_hardgrab.raw_capture.output_path = missing_hardgrab.raw_capture.original_path;
+    const CaptureTaskStartResult missing_task = ReserveAndStart(&service, missing_hardgrab);
+    Require(WaitForTerminal(&service, "connection-a", missing_task.task.task_id),
+            "missing hardgrab source should become terminal");
+    const CaptureTaskSnapshot missing_snapshot = service.GetTask("connection-a", missing_task.task.task_id);
+    Require(missing_snapshot.status == "failed" && missing_snapshot.acquisition_status == "failed",
+            "missing hardgrab source should fail during acquisition staging");
+
     const CaptureSessionSummary summary = service.GetSessionSummary("connection-a");
-    Require(summary.captured_count == 3 && summary.processed_count == 3 && summary.failed_count == 0 && summary.pending_count == 0,
-            "successful capture summary should count acquired and processed tasks");
+    Require(summary.captured_count == 3 && summary.processed_count == 3 && summary.failed_count == 1 && summary.pending_count == 0,
+            "capture summary should count acquired, processed and staging failures");
     Require(events.HasReason("raw_captured") && events.HasReason("processing_completed"),
             "session updates should cover raw acquisition and processing completion");
     const CaptureSessionSummary other_summary = service.GetSessionSummary("connection-b");
