@@ -915,14 +915,26 @@ private:
         event.auto_capture = true;
         event.timestamp_ms = NowMs();
         // mock 硬拍默认不自动触发；设置 SDK_OPEN_MOCK_HARDGRAB_ON_PREVIEW=1 后，
-        // 直接携带 raw JPEG 覆盖 hardgrab -> capture task -> completed 的完整链路。
-        event.capture.captured = true;
+        // 在 Provider 临时目录落盘，覆盖 hardgrab -> capture task -> completed 的完整链路。
+        const std::string output_dir = JoinPath(
+            JoinPath(GetSdkOpenCaptureDir(), "mock-hardgrab"),
+            std::to_string(static_cast<unsigned long long>(frame_seq)));
+        const std::string output_path = JoinPath(output_dir, "original.jpg");
         event.capture.content_type = "image/jpeg";
-        event.capture.raw_payload = TinyJpeg();
         event.capture.width = 1;
         event.capture.height = 1;
         event.capture.dpi = 96;
-        event.capture.size = event.capture.raw_payload.size();
+        const std::vector<uint8_t> jpeg = TinyJpeg();
+        if (!EnsureDirectoryRecursive(output_dir) || jpeg.empty()) {
+            event.capture.code = ToCode(SdkStatusCode::ProviderCallFailed);
+            event.capture.message = "failed to create mock hardgrab output";
+        } else {
+            WriteBytes(output_path, jpeg);
+            event.capture.captured = true;
+            event.capture.output_path = output_path;
+            event.capture.original_path = output_path;
+            event.capture.size = jpeg.size();
+        }
         PublishDeviceActionEvent(event);
     }
 

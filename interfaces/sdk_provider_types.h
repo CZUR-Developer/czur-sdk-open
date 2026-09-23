@@ -242,11 +242,11 @@ struct SdkCaptureResult {
     std::string message = "ok";
     bool captured = false;
     std::string content_type;
+    // Optional public compatibility payload. Provider-to-SDK raw images are
+    // exchanged through the path fields below, never through this field.
     std::string payload;
-    // 内部原图传递字段：provider 只把硬拍原始图交给 capture task，
-    // 对外 websocket 仍通过 task assets 暴露最终路径，避免临时文件协议外泄。
-    std::vector<uint8_t> raw_payload;
-    std::vector<uint8_t> raw_laser_payload;
+    // Provider-owned original files. The SDK Open task copies them into its
+    // task raw directory before processing.
     std::string output_path;
     std::string original_path;
     std::string laser_path;
