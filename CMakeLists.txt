@@ -371,6 +371,15 @@ if(BUILD_SDK_OPEN_TESTS)
     )
     add_test(NAME sdk_open.capture_task_service
              COMMAND sdk_open_capture_task_service_test)
+
+    add_executable(sdk_open_status_software_test
+        test/status_software_test.cpp
+    )
+    target_link_libraries(sdk_open_status_software_test PRIVATE
+        sdk_open_runtime
+    )
+    add_test(NAME sdk_open.status_software
+             COMMAND sdk_open_status_software_test)
 endif()
 if(WIN32 AND SDK_OPEN_USE_PRIVATE_PROVIDER)
     target_sources(sdk_open_app PRIVATE

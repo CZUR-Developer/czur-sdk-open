@@ -22,6 +22,8 @@
 namespace editor {
 namespace sdk {
 
+class SdkAppStatusTest;
+
 class SdkApp {
 public:
     SdkApp(const SdkConfig& config, ProviderBundle providers);
@@ -30,6 +32,8 @@ public:
     bool IsRunning() const;
 
 private:
+    friend class SdkAppStatusTest;
+
     Json BuildStatusJson() const;
     Json BuildSystemJson() const;
     Json BuildAuthJson() const;
