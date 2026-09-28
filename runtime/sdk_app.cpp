@@ -608,6 +608,10 @@ Json SdkApp::BuildStatusJson() const {
         {"running", running_.load()},
         {"uptimeSec", UptimeSeconds()},
         {"bindHost", config_.bind_host},
+        {"software",
+         Json{{"version", SDK_OPEN_VERSION_STRING},
+              {"build", SDK_OPEN_BUILD_NUMBER},
+              {"protocolVersion", "2.0.0"}}},
         {"process",
          {
              {"pid", CurrentProcessId()},
