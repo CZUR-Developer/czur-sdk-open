@@ -18,6 +18,7 @@
 #include <utility>
 
 #include "sdk_runtime_paths.h"
+#include "image_enhance_workflow_store.h"
 #include "sdk_entitlement_policy.h"
 #include "sdk_logger.h"
 
@@ -336,66 +337,6 @@ bool EnsureTwainOutputDirectoryReady(const std::string& raw_dir, std::string* no
 }
 
 
-SdkAccountType MaxRequiredTier(SdkAccountType lhs, SdkAccountType rhs) {
-    return EntitlementRank(lhs) >= EntitlementRank(rhs) ? lhs : rhs;
-}
-
-SdkAccountType RequiredTierForColorMode(const std::string& color_mode) {
-    const std::string value = NormalizeLower(color_mode);
-    if (value == "white_paper_seal" || value == "white_paper_stamp") {
-        return SdkAccountType::Svip;
-    }
-    if (value == "ancient" || value == "ancient_book") {
-        return SdkAccountType::SvipPlus;
-    }
-    return SdkAccountType::Trial;
-}
-
-SdkAccountType RequiredTierForImageProcess(const std::string& page_processing,
-                                           const std::string& color_mode,
-                                           const SdkSinglePageOptions& single_page,
-                                           const SdkCurvedBookOptions&) {
-    SdkAccountType required = RequiredTierForColorMode(color_mode);
-    if (single_page.auto_rotate) {
-        required = MaxRequiredTier(required, SdkAccountType::Vip);
-    }
-    const std::string processing = NormalizeLower(page_processing);
-    if (processing == "curved_book" || processing == "book" || processing == "curve_flatten") {
-        required = MaxRequiredTier(required, SdkAccountType::Svip);
-    }
-    return required;
-}
-
-SdkAccountType RequiredTierForEnhanceStep(const std::string& step_type) {
-    const std::string type = NormalizeLower(step_type);
-    if (type == "rotate") {
-        return SdkAccountType::Vip;
-    }
-    if (type == "blank_page_detect" || type == "normalize_spec" || type == "red_green_head" ||
-        type == "white_paper_seal" || type == "white_paper_stamp" || type == "curved_book") {
-        return SdkAccountType::Svip;
-    }
-    if (type == "ancient" || type == "ancient_book" || type == "hole_fill" || type == "punch_hole_fill" ||
-        type == "doc_crop_enhance" || type == "document_rectify_enhance" || type == "remove_handwriting" ||
-        type == "doc_repair" || type == "remove_background_texture" || type == "remove_moire") {
-        return SdkAccountType::SvipPlus;
-    }
-    return SdkAccountType::Trial;
-}
-
-SdkAccountType RequiredTierForEnhancePipeline(const SdkImageEnhancePipeline& pipeline) {
-    SdkAccountType required = SdkAccountType::Trial;
-    for (std::vector<SdkImageEnhanceStep>::const_iterator it = pipeline.steps.begin();
-         it != pipeline.steps.end();
-         ++it) {
-        if (!it->enabled) {
-            continue;
-        }
-        required = MaxRequiredTier(required, RequiredTierForEnhanceStep(it->type));
-    }
-    return required;
-}
-
 SdkAccountType RequiredTierForFileConvert(const SdkFileConvertRequest& request) {
     std::string format = NormalizeLower(request.output_format);
     if (format == "jpeg") {
@@ -419,28 +360,6 @@ SdkAccountType RequiredTierForFileConvert(const SdkFileConvertRequest& request) 
         return SdkAccountType::Svip;
     }
     return SdkAccountType::Trial;
-}
-
-std::string TrialQuotaCapabilityFor(const std::string& method, SdkAccountType required) {
-    if (required == SdkAccountType::Vip) {
-        if (method.find("image.enhance") == 0) return "image.enhance.vip";
-        if (method.find("image.") == 0) return "image.process.vip";
-        if (method == "file.convert") return "file.convert.vip";
-        return method;
-    }
-    if (required == SdkAccountType::Svip) {
-        if (method.find("image.enhance") == 0) return "image.enhance.svip";
-        if (method.find("image.") == 0) return "image.process.svip";
-        if (method == "file.convert") return "file.convert.svip";
-        return method;
-    }
-    if (required == SdkAccountType::SvipPlus) {
-        if (method.find("image.enhance") == 0) return "image.enhance.svip_plus";
-        if (method.find("image.") == 0) return "image.process.svip_plus";
-        if (method == "file.convert") return "file.convert.svip_plus";
-        return method;
-    }
-    return method;
 }
 
 void ApplyOnlineImageEnhanceAvailability(SdkImageEnhanceCapabilityResult* result, bool online_available) {
@@ -645,31 +564,6 @@ bool WriteBinaryFile(const std::string& path, const std::string& content) {
         return false;
     }
     out.write(content.data(), static_cast<std::streamsize>(content.size()));
-    return static_cast<bool>(out);
-}
-
-bool ReadJsonFile(const std::string& path, Json* out_json) {
-    if (out_json == NULL) {
-        return false;
-    }
-    std::ifstream in(path.c_str(), std::ios::binary);
-    if (!in) {
-        return false;
-    }
-    try {
-        in >> *out_json;
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
-bool WriteJsonFile(const std::string& path, const Json& value) {
-    std::ofstream out(path.c_str(), std::ios::binary | std::ios::trunc);
-    if (!out) {
-        return false;
-    }
-    out << value.dump(2);
     return static_cast<bool>(out);
 }
 
@@ -1016,17 +910,6 @@ Json BuildCaptureOutputCapabilitiesJson(const SdkCaptureOutputCapabilities& capa
                 {"target_sizes", target_sizes}};
 }
 
-std::string FormatOutputTargetSizeList(const std::vector<SdkOutputTargetSizeOption>& options) {
-    std::ostringstream oss;
-    for (std::vector<SdkOutputTargetSizeOption>::const_iterator it = options.begin(); it != options.end(); ++it) {
-        if (it != options.begin()) {
-            oss << ",";
-        }
-        oss << it->target_size;
-    }
-    return oss.str();
-}
-
 // 仅用于 websocket 事件回传 provider 原始采集状态。
 // 最终对外可下载路径仍以 capture task assets 为准。
 Json BuildCaptureResultJson(const SdkCaptureResult& result) {
@@ -1235,70 +1118,6 @@ SdkImageEnhancePipeline ParseImageEnhancePipeline(const Json& pipeline_json) {
         }
     }
     return pipeline;
-}
-
-std::string ImageEnhanceWorkflowDir() {
-    return JoinPath(GetSdkOpenWorkDir(), "profiles");
-}
-
-std::string ImageEnhanceWorkflowStorePath() {
-    return JoinPath(ImageEnhanceWorkflowDir(), "image_enhance_workflows.json");
-}
-
-Json LoadImageEnhanceWorkflowStore() {
-    Json store;
-    if (!ReadJsonFile(ImageEnhanceWorkflowStorePath(), &store) || !store.is_object()) {
-        store = Json::object();
-    }
-    if (store.find("workflows") == store.end() || !store["workflows"].is_array()) {
-        store["workflows"] = Json::array();
-    }
-    return store;
-}
-
-bool SaveImageEnhanceWorkflowStore(const Json& store) {
-    if (!EnsureDirectoryRecursive(ImageEnhanceWorkflowDir())) {
-        return false;
-    }
-    return WriteJsonFile(ImageEnhanceWorkflowStorePath(), store);
-}
-
-std::string CurrentTimestampString() {
-    return std::to_string(static_cast<long long>(std::time(NULL)));
-}
-
-std::string NextWorkflowId() {
-    static uint64_t seq = 1;
-    return "wf-" + CurrentTimestampString() + "-" + std::to_string(static_cast<long long>(seq++));
-}
-
-Json NormalizeImageEnhanceWorkflow(Json workflow) {
-    if (!workflow.is_object()) {
-        workflow = Json::object();
-    }
-    if (!workflow.contains("workflow_id") || !workflow["workflow_id"].is_string() || workflow["workflow_id"].get<std::string>().empty()) {
-        workflow["workflow_id"] = NextWorkflowId();
-    }
-    if (!workflow.contains("name") || !workflow["name"].is_string() || workflow["name"].get<std::string>().empty()) {
-        workflow["name"] = "Untitled workflow";
-    }
-    if (!workflow.contains("description") || !workflow["description"].is_string()) {
-        workflow["description"] = "";
-    }
-    if (!workflow.contains("pipeline") || !workflow["pipeline"].is_object()) {
-        workflow["pipeline"] = Json{{"version", "image.enhance.pipeline.v1"},
-                                    {"steps", Json::array()},
-                                    {"target", Json{{"type", "images"}, {"format", "jpg"}, {"export_type", "single-page"}}}};
-    }
-    if (!workflow["pipeline"].contains("target") || !workflow["pipeline"]["target"].is_object()) {
-        workflow["pipeline"]["target"] = Json{{"type", "images"}, {"format", "jpg"}, {"export_type", "single-page"}};
-    }
-    const std::string now = CurrentTimestampString();
-    if (!workflow.contains("created_at") || !workflow["created_at"].is_string()) {
-        workflow["created_at"] = now;
-    }
-    workflow["updated_at"] = now;
-    return workflow;
 }
 
 Json BuildSaneStatusJson(const SdkSaneStatusResult& result, const std::string& provider) {
@@ -4983,14 +4802,12 @@ Json CommandApplicationService::HandleImageEnhanceWorkflowList(const std::string
     if (!IsOkStatusCode(session_result.code)) {
         return BuildWsResponse(request.request_id, session_result.code, session_result.message);
     }
-    const Json store = LoadImageEnhanceWorkflowStore();
-    const Json workflows = store.find("workflows") != store.end() && store["workflows"].is_array() ? store["workflows"] : Json::array();
-    return BuildWsResponse(request.request_id,
-                           SdkStatusCode::Ok,
-                           "ok",
-                           Json{{"workflows", workflows},
-                                {"count", workflows.size()},
-                                {"provider", ProviderNameOrEmpty(provider_names_, "imageEnhance")}});
+    ImageEnhanceWorkflowResult result = ListImageEnhanceWorkflows();
+    if (!IsOkStatusCode(result.code)) {
+        return BuildWsResponse(request.request_id, result.code, result.message, result.data);
+    }
+    result.data["provider"] = ProviderNameOrEmpty(provider_names_, "imageEnhance");
+    return BuildWsResponse(request.request_id, result.code, result.message, result.data);
 }
 
 Json CommandApplicationService::HandleImageEnhanceWorkflowGet(const std::string& connection_id, const Request& request) {
@@ -4998,18 +4815,8 @@ Json CommandApplicationService::HandleImageEnhanceWorkflowGet(const std::string&
     if (!IsOkStatusCode(session_result.code)) {
         return BuildWsResponse(request.request_id, session_result.code, session_result.message);
     }
-    const std::string workflow_id = GetOptionalStringField(request.params, "workflow_id");
-    if (workflow_id.empty()) {
-        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "workflow_id required");
-    }
-    const Json store = LoadImageEnhanceWorkflowStore();
-    const Json workflows = store.find("workflows") != store.end() && store["workflows"].is_array() ? store["workflows"] : Json::array();
-    for (Json::const_iterator it = workflows.begin(); it != workflows.end(); ++it) {
-        if (it->is_object() && GetOptionalStringField(*it, "workflow_id") == workflow_id) {
-            return BuildWsResponse(request.request_id, SdkStatusCode::Ok, "ok", Json{{"workflow", *it}});
-        }
-    }
-    return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "image enhance workflow not found");
+    const ImageEnhanceWorkflowResult result = GetImageEnhanceWorkflow(GetOptionalStringField(request.params, "workflow_id"));
+    return BuildWsResponse(request.request_id, result.code, result.message, result.data);
 }
 
 Json CommandApplicationService::HandleImageEnhanceWorkflowSave(const std::string& connection_id, const Request& request) {
@@ -5021,34 +4828,8 @@ Json CommandApplicationService::HandleImageEnhanceWorkflowSave(const std::string
     if (workflow.empty()) {
         workflow = request.params;
     }
-    workflow = NormalizeImageEnhanceWorkflow(workflow);
-    const std::string workflow_id = GetOptionalStringField(workflow, "workflow_id");
-    Json store = LoadImageEnhanceWorkflowStore();
-    Json workflows = store.find("workflows") != store.end() && store["workflows"].is_array() ? store["workflows"] : Json::array();
-    bool updated = false;
-    for (Json::iterator it = workflows.begin(); it != workflows.end(); ++it) {
-        if (it->is_object() && GetOptionalStringField(*it, "workflow_id") == workflow_id) {
-            if (it->contains("created_at") && (*it)["created_at"].is_string()) {
-                workflow["created_at"] = (*it)["created_at"];
-            }
-            *it = workflow;
-            updated = true;
-            break;
-        }
-    }
-    if (!updated) {
-        workflows.push_back(workflow);
-    }
-    store["workflows"] = workflows;
-    if (!SaveImageEnhanceWorkflowStore(store)) {
-        return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "failed to save image enhance workflow");
-    }
-    return BuildWsResponse(request.request_id,
-                           SdkStatusCode::Ok,
-                           "ok",
-                           Json{{"saved", true},
-                                {"updated", updated},
-                                {"workflow", workflow}});
+    const ImageEnhanceWorkflowResult result = SaveImageEnhanceWorkflow(workflow);
+    return BuildWsResponse(request.request_id, result.code, result.message, result.data);
 }
 
 Json CommandApplicationService::HandleImageEnhanceWorkflowDelete(const std::string& connection_id, const Request& request) {
@@ -5056,34 +4837,8 @@ Json CommandApplicationService::HandleImageEnhanceWorkflowDelete(const std::stri
     if (!IsOkStatusCode(session_result.code)) {
         return BuildWsResponse(request.request_id, session_result.code, session_result.message);
     }
-    const std::string workflow_id = GetOptionalStringField(request.params, "workflow_id");
-    if (workflow_id.empty()) {
-        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "workflow_id required");
-    }
-    Json store = LoadImageEnhanceWorkflowStore();
-    Json workflows = store.find("workflows") != store.end() && store["workflows"].is_array() ? store["workflows"] : Json::array();
-    Json kept = Json::array();
-    bool deleted = false;
-    for (Json::const_iterator it = workflows.begin(); it != workflows.end(); ++it) {
-        if (it->is_object() && GetOptionalStringField(*it, "workflow_id") == workflow_id) {
-            deleted = true;
-            continue;
-        }
-        kept.push_back(*it);
-    }
-    if (!deleted) {
-        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, "image enhance workflow not found");
-    }
-    store["workflows"] = kept;
-    if (!SaveImageEnhanceWorkflowStore(store)) {
-        return BuildWsResponse(request.request_id, SdkStatusCode::InternalError, "failed to delete image enhance workflow");
-    }
-    return BuildWsResponse(request.request_id,
-                           SdkStatusCode::Ok,
-                           "ok",
-                           Json{{"deleted", true},
-                                {"workflow_id", workflow_id},
-                                {"count", kept.size()}});
+    const ImageEnhanceWorkflowResult result = DeleteImageEnhanceWorkflow(GetOptionalStringField(request.params, "workflow_id"));
+    return BuildWsResponse(request.request_id, result.code, result.message, result.data);
 }
 
 Json CommandApplicationService::HandleOcrRecognize(const std::string& connection_id, const Request& request) {
@@ -6845,64 +6600,7 @@ Json CommandApplicationService::BuildAuthContextJson(const AuthContext& auth_con
 int CommandApplicationService::ApplyCaptureOutputCapabilities(const AuthContext& auth_context,
                                                               SdkCaptureProfile* profile,
                                                               std::string* message) const {
-    if (profile == NULL || profile->output_target_size <= 0) {
-        return ToCode(SdkStatusCode::Ok);
-    }
-    if (profile->device_id.empty()) {
-        if (message != NULL) {
-            *message = "device_id required for output.target_size";
-        }
-        return ToCode(SdkStatusCode::InvalidParams);
-    }
-
-    const DeviceGetResult device_result = device_facade_.GetDevice(auth_context, profile->device_id);
-    if (!IsOkStatusCode(device_result.code)) {
-        if (message != NULL) {
-            *message = device_result.message;
-        }
-        return device_result.code;
-    }
-
-    const SdkCaptureOutputCapabilities& capabilities = device_result.device.capture_output;
-    if (!capabilities.target_size_supported || capabilities.target_sizes.empty()) {
-        SDK_OPEN_LOG_INFO("[command_application] output.target_size ignored device={} target_size={} reason=unsupported",
-                          profile->device_id,
-                          profile->output_target_size);
-        profile->output_target_size = 0;
-        profile->output_target_width = 0;
-        profile->output_target_height = 0;
-        return ToCode(SdkStatusCode::Ok);
-    }
-
-    for (std::vector<SdkOutputTargetSizeOption>::const_iterator it = capabilities.target_sizes.begin();
-         it != capabilities.target_sizes.end();
-         ++it) {
-        if (it->target_size != profile->output_target_size) {
-            continue;
-        }
-        int target_width = it->width;
-        int target_height = it->height;
-        if (target_width <= 0 || target_height <= 0) {
-            ResolveSdkOutputTargetSize(it->target_size, &target_width, &target_height);
-        }
-        if (target_width <= 0 || target_height <= 0) {
-            if (message != NULL) {
-                *message = "unsupported output.target_size: " + std::to_string(profile->output_target_size);
-            }
-            return ToCode(SdkStatusCode::InvalidParams);
-        }
-        profile->output_target_width = target_width;
-        profile->output_target_height = target_height;
-        return ToCode(SdkStatusCode::Ok);
-    }
-
-    const std::string allowed = FormatOutputTargetSizeList(capabilities.target_sizes);
-    if (message != NULL) {
-        *message = allowed.empty()
-            ? "unsupported output.target_size: " + std::to_string(profile->output_target_size)
-            : "unsupported output.target_size: " + std::to_string(profile->output_target_size) + ", allowed: " + allowed;
-    }
-    return ToCode(SdkStatusCode::InvalidParams);
+    return device_facade_.ApplyCaptureOutputCapabilities(auth_context, profile, message);
 }
 
 Json CommandApplicationService::BuildDeviceJson(const SdkDeviceDescriptor& device, bool include_capture_output) const {

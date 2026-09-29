@@ -3,6 +3,8 @@
 
 #include "capture_task_service.h"
 
+#include "image_enhance_quota.h"
+
 #include <algorithm>
 #include <chrono>
 #include <ctime>
@@ -130,8 +132,21 @@ CaptureTaskService::~CaptureTaskService() {
 }
 
 void CaptureTaskService::SetEventSink(EventSink sink) {
-    std::lock_guard<std::mutex> lock(mu_);
-    event_sink_ = sink;
+    EventSink previous;
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        previous.swap(event_sink_);
+        event_sink_.swap(sink);
+    }
+}
+
+void CaptureTaskService::SetSnapshotEventSink(SnapshotEventSink sink) {
+    SnapshotEventSink previous;
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        previous.swap(snapshot_event_sink_);
+        snapshot_event_sink_.swap(sink);
+    }
 }
 
 CaptureTaskStartResult CaptureTaskService::ReserveTask(const CaptureTaskStartRequest& request) {
@@ -176,9 +191,10 @@ CaptureTaskStartResult CaptureTaskService::ReserveTask(const CaptureTaskStartReq
         // 硬拍回调已携带原图，当前线程只做原图落盘而不再发起物理拍照；
         // 它参与同一 1500ms 限频，但不应把短暂的落盘当成设备物理采集占用。
         if (!request.raw_capture.captured) {
-            active_capture_devices_.insert(request.device_id);
+            active_capture_devices_[request.device_id] = task_id;
         }
         capture_cooldown_until_[request.device_id] = now + std::chrono::milliseconds(kCaptureCooldownMs);
+        capture_cooldown_owners_[request.device_id] = task_id;
         tasks_[task_id] = task;
         requests_[task_id] = request;
     }
@@ -196,49 +212,160 @@ CaptureTaskStartResult CaptureTaskService::StartReservedTask(const std::string& 
         result.message = "capture task not found";
         return result;
     }
-    if (task_it->second.acquisition_status != "queued") {
+    if (task_it->second.acquisition_status != "queued" ||
+        cancel_requested_task_ids_.find(task_id) != cancel_requested_task_ids_.end() ||
+        task_activity_counts_.find(task_id) != task_activity_counts_.end()) {
         result.code = ToCode(SdkStatusCode::InvalidParams);
         result.message = "capture task is not pending";
         return result;
     }
-    active_worker_task_ids_.insert(task_id);
     try {
+        // Prepare the complete return value before admitting a thread.
+        result.task = task_it->second;
+        BeginTaskActivityUnlocked(task_id);
         // reserve 先完成可能抛异常的内存分配；随后移动 std::thread 不会再因
         // vector 扩容丢失一个 joinable worker。
         workers_.reserve(workers_.size() + 1);
-        workers_.push_back(std::thread(&CaptureTaskService::RunCaptureTask, this, task_id));
+        std::thread worker(&CaptureTaskService::RunCaptureTask, this, task_id);
+        workers_.push_back(std::move(worker));
     } catch (const std::exception& e) {
-        active_worker_task_ids_.erase(task_id);
-        active_capture_devices_.erase(task_it->second.device_id);
-        capture_cooldown_until_.erase(task_it->second.device_id);
+        task_activity_counts_.erase(task_id);
+        ReleaseCaptureOwnershipUnlocked(task_id, true);
         requests_.erase(task_id);
         tasks_.erase(task_it);
+        result.task = CaptureTaskSnapshot();
         result.code = ToCode(SdkStatusCode::InternalError);
         result.message = e.what();
         return result;
     } catch (...) {
-        active_worker_task_ids_.erase(task_id);
-        active_capture_devices_.erase(task_it->second.device_id);
-        capture_cooldown_until_.erase(task_it->second.device_id);
+        task_activity_counts_.erase(task_id);
+        ReleaseCaptureOwnershipUnlocked(task_id, true);
         requests_.erase(task_id);
         tasks_.erase(task_it);
+        result.task = CaptureTaskSnapshot();
         result.code = ToCode(SdkStatusCode::InternalError);
         result.message = "failed to start capture task";
         return result;
     }
     result.accepted = true;
-    result.task = task_it->second;
     return result;
+}
+
+void CaptureTaskService::ReleaseCaptureOwnershipUnlocked(const std::string& task_id,
+                                                          bool reset_cooldown) {
+    const auto task = tasks_.find(task_id);
+    if (task == tasks_.end()) return;
+    const std::string& device_id = task->second.device_id;
+    const auto owner = active_capture_devices_.find(device_id);
+    if (owner != active_capture_devices_.end() && owner->second == task_id) {
+        active_capture_devices_.erase(owner);
+    }
+    const auto cooldown = capture_cooldown_owners_.find(device_id);
+    if (reset_cooldown && cooldown != capture_cooldown_owners_.end() && cooldown->second == task_id) {
+        capture_cooldown_until_.erase(device_id);
+        capture_cooldown_owners_.erase(cooldown);
+    }
+}
+
+void CaptureTaskService::RequestCancellationUnlocked(const std::string& task_id) {
+    auto task_it = tasks_.find(task_id);
+    if (task_it == tasks_.end() || IsTerminalStatus(task_it->second.status)) return;
+    CaptureTaskSnapshot& task = task_it->second;
+    cancel_requested_task_ids_.insert(task_id);
+    MarkTaskCancellingUnlocked(&task);
+
+    // Queued processing has a reference, but no executing provider. Remove only
+    // this task; another Context may own the device's currently executing job.
+    auto queue = processing_queues_.find(task.device_id);
+    if (queue != processing_queues_.end()) {
+        auto position = std::find(queue->second.begin(), queue->second.end(), task_id);
+        if (position != queue->second.end()) {
+            task.status = "cancelled";
+            task.message = "cancelled";
+            task.processing_status = "cancelled";
+            queue->second.erase(position);
+            auto session = session_summaries_.find(task.connection_id);
+            if (session != session_summaries_.end()) {
+                auto summary = session->second.find(task.device_id);
+                if (summary != session->second.end() && summary->second.pending_count > 0) {
+                    --summary->second.pending_count;
+                }
+            }
+            EndTaskActivityUnlocked(task_id); // release the queue's reference only
+            return;
+        }
+    }
+    if (task_activity_counts_.find(task_id) == task_activity_counts_.end()) {
+        task.status = "cancelled";
+        task.message = "cancelled";
+        task.acquisition_status = "cancelled";
+        task.processing_status = "cancelled";
+        ReleaseCaptureOwnershipUnlocked(task_id, true);
+        requests_.erase(task_id);
+    }
+}
+
+CaptureTaskSnapshot CaptureTaskService::CancelTask(const std::string& connection_id,
+                                                  const std::string& task_id) {
+    CaptureTaskSnapshot result;
+    TaskActivityGuard event_activity = {this, &task_id, false};
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        const auto task = tasks_.find(task_id);
+        if (task == tasks_.end()) {
+            result.code = ToCode(SdkStatusCode::InvalidParams);
+            result.message = "capture task not found";
+            return result;
+        }
+        if (task->second.connection_id != connection_id) {
+            result.code = ToCode(SdkStatusCode::CapabilityNotAllowed);
+            result.message = "task belongs to another connection";
+            return result;
+        }
+        if (IsTerminalStatus(task->second.status)) return task->second;
+        RequestCancellationUnlocked(task_id);
+        BeginTaskActivityUnlocked(task_id);
+        event_activity.active = true;
+        result = task->second;
+    }
+    PublishEvent(connection_id, result.status == "cancelled" ? "capture.cancelled" : "capture.cancelling", result);
+    return result;
+}
+
+bool CaptureTaskService::CancelAndWait(const std::string& connection_id, int timeout_ms) {
+    const auto deadline = std::chrono::steady_clock::now() +
+        std::chrono::milliseconds(timeout_ms > 0 ? timeout_ms : 0);
+    std::unique_lock<std::mutex> lock(mu_);
+    for (auto it = tasks_.begin(); it != tasks_.end(); ++it) {
+        if (connection_id.empty() || it->second.connection_id == connection_id) {
+            RequestCancellationUnlocked(it->first);
+        }
+    }
+    // Bulk teardown does not synchronously invoke a host sink: a blocked callback
+    // must not consume an unbounded amount of this caller's timeout budget.
+    const auto drained = [this, &connection_id]() {
+        for (auto it = task_activity_counts_.begin(); it != task_activity_counts_.end(); ++it) {
+            const auto task = tasks_.find(it->first);
+            if (task != tasks_.end() &&
+                (connection_id.empty() || task->second.connection_id == connection_id)) return false;
+        }
+        return true;
+    };
+    if (timeout_ms < 0) {
+        task_activity_cv_.wait(lock, drained);
+        return true;
+    }
+    return task_activity_cv_.wait_until(lock, deadline, drained);
 }
 
 void CaptureTaskService::AbortReservedTask(const std::string& task_id) {
     std::lock_guard<std::mutex> lock(mu_);
     std::map<std::string, CaptureTaskSnapshot>::iterator task_it = tasks_.find(task_id);
-    if (task_it == tasks_.end() || task_it->second.acquisition_status != "queued") {
+    if (task_it == tasks_.end() || task_it->second.acquisition_status != "queued" ||
+        task_activity_counts_.find(task_id) != task_activity_counts_.end()) {
         return;
     }
-    active_capture_devices_.erase(task_it->second.device_id);
-    capture_cooldown_until_.erase(task_it->second.device_id);
+    ReleaseCaptureOwnershipUnlocked(task_id, true);
     requests_.erase(task_id);
     tasks_.erase(task_it);
 }
@@ -293,7 +420,8 @@ std::size_t CaptureTaskService::ActiveTaskCount() const {
     // hand-off window.
     std::size_t active_count = 0;
     for (std::map<std::string, CaptureTaskSnapshot>::const_iterator it = tasks_.begin(); it != tasks_.end(); ++it) {
-        if (it->second.status != "succeeded" && it->second.status != "failed") {
+        if (task_activity_counts_.find(it->first) != task_activity_counts_.end() ||
+            !IsTerminalStatus(it->second.status)) {
             ++active_count;
         }
     }
@@ -304,20 +432,146 @@ std::size_t CaptureTaskService::ClearFinishedTasks() {
     std::lock_guard<std::mutex> lock(mu_);
     std::size_t count = 0;
     for (std::map<std::string, CaptureTaskSnapshot>::iterator it = tasks_.begin(); it != tasks_.end();) {
-        if (active_worker_task_ids_.find(it->first) != active_worker_task_ids_.end()) {
+        if (!IsTerminalStatus(it->second.status) ||
+            task_activity_counts_.find(it->first) != task_activity_counts_.end()) {
             ++it;
             continue;
         }
         requests_.erase(it->first);
+        cancel_requested_task_ids_.erase(it->first);
         it = tasks_.erase(it);
         ++count;
     }
     return count;
 }
 
-void CaptureTaskService::RunCaptureTask(const std::string& task_id) {
+bool CaptureTaskService::IsCancelRequested(const std::string& task_id) const {
+    std::lock_guard<std::mutex> lock(mu_);
+    return cancel_requested_task_ids_.find(task_id) != cancel_requested_task_ids_.end();
+}
+
+bool CaptureTaskService::IsTerminalStatus(const std::string& status) const {
+    return status == "succeeded" || status == "failed" || status == "cancelled";
+}
+
+void CaptureTaskService::MarkTaskCancellingUnlocked(CaptureTaskSnapshot* task) const {
+    if (task == NULL || IsTerminalStatus(task->status)) {
+        return;
+    }
+    task->status = "cancelling";
+    task->code = ToCode(SdkStatusCode::Ok);
+    task->message = "cancelling";
+}
+
+void CaptureTaskService::BeginTaskActivityUnlocked(const std::string& task_id) {
+    ++task_activity_counts_[task_id];
+}
+
+void CaptureTaskService::EndTaskActivityUnlocked(const std::string& task_id) {
+    const auto it = task_activity_counts_.find(task_id);
+    if (it != task_activity_counts_.end() && --it->second == 0) task_activity_counts_.erase(it);
+    task_activity_cv_.notify_all();
+}
+
+void CaptureTaskService::EndTaskActivity(const std::string& task_id) noexcept {
+    try {
+        std::lock_guard<std::mutex> lock(mu_);
+        EndTaskActivityUnlocked(task_id);
+    } catch (...) {
+    }
+}
+
+void CaptureTaskService::FailTaskAfterException(const std::string& task_id, const char* message) noexcept {
+    try {
+        std::lock_guard<std::mutex> lock(mu_);
+        const auto it = tasks_.find(task_id);
+        if (it == tasks_.end() || IsTerminalStatus(it->second.status)) return;
+        CaptureTaskSnapshot& task = it->second;
+        const bool processing = task.acquisition_status == "captured";
+        auto session = session_summaries_.find(task.connection_id);
+        if (session != session_summaries_.end()) {
+            auto summary = session->second.find(task.device_id);
+            if (summary != session->second.end()) {
+                if (processing && summary->second.pending_count > 0) --summary->second.pending_count;
+                ++summary->second.failed_count;
+            }
+        }
+        ReleaseCaptureOwnershipUnlocked(task_id, false);
+        task.status = "failed";
+        task.processing_status = processing ? "failed" : "skipped";
+        if (!processing) task.acquisition_status = "failed";
+        task.code = ToCode(SdkStatusCode::InternalError);
+        task.message = message;
+        task.error = message;
+    } catch (...) {
+        // Allocation failure during reporting must not escape the thread boundary.
+    }
+}
+
+void CaptureTaskService::FailProcessingQueue(const std::string& device_id) noexcept {
+    // A failure before dequeue must not strand the remaining queue behind a dead
+    // device worker. Each pending task still owns its queue reference here.
+    for (;;) {
+        std::string task_id;
+        try {
+            {
+                std::lock_guard<std::mutex> lock(mu_);
+                auto queue = processing_queues_.find(device_id);
+                if (queue == processing_queues_.end() || queue->second.empty()) {
+                    active_processing_devices_.erase(device_id);
+                    if (queue != processing_queues_.end()) processing_queues_.erase(queue);
+                    return;
+                }
+                task_id.swap(queue->second.front());
+                queue->second.pop_front();
+            }
+            FailTaskAfterException(task_id, "capture processing worker failed");
+            EndTaskActivity(task_id);
+        } catch (...) {
+            return;
+        }
+    }
+}
+
+CaptureTaskSnapshot CaptureTaskService::CompleteCancelledTask(const std::string& task_id,
+                                                              const CaptureTaskStartRequest& request,
+                                                              const std::string& reason) {
+    CaptureTaskSnapshot task;
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        std::map<std::string, CaptureTaskSnapshot>::iterator it = tasks_.find(task_id);
+        if (it == tasks_.end()) {
+            return task;
+        }
+        it->second.status = "cancelled";
+        it->second.code = ToCode(SdkStatusCode::Ok);
+        it->second.message = reason.empty() ? "cancelled" : reason;
+        if (it->second.acquisition_status != "captured") {
+            it->second.acquisition_status = "cancelled";
+        }
+        it->second.processing_status = "cancelled";
+        ReleaseCaptureOwnershipUnlocked(task_id, false);
+        task = it->second;
+    }
+    PublishEvent(request.connection_id, "capture.cancelled", task);
+    return task;
+}
+
+void CaptureTaskService::RunCaptureTask(const std::string& task_id) noexcept {
+    TaskActivityGuard activity = {this, &task_id, true};
+    try {
+        RunCaptureTaskImpl(task_id);
+    } catch (const std::exception& error) {
+        FailTaskAfterException(task_id, error.what());
+    } catch (...) {
+        FailTaskAfterException(task_id, "capture worker failed");
+    }
+}
+
+void CaptureTaskService::RunCaptureTaskImpl(const std::string& task_id) {
     CaptureTaskStartRequest request;
     CaptureTaskSnapshot running;
+    bool cancelled_before_start = false;
     {
         std::lock_guard<std::mutex> lock(mu_);
         const std::map<std::string, CaptureTaskStartRequest>::const_iterator request_it = requests_.find(task_id);
@@ -326,11 +580,23 @@ void CaptureTaskService::RunCaptureTask(const std::string& task_id) {
             return;
         }
         request = request_it->second;
-        task_it->second.status = "running";
+        cancelled_before_start = cancel_requested_task_ids_.find(task_id) != cancel_requested_task_ids_.end();
+        if (!cancelled_before_start) task_it->second.status = "running";
         task_it->second.acquisition_status = "capturing";
         running = task_it->second;
     }
+    if (cancelled_before_start) {
+        CompleteCancelledTask(task_id, request, "capture cancelled");
+        return;
+    }
     PublishEvent(request.connection_id, "capture.started", running);
+    // A synchronous notification can outlive a concurrent teardown request.
+    // Recheck cancellation before entering the physical Provider, not only
+    // after it returns. Open callers that do not request cancellation are unchanged.
+    if (IsCancelRequested(task_id)) {
+        CompleteCancelledTask(task_id, request, "capture cancelled");
+        return;
+    }
 
     SdkCaptureResult raw_capture;
     try {
@@ -344,8 +610,13 @@ void CaptureTaskService::RunCaptureTask(const std::string& task_id) {
         CompleteCaptureFailure(task_id, request, "capture action failed");
         return;
     }
+    if (IsCancelRequested(task_id)) {
+        CompleteCancelledTask(task_id, request, "capture cancelled");
+        return;
+    }
     if (!IsOkStatusCode(raw_capture.code) || !raw_capture.captured) {
-        CompleteCaptureFailure(task_id, request, raw_capture.message.empty() ? "capture failed" : raw_capture.message);
+        CompleteCaptureFailure(task_id, request, raw_capture.message.empty() ? "capture failed" : raw_capture.message,
+                               raw_capture.code);
         return;
     }
     std::string stage_error;
@@ -353,8 +624,13 @@ void CaptureTaskService::RunCaptureTask(const std::string& task_id) {
         CompleteCaptureFailure(task_id, request, stage_error);
         return;
     }
+    if (IsCancelRequested(task_id)) {
+        CompleteCancelledTask(task_id, request, "capture cancelled");
+        return;
+    }
 
     bool start_processing_failed = false;
+    bool cancelled_before_queue = false;
     CaptureTaskSnapshot captured_task;
     {
         std::lock_guard<std::mutex> lock(mu_);
@@ -363,27 +639,43 @@ void CaptureTaskService::RunCaptureTask(const std::string& task_id) {
         if (task_it == tasks_.end() || request_it == requests_.end()) {
             return;
         }
-        request_it->second.raw_capture = raw_capture;
-        task_it->second.acquisition_status = "captured";
-        task_it->second.processing_status = "queued";
-        active_capture_devices_.erase(request.device_id);
-        CaptureSessionDeviceSummary& summary = session_summaries_[request.connection_id][request.device_id];
-        summary.device_id = request.device_id;
-        ++summary.captured_count;
-        ++summary.pending_count;
-        processing_queues_[request.device_id].push_back(task_id);
-        if (active_processing_devices_.insert(request.device_id).second) {
+        cancelled_before_queue = cancel_requested_task_ids_.find(task_id) != cancel_requested_task_ids_.end();
+        if (!cancelled_before_queue) {
+            request_it->second.raw_capture = raw_capture;
+            task_it->second.acquisition_status = "captured";
+            task_it->second.processing_status = "queued";
+            ReleaseCaptureOwnershipUnlocked(task_id, false);
+            CaptureSessionDeviceSummary& summary = session_summaries_[request.connection_id][request.device_id];
+            summary.device_id = request.device_id;
+            ++summary.captured_count;
+            ++summary.pending_count;
+            // Register both queue ownership and a possible device worker transactionally.
+            // The acquisition guard remains active through raw-captured event delivery.
+            captured_task = task_it->second;
+            BeginTaskActivityUnlocked(task_id);
+            bool enqueued = false;
+            bool owns_processing_slot = false;
             try {
-                // 同 StartReservedTask，先完成可能抛异常的 vector 扩容。
-                workers_.reserve(workers_.size() + 1);
-                workers_.push_back(std::thread(&CaptureTaskService::RunProcessingQueue, this, request.device_id));
+                processing_queues_[request.device_id].push_back(task_id);
+                enqueued = true;
+                owns_processing_slot = active_processing_devices_.insert(request.device_id).second;
+                if (owns_processing_slot) {
+                    workers_.reserve(workers_.size() + 1);
+                    std::thread worker(&CaptureTaskService::RunProcessingQueue, this, request.device_id);
+                    workers_.push_back(std::move(worker));
+                }
             } catch (...) {
-                active_processing_devices_.erase(request.device_id);
-                processing_queues_[request.device_id].pop_back();
+                if (owns_processing_slot) active_processing_devices_.erase(request.device_id);
+                if (enqueued) processing_queues_[request.device_id].pop_back();
+                EndTaskActivityUnlocked(task_id);
                 start_processing_failed = true;
             }
         }
-        captured_task = task_it->second;
+
+    }
+    if (cancelled_before_queue) {
+        CompleteCancelledTask(task_id, request, "capture cancelled");
+        return;
     }
     if (start_processing_failed) {
         CapturePipelineResult failure;
@@ -393,50 +685,58 @@ void CaptureTaskService::RunCaptureTask(const std::string& task_id) {
         CompleteProcessingTask(task_id, request, failure);
         return;
     }
-    SDK_OPEN_LOG_INFO("[capture_task] raw captured task_id={} source={} device={} queued_for_processing=true",
-                      task_id, captured_task.capture_source, request.device_id);
+    try {
+        SDK_OPEN_LOG_INFO("[capture_task] raw captured task_id={} source={} device={} queued_for_processing=true",
+                          task_id, captured_task.capture_source, request.device_id);
+    } catch (...) {
+        // Logging after queue admission must not turn accepted processing into failure.
+    }
     PublishSessionUpdate(request.connection_id, request.device_id, task_id, "raw_captured");
 }
 
-void CaptureTaskService::RunProcessingQueue(const std::string& device_id) {
+void CaptureTaskService::RunProcessingQueue(const std::string& device_id) noexcept {
+    try {
+        RunProcessingQueueImpl(device_id);
+    } catch (...) {
+        FailProcessingQueue(device_id);
+    }
+}
+
+void CaptureTaskService::RunProcessingQueueImpl(const std::string& device_id) {
     for (;;) {
         std::string task_id;
         CaptureTaskStartRequest request;
+        TaskActivityGuard activity = {this, &task_id, false};
         {
             std::lock_guard<std::mutex> lock(mu_);
-            std::map<std::string, std::deque<std::string> >::iterator queue_it = processing_queues_.find(device_id);
-            if (queue_it == processing_queues_.end() || queue_it->second.empty()) {
+            auto queue = processing_queues_.find(device_id);
+            if (queue == processing_queues_.end() || queue->second.empty()) {
                 active_processing_devices_.erase(device_id);
-                if (queue_it != processing_queues_.end()) {
-                    processing_queues_.erase(queue_it);
-                }
+                if (queue != processing_queues_.end()) processing_queues_.erase(queue);
                 return;
             }
-            task_id = queue_it->second.front();
-            queue_it->second.pop_front();
-            const std::map<std::string, CaptureTaskStartRequest>::const_iterator request_it = requests_.find(task_id);
-            std::map<std::string, CaptureTaskSnapshot>::iterator task_it = tasks_.find(task_id);
+            // Copy before popping so allocation failure leaves a recoverable queue.
+            task_id = queue->second.front();
+            const auto request_it = requests_.find(task_id);
+            const auto task_it = tasks_.find(task_id);
             if (request_it == requests_.end() || task_it == tasks_.end()) {
+                queue->second.pop_front();
+                EndTaskActivityUnlocked(task_id);
                 continue;
             }
             request = request_it->second;
+            queue->second.pop_front();
+            activity.active = true; // adopts, rather than increments, the queue reference
             task_it->second.processing_status = "running";
         }
-        CapturePipelineResult pipeline_result;
         try {
-            pipeline_result = RunProcessingPipeline(task_id, request);
-        } catch (const std::exception& e) {
-            SDK_OPEN_LOG_ERROR("[capture_task] processing exception task_id={} err={}", task_id, e.what());
-            pipeline_result.code = ToCode(SdkStatusCode::InternalError);
-            pipeline_result.message = e.what();
-            pipeline_result.status = "failed";
+            const CapturePipelineResult result = RunProcessingPipeline(task_id, request);
+            CompleteProcessingTask(task_id, request, result);
+        } catch (const std::exception& error) {
+            FailTaskAfterException(task_id, error.what());
         } catch (...) {
-            SDK_OPEN_LOG_ERROR("[capture_task] processing unknown exception task_id={}", task_id);
-            pipeline_result.code = ToCode(SdkStatusCode::InternalError);
-            pipeline_result.message = "capture processing failed";
-            pipeline_result.status = "failed";
+            FailTaskAfterException(task_id, "capture processing failed");
         }
-        CompleteProcessingTask(task_id, request, pipeline_result);
     }
 }
 
@@ -565,6 +865,7 @@ CapturePipelineResult CaptureTaskService::RunProcessingPipeline(const std::strin
     pipeline_request.auth_context = request.auth_context;
     pipeline_request.profile = request.profile;
     pipeline_request.raw_capture = request.raw_capture;
+    pipeline_request.should_cancel = [this, task_id]() { return IsCancelRequested(task_id); };
     CapturePipelineResult final_result = pipeline_service_.Run(
         pipeline_request, [this, task_id, request](const SdkCaptureStageResult& stage) {
             CaptureTaskSnapshot snapshot;
@@ -582,7 +883,7 @@ CapturePipelineResult CaptureTaskService::RunProcessingPipeline(const std::strin
             PublishEvent(request.connection_id, "capture.stage.updated", snapshot, &stage);
         });
 
-    if (!IsOkStatusCode(final_result.code) || request.pipeline.steps.empty() || !providers_.image_enhance_provider) {
+    if (final_result.status == "cancelled" || !IsOkStatusCode(final_result.code) || request.pipeline.steps.empty() || !providers_.image_enhance_provider) {
         return final_result;
     }
     std::vector<SdkImageEnhancePage> pages;
@@ -607,7 +908,14 @@ CapturePipelineResult CaptureTaskService::RunProcessingPipeline(const std::strin
     PublishEvent(request.connection_id, "capture.stage.updated", GetTask(request.connection_id, task_id), &enhance_stage);
     bool failed = false;
     std::string error;
+    std::map<std::string, int> online_usage_by_capability;
     for (std::size_t step_index = 0; !failed && step_index < request.pipeline.steps.size(); ++step_index) {
+        if (IsCancelRequested(task_id)) {
+            final_result.code = ToCode(SdkStatusCode::Ok);
+            final_result.message = "cancelled";
+            final_result.status = "cancelled";
+            return final_result;
+        }
         const SdkImageEnhanceStep& step = request.pipeline.steps[step_index];
         if (!step.enabled) {
             continue;
@@ -621,6 +929,12 @@ CapturePipelineResult CaptureTaskService::RunProcessingPipeline(const std::strin
         step_request.online_base_url = request.online_base_url;
         EnsureDirectoryRecursive(step_request.output_dir);
         const SdkImageEnhanceStepResult step_result = providers_.image_enhance_provider->RunStep(step_request);
+        if (IsCancelRequested(task_id)) {
+            final_result.code = ToCode(SdkStatusCode::Ok);
+            final_result.message = "cancelled";
+            final_result.status = "cancelled";
+            return final_result;
+        }
         if (!IsOkStatusCode(step_result.code)) {
             if (step.on_error == "skip") {
                 final_result.warnings.push_back(step.type + " skipped: " + step_result.message);
@@ -629,6 +943,11 @@ CapturePipelineResult CaptureTaskService::RunProcessingPipeline(const std::strin
             failed = true;
             error = step_result.message;
             break;
+        }
+        if (request.confirm_online_enhance_quota && IsOnlineEnhanceCapability(step.type)) {
+            const std::string capability = NormalizeOnlineEnhanceCapability(step.type);
+            const int units = static_cast<int>(step_result.pages.empty() ? pages.size() : step_result.pages.size());
+            online_usage_by_capability[capability] += units > 0 ? units : 1;
         }
         pages = step_result.pages;
     }
@@ -639,6 +958,41 @@ CapturePipelineResult CaptureTaskService::RunProcessingPipeline(const std::strin
         final_result.code = ToCode(SdkStatusCode::ProviderCallFailed);
         final_result.message = failed ? error : "image enhance produced no output pages";
         final_result.status = "failed";
+        return final_result;
+    }
+    if (request.confirm_online_enhance_quota && !online_usage_by_capability.empty()) {
+        // Do not begin confirmation after cancellation has been observed. Once
+        // the external call starts it cannot be forcibly stopped or refunded.
+        if (IsCancelRequested(task_id)) {
+            final_result.code = ToCode(SdkStatusCode::Ok);
+            final_result.message = "cancelled";
+            final_result.status = "cancelled";
+            return final_result;
+        }
+        OnlineEnhanceQuotaCredentials quota_credentials;
+        quota_credentials.online_api_key = request.online_api_key;
+        quota_credentials.online_session_token = request.session_token;
+        quota_credentials.authz_base_url = request.authz_base_url;
+        QuotaConsumeResult quota_result;
+        try {
+            quota_result = ConfirmOnlineEnhanceQuota(providers_, quota_credentials, task_id, online_usage_by_capability);
+        } catch (...) {
+            // Do not publish credentials or provider internals from exception text.
+            quota_result.code = ToCode(SdkStatusCode::InternalError);
+            quota_result.message = "online image enhance quota confirmation failed";
+        }
+        if (!IsOkStatusCode(quota_result.code)) {
+            final_result.code = quota_result.code;
+            final_result.message = quota_result.message.empty() ? "online image enhance quota confirm failed" : quota_result.message;
+            final_result.status = "failed";
+            final_result.assets.clear();
+            return final_result;
+        }
+    }
+    if (IsCancelRequested(task_id)) {
+        final_result.code = ToCode(SdkStatusCode::Ok);
+        final_result.message = "cancelled";
+        final_result.status = "cancelled";
         return final_result;
     }
     std::vector<SdkCaptureAsset> enhanced_assets;
@@ -657,7 +1011,8 @@ CapturePipelineResult CaptureTaskService::RunProcessingPipeline(const std::strin
 
 void CaptureTaskService::CompleteCaptureFailure(const std::string& task_id,
                                                 const CaptureTaskStartRequest& request,
-                                                const std::string& message) {
+                                                const std::string& message,
+                                                int failure_code) {
     CaptureTaskSnapshot task;
     {
         std::lock_guard<std::mutex> lock(mu_);
@@ -665,21 +1020,26 @@ void CaptureTaskService::CompleteCaptureFailure(const std::string& task_id,
         if (it == tasks_.end()) {
             return;
         }
-        it->second.status = "failed";
-        it->second.acquisition_status = "failed";
-        it->second.processing_status = "skipped";
-        it->second.code = ToCode(SdkStatusCode::CaptureFailed);
-        it->second.message = message.empty() ? "capture failed" : message;
-        it->second.error = it->second.message;
-        active_capture_devices_.erase(request.device_id);
-        active_worker_task_ids_.erase(task_id);
+        const bool cancelled = cancel_requested_task_ids_.find(task_id) != cancel_requested_task_ids_.end();
+        it->second.status = cancelled ? "cancelled" : "failed";
+        it->second.acquisition_status = cancelled ? "cancelled" : "failed";
+        it->second.processing_status = cancelled ? "cancelled" : "skipped";
+        const int code = request.preserve_acquisition_error_code && !IsOkStatusCode(failure_code)
+            ? failure_code : ToCode(SdkStatusCode::CaptureFailed);
+        it->second.code = cancelled ? ToCode(SdkStatusCode::Ok) : code;
+        it->second.message = cancelled ? "cancelled" : (message.empty() ? "capture failed" : message);
+        it->second.error = cancelled ? "" : it->second.message;
+        ReleaseCaptureOwnershipUnlocked(task_id, false);
         CaptureSessionDeviceSummary& summary = session_summaries_[request.connection_id][request.device_id];
         summary.device_id = request.device_id;
-        ++summary.failed_count;
+        if (!cancelled) {
+            ++summary.failed_count;
+        }
         task = it->second;
     }
-    PublishEvent(request.connection_id, "capture.failed", task);
-    PublishSessionUpdate(request.connection_id, request.device_id, task_id, "capture_failed");
+    PublishEvent(request.connection_id, task.status == "cancelled" ? "capture.cancelled" : "capture.failed", task);
+    PublishSessionUpdate(request.connection_id, request.device_id, task_id,
+                         task.status == "cancelled" ? "capture_cancelled" : "capture_failed");
 }
 
 void CaptureTaskService::CompleteProcessingTask(const std::string& task_id,
@@ -693,72 +1053,105 @@ void CaptureTaskService::CompleteProcessingTask(const std::string& task_id,
         if (it == tasks_.end()) {
             return;
         }
-        it->second.status = result.status.empty() ? (IsOkStatusCode(result.code) ? "succeeded" : "failed") : result.status;
+        const bool cancelled = result.status == "cancelled" ||
+            cancel_requested_task_ids_.find(task_id) != cancel_requested_task_ids_.end();
+        it->second.status = cancelled ? "cancelled" :
+            (result.status.empty() ? (IsOkStatusCode(result.code) ? "succeeded" : "failed") : result.status);
         succeeded = IsOkStatusCode(result.code) && it->second.status == "succeeded";
-        it->second.processing_status = succeeded ? "succeeded" : "failed";
+        it->second.processing_status = cancelled ? "cancelled" : (succeeded ? "succeeded" : "failed");
         it->second.stages = result.stages;
         it->second.assets = result.assets;
         AttachAssetUrls(task_id, &it->second.assets);
         it->second.warnings = result.warnings;
-        it->second.code = result.code;
-        it->second.message = result.message;
-        if (!succeeded) {
-            it->second.error = result.message;
-        }
-        active_worker_task_ids_.erase(task_id);
+        it->second.code = cancelled ? ToCode(SdkStatusCode::Ok) : result.code;
+        it->second.message = cancelled ? "cancelled" : result.message;
+        it->second.error = cancelled || succeeded ? "" : result.message;
         CaptureSessionDeviceSummary& summary = session_summaries_[request.connection_id][request.device_id];
         summary.device_id = request.device_id;
         if (summary.pending_count > 0) {
             --summary.pending_count;
         }
-        if (succeeded) {
+        if (cancelled) {
+            // Cancellation is not a processing failure and does not roll back
+            // already captured files or quota accounting.
+        } else if (succeeded) {
             ++summary.processed_count;
         } else {
             ++summary.failed_count;
         }
         task = it->second;
     }
-    PublishEvent(request.connection_id, succeeded ? "capture.completed" : "capture.failed", task);
+    task_activity_cv_.notify_all();
+    const bool cancelled = task.status == "cancelled";
+    PublishEvent(request.connection_id, cancelled ? "capture.cancelled" : (succeeded ? "capture.completed" : "capture.failed"), task);
     PublishSessionUpdate(request.connection_id, request.device_id, task_id,
-                         succeeded ? "processing_completed" : "processing_failed");
+                         cancelled ? "capture_cancelled" : (succeeded ? "processing_completed" : "processing_failed"));
 }
 
 void CaptureTaskService::PublishEvent(const std::string& connection_id,
                                       const std::string& event,
                                       const CaptureTaskSnapshot& task,
                                       const SdkCaptureStageResult* stage) const {
-    EventSink sink;
-    {
+    SnapshotEventSink snapshot_sink;
+    EventSink event_sink;
+    try {
         std::lock_guard<std::mutex> lock(mu_);
-        sink = event_sink_;
+        snapshot_sink = snapshot_event_sink_;
+    } catch (...) {
+        // A typed sink copy can allocate. Legacy delivery remains independent.
     }
-    if (!sink) {
-        return;
+    try {
+        std::lock_guard<std::mutex> lock(mu_);
+        event_sink = event_sink_;
+    } catch (...) {
+        // A legacy sink copy can allocate. Typed delivery remains independent.
     }
-    Json payload = BuildTaskJson(task);
-    if (stage != NULL) {
-        payload["stage"] = BuildStageJson(*stage);
+
+    if (snapshot_sink) {
+        try {
+            // `task` is the caller-provided event snapshot. Do not re-read the
+            // task map here: typed consumers must observe the same state that
+            // produced the legacy event.
+            snapshot_sink(connection_id, event, task, stage);
+        } catch (...) {
+            // Typed delivery is best effort and must not suppress legacy JSON
+            // delivery or prevent worker cleanup.
+        }
     }
-    sink(connection_id, BuildWsEvent(event, payload));
+
+    if (event_sink) {
+        try {
+            Json payload = BuildTaskJson(task);
+            if (stage != NULL) {
+                payload["stage"] = BuildStageJson(*stage);
+            }
+            event_sink(connection_id, BuildWsEvent(event, payload));
+        } catch (...) {
+            // Legacy delivery is best effort and must not escape worker threads.
+        }
+    }
 }
 
 void CaptureTaskService::PublishSessionUpdate(const std::string& connection_id,
                                               const std::string& device_id,
                                               const std::string& task_id,
                                               const std::string& reason) const {
-    EventSink sink;
-    CaptureSessionSummary summary;
-    {
-        std::lock_guard<std::mutex> lock(mu_);
-        sink = event_sink_;
-        summary = GetSessionSummaryUnlocked(connection_id);
+    try {
+        EventSink sink;
+        CaptureSessionSummary summary;
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            sink = event_sink_;
+            summary = GetSessionSummaryUnlocked(connection_id);
+        }
+        if (!sink) {
+            return;
+        }
+        sink(connection_id, BuildWsEvent("capture.session.updated",
+                                         Json{{"device_id", device_id}, {"task_id", task_id}, {"reason", reason},
+                                              {"summary", BuildCaptureSessionSummaryJson(summary)}}));
+    } catch (...) {
     }
-    if (!sink) {
-        return;
-    }
-    sink(connection_id, BuildWsEvent("capture.session.updated",
-                                     Json{{"device_id", device_id}, {"task_id", task_id}, {"reason", reason},
-                                          {"summary", BuildCaptureSessionSummaryJson(summary)}}));
 }
 
 CaptureTaskSnapshot CaptureTaskService::GetTaskUnlocked(const std::string& task_id) const {

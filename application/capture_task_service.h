@@ -35,6 +35,11 @@ struct CaptureTaskStartRequest {
     SdkImageEnhancePipeline pipeline;
     std::string online_api_key;
     std::string online_base_url;
+    std::string authz_base_url;
+    bool confirm_online_enhance_quota = false;
+    // Typed Local callers retain acquisition diagnostics; Open keeps its historic
+    // CaptureFailed normalization unless a caller explicitly opts in.
+    bool preserve_acquisition_error_code = false;
 };
 
 struct CaptureTaskSnapshot {
@@ -90,11 +95,16 @@ Json BuildCaptureSessionSummaryJson(const CaptureSessionSummary& summary);
 class CaptureTaskService {
 public:
     using EventSink = std::function<void(const std::string&, const Json&)>;
+    using SnapshotEventSink = std::function<void(const std::string&,
+                                                 const std::string&,
+                                                 const CaptureTaskSnapshot&,
+                                                 const SdkCaptureStageResult*)>;
 
     explicit CaptureTaskService(const ProviderBundle& providers, const std::string& asset_base_url = "");
     ~CaptureTaskService();
 
     void SetEventSink(EventSink sink);
+    void SetSnapshotEventSink(SnapshotEventSink sink);
     // 先登记任务，并为手动拍照占用物理采集窗口。硬拍只占用同一限频窗口。
     // 调用方完成配额扣减后必须调用 StartReservedTask；扣减失败则调用
     // AbortReservedTask 释放登记与限频状态。
@@ -102,6 +112,8 @@ public:
     CaptureTaskStartResult StartReservedTask(const std::string& task_id);
     void AbortReservedTask(const std::string& task_id);
     CaptureTaskSnapshot GetTask(const std::string& connection_id, const std::string& task_id) const;
+    CaptureTaskSnapshot CancelTask(const std::string& connection_id, const std::string& task_id);
+    bool CancelAndWait(const std::string& connection_id = std::string(), int timeout_ms = 6000);
     CaptureSessionSummary GetSessionSummary(const std::string& connection_id) const;
     CaptureAssetResult GetAsset(const std::string& connection_id,
                                 const std::string& task_id,
@@ -110,18 +122,42 @@ public:
     std::size_t ClearFinishedTasks();
 
 private:
-    void RunCaptureTask(const std::string& task_id);
-    void RunProcessingQueue(const std::string& device_id);
+    struct TaskActivityGuard {
+        CaptureTaskService* service;
+        const std::string* task_id;
+        bool active;
+        ~TaskActivityGuard() noexcept {
+            if (active) service->EndTaskActivity(*task_id);
+        }
+    };
+    void RequestCancellationUnlocked(const std::string& task_id);
+    void ReleaseCaptureOwnershipUnlocked(const std::string& task_id, bool reset_cooldown);
+    void EndTaskActivityUnlocked(const std::string& task_id);
+    void FailTaskAfterException(const std::string& task_id, const char* message) noexcept;
+    void FailProcessingQueue(const std::string& device_id) noexcept;
+    void RunCaptureTask(const std::string& task_id) noexcept;
+    void RunCaptureTaskImpl(const std::string& task_id);
+    void RunProcessingQueue(const std::string& device_id) noexcept;
+    void RunProcessingQueueImpl(const std::string& device_id);
     SdkCaptureResult CaptureRaw(const std::string& task_id, const CaptureTaskStartRequest& request) const;
     bool StageCapturedRaw(const std::string& task_id, SdkCaptureResult* raw_capture, std::string* error) const;
     void CompleteCaptureFailure(const std::string& task_id,
                                 const CaptureTaskStartRequest& request,
-                                const std::string& message);
+                                const std::string& message,
+                                int failure_code = ToCode(SdkStatusCode::CaptureFailed));
     void CompleteProcessingTask(const std::string& task_id,
                                 const CaptureTaskStartRequest& request,
                                 const CapturePipelineResult& result);
     CapturePipelineResult RunProcessingPipeline(const std::string& task_id,
                                                 const CaptureTaskStartRequest& request);
+    bool IsCancelRequested(const std::string& task_id) const;
+    bool IsTerminalStatus(const std::string& status) const;
+    void MarkTaskCancellingUnlocked(CaptureTaskSnapshot* task) const;
+    CaptureTaskSnapshot CompleteCancelledTask(const std::string& task_id,
+                                              const CaptureTaskStartRequest& request,
+                                              const std::string& reason);
+    void BeginTaskActivityUnlocked(const std::string& task_id);
+    void EndTaskActivity(const std::string& task_id) noexcept;
     void PublishEvent(const std::string& connection_id,
                       const std::string& event,
                       const CaptureTaskSnapshot& task,
@@ -143,14 +179,19 @@ private:
     std::map<std::string, CaptureTaskSnapshot> tasks_;
     std::map<std::string, CaptureTaskStartRequest> requests_;
     std::map<std::string, std::deque<std::string> > processing_queues_;
-    std::set<std::string> active_capture_devices_;
+    std::map<std::string, std::string> active_capture_devices_;
+    std::map<std::string, std::string> capture_cooldown_owners_;
     std::set<std::string> active_processing_devices_;
     std::map<std::string, std::chrono::steady_clock::time_point> capture_cooldown_until_;
     std::map<std::string, std::map<std::string, CaptureSessionDeviceSummary> > session_summaries_;
-    // 该集合以采集或处理 worker 实际退出作为清理边界。
-    std::set<std::string> active_worker_task_ids_;
+    // Counts acquisition, queued/processing work and synchronous event delivery.
+    // A terminal snapshot alone never permits cleanup while one of these remains.
+    std::set<std::string> cancel_requested_task_ids_;
+    std::map<std::string, int> task_activity_counts_;
+    std::condition_variable task_activity_cv_;
     std::vector<std::thread> workers_;
     EventSink event_sink_;
+    SnapshotEventSink snapshot_event_sink_;
     std::atomic<uint64_t> next_task_seq_;
 };
 

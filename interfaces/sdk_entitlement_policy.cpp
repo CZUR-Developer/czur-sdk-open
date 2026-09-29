@@ -3,12 +3,26 @@
 
 #include "sdk_entitlement_policy.h"
 
+#include <cctype>
 #include <sstream>
+
+#include "sdk_provider_types.h"
 
 namespace editor {
 namespace sdk {
 
 namespace {
+
+std::string NormalizeLower(std::string value) {
+    for (std::string::iterator it = value.begin(); it != value.end(); ++it) {
+        *it = static_cast<char>(std::tolower(static_cast<unsigned char>(*it)));
+    }
+    return value;
+}
+
+SdkAccountType MaxRequiredTier(SdkAccountType lhs, SdkAccountType rhs) {
+    return EntitlementRank(lhs) >= EntitlementRank(rhs) ? lhs : rhs;
+}
 
 bool IsKnownTier(SdkAccountType account_type) {
     return account_type == SdkAccountType::Trial || account_type == SdkAccountType::Vip ||
@@ -158,6 +172,85 @@ std::string CapabilityToEntitlementQuotaBucket(const std::string& capability) {
         return "file";
     }
     return "";
+}
+
+
+SdkAccountType RequiredTierForColorMode(const std::string& color_mode) {
+    const std::string value = NormalizeLower(color_mode);
+    if (value == "white_paper_seal" || value == "white_paper_stamp") {
+        return SdkAccountType::Svip;
+    }
+    if (value == "ancient" || value == "ancient_book") {
+        return SdkAccountType::SvipPlus;
+    }
+    return SdkAccountType::Trial;
+}
+
+SdkAccountType RequiredTierForImageProcess(const std::string& page_processing,
+                                           const std::string& color_mode,
+                                           const SdkSinglePageOptions& single_page,
+                                           const SdkCurvedBookOptions&) {
+    SdkAccountType required = RequiredTierForColorMode(color_mode);
+    if (single_page.auto_rotate) {
+        required = MaxRequiredTier(required, SdkAccountType::Vip);
+    }
+    const std::string processing = NormalizeLower(page_processing);
+    if (processing == "curved_book" || processing == "book" || processing == "curve_flatten") {
+        required = MaxRequiredTier(required, SdkAccountType::Svip);
+    }
+    return required;
+}
+
+SdkAccountType RequiredTierForEnhanceStep(const std::string& step_type) {
+    const std::string type = NormalizeLower(step_type);
+    if (type == "rotate") {
+        return SdkAccountType::Vip;
+    }
+    if (type == "blank_page_detect" || type == "normalize_spec" || type == "red_green_head" ||
+        type == "white_paper_seal" || type == "white_paper_stamp" || type == "curved_book") {
+        return SdkAccountType::Svip;
+    }
+    if (type == "ancient" || type == "ancient_book" || type == "hole_fill" || type == "punch_hole_fill" ||
+        type == "doc_crop_enhance" || type == "document_rectify_enhance" || type == "remove_handwriting" ||
+        type == "doc_repair" || type == "remove_background_texture" || type == "remove_moire") {
+        return SdkAccountType::SvipPlus;
+    }
+    return SdkAccountType::Trial;
+}
+
+SdkAccountType RequiredTierForEnhancePipeline(const SdkImageEnhancePipeline& pipeline) {
+    SdkAccountType required = SdkAccountType::Trial;
+    for (std::vector<SdkImageEnhanceStep>::const_iterator it = pipeline.steps.begin();
+         it != pipeline.steps.end();
+         ++it) {
+        if (!it->enabled) {
+            continue;
+        }
+        required = MaxRequiredTier(required, RequiredTierForEnhanceStep(it->type));
+    }
+    return required;
+}
+
+std::string TrialQuotaCapabilityFor(const std::string& method, SdkAccountType required) {
+    if (required == SdkAccountType::Vip) {
+        if (method.find("image.enhance") == 0) return "image.enhance.vip";
+        if (method.find("image.") == 0) return "image.process.vip";
+        if (method == "file.convert") return "file.convert.vip";
+        return method;
+    }
+    if (required == SdkAccountType::Svip) {
+        if (method.find("image.enhance") == 0) return "image.enhance.svip";
+        if (method.find("image.") == 0) return "image.process.svip";
+        if (method == "file.convert") return "file.convert.svip";
+        return method;
+    }
+    if (required == SdkAccountType::SvipPlus) {
+        if (method.find("image.enhance") == 0) return "image.enhance.svip_plus";
+        if (method.find("image.") == 0) return "image.process.svip_plus";
+        if (method == "file.convert") return "file.convert.svip_plus";
+        return method;
+    }
+    return method;
 }
 
 EntitlementCheckResult CheckFeatureEntitlement(const AuthContext& auth_context,

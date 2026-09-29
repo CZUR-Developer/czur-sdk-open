@@ -76,7 +76,11 @@ std::shared_ptr<spdlog::logger> BuildSdkOpenLogger(std::string* init_warning) {
 
     g_sdk_open_log_dir = ResolveSdkOpenLogDir();
     g_sdk_open_log_path.clear();
-    if (EnsureDirectoryRecursive(g_sdk_open_log_dir)) {
+    if (!IsSdkCoreFileLoggingEnabled()) {
+        // Embedded hosts can opt out of file logging without changing process
+        // environment variables or the Open Runtime's default behavior.
+        g_sdk_open_log_dir.clear();
+    } else if (EnsureDirectoryRecursive(g_sdk_open_log_dir)) {
         g_sdk_open_log_path = JoinPath(g_sdk_open_log_dir, kSdkOpenLogFileName);
         try {
             sinks.push_back(std::make_shared<spdlog::sinks::rotating_file_sink_mt>(

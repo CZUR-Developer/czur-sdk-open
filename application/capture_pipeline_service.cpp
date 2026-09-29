@@ -434,6 +434,16 @@ public:
         return result;
     }
 
+    CStatus CheckCancelled() {
+        if (request_.should_cancel && request_.should_cancel()) {
+            pipeline_result_.code = ToCode(SdkStatusCode::Ok);
+            pipeline_result_.message = "cancelled";
+            pipeline_result_.status = "cancelled";
+            return CStatus("cancelled");
+        }
+        return CStatus();
+    }
+
 private:
     enum ProviderKind {
         providers_device,
@@ -540,6 +550,8 @@ private:
     }
 
     CStatus ApplyColorModeForOutput(ProcessedOutput& output, bool single) {
+        const CStatus cancelled = CheckCancelled();
+        if (cancelled.isErr()) return cancelled;
         const std::string stage_name = single ? "color_mode" : ("color_mode_" + output.output_id);
         StartStage(stage_name);
 
@@ -563,6 +575,8 @@ private:
     }
 
     CStatus FormatConvertForOutput(ProcessedOutput& output, bool single) {
+        const CStatus cancelled = CheckCancelled();
+        if (cancelled.isErr()) return cancelled;
         const std::string stage_name = single ? "format_convert" : ("format_convert_" + output.output_id);
         StartStage(stage_name);
 
@@ -650,6 +664,8 @@ private:
     }
 
     CStatus GenerateThumbnail(const ThumbnailSpec& spec) {
+        const CStatus cancelled = CheckCancelled();
+        if (cancelled.isErr()) return cancelled;
         if (!spec.enabled) {
             return CStatus();
         }
@@ -738,22 +754,37 @@ CapturePipelineService::CapturePipelineService(const ProviderBundle& providers)
 CapturePipelineResult CapturePipelineService::Run(const CapturePipelineRequest& request,
                                                   CaptureStageCallback stage_callback) const {
     CapturePipelineContext context(request, device_facade_, graphic_facade_, providers_, stage_callback);
-    CStatus status = context.CaptureRaw();
+    CStatus status = context.CheckCancelled();
+    if (!status.isErr()) {
+        status = context.CaptureRaw();
+    }
+    if (!status.isErr()) {
+        status = context.CheckCancelled();
+    }
     if (!status.isErr()) {
         status = context.RunThumbnail(ThumbnailTarget::Original);
+    }
+    if (!status.isErr()) {
+        status = context.CheckCancelled();
     }
     if (!status.isErr()) {
         status = context.PageProcess();
     }
     if (!status.isErr()) {
+        status = context.CheckCancelled();
+    }
+    if (!status.isErr()) {
         status = context.ProcessOutputWorkflow();
+    }
+    if (!status.isErr()) {
+        status = context.CheckCancelled();
     }
     if (!status.isErr()) {
         status = context.FinalizeResult();
     }
 
     CapturePipelineResult result = context.Result();
-    if (status.isErr() && result.status != "failed") {
+    if (status.isErr() && result.status != "failed" && result.status != "cancelled") {
         result.status = "failed";
         result.code = ToCode(SdkStatusCode::ProviderCallFailed);
         result.message = status.getInfo();

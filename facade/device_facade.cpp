@@ -3,6 +3,10 @@
 
 #include "device_facade.h"
 
+#include <sstream>
+
+#include "sdk_logger.h"
+
 #if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
 #include <map>
 #include <memory>
@@ -11,13 +15,24 @@
 #include <windows.h>
 
 #include "sdk_json_utils.h"
-#include "sdk_logger.h"
 #endif
 
 namespace editor {
 namespace sdk {
 
 namespace {
+
+std::string FormatOutputTargetSizeList(const std::vector<SdkOutputTargetSizeOption>& options) {
+    std::ostringstream oss;
+    for (std::vector<SdkOutputTargetSizeOption>::const_iterator it = options.begin(); it != options.end(); ++it) {
+        if (it != options.begin()) {
+            oss << ",";
+        }
+        oss << it->target_size;
+    }
+    return oss.str();
+}
+
 
 #if defined(_WIN32) && defined(SDK_USE_PRIVATE_PROVIDER)
 
@@ -717,6 +732,10 @@ DeviceGetResult DeviceFacade::LookupDevice(const AuthContext& auth_context, cons
     return result;
 }
 
+DeviceGetResult DeviceFacade::CheckDeviceAccess(const AuthContext& auth_context, const std::string& device_id) const {
+    return LookupDevice(auth_context, device_id);
+}
+
 DeviceGetResult DeviceFacade::GetDevice(const AuthContext& auth_context, const std::string& device_id) const {
     DeviceGetResult result = LookupDevice(auth_context, device_id);
     if (!IsOkStatusCode(result.code)) {
@@ -738,6 +757,69 @@ DeviceGetResult DeviceFacade::GetDevice(const AuthContext& auth_context, const s
     result.device = provider_result.device;
     result.device.authorized = true;
     return result;
+}
+
+int DeviceFacade::ApplyCaptureOutputCapabilities(const AuthContext& auth_context,
+                                                              SdkCaptureProfile* profile,
+                                                              std::string* message) const {
+    if (profile == NULL || profile->output_target_size <= 0) {
+        return ToCode(SdkStatusCode::Ok);
+    }
+    if (profile->device_id.empty()) {
+        if (message != NULL) {
+            *message = "device_id required for output.target_size";
+        }
+        return ToCode(SdkStatusCode::InvalidParams);
+    }
+
+    const DeviceGetResult device_result = GetDevice(auth_context, profile->device_id);
+    if (!IsOkStatusCode(device_result.code)) {
+        if (message != NULL) {
+            *message = device_result.message;
+        }
+        return device_result.code;
+    }
+
+    const SdkCaptureOutputCapabilities& capabilities = device_result.device.capture_output;
+    if (!capabilities.target_size_supported || capabilities.target_sizes.empty()) {
+        SDK_OPEN_LOG_INFO("[command_application] output.target_size ignored device={} target_size={} reason=unsupported",
+                          profile->device_id,
+                          profile->output_target_size);
+        profile->output_target_size = 0;
+        profile->output_target_width = 0;
+        profile->output_target_height = 0;
+        return ToCode(SdkStatusCode::Ok);
+    }
+
+    for (std::vector<SdkOutputTargetSizeOption>::const_iterator it = capabilities.target_sizes.begin();
+         it != capabilities.target_sizes.end();
+         ++it) {
+        if (it->target_size != profile->output_target_size) {
+            continue;
+        }
+        int target_width = it->width;
+        int target_height = it->height;
+        if (target_width <= 0 || target_height <= 0) {
+            ResolveSdkOutputTargetSize(it->target_size, &target_width, &target_height);
+        }
+        if (target_width <= 0 || target_height <= 0) {
+            if (message != NULL) {
+                *message = "unsupported output.target_size: " + std::to_string(profile->output_target_size);
+            }
+            return ToCode(SdkStatusCode::InvalidParams);
+        }
+        profile->output_target_width = target_width;
+        profile->output_target_height = target_height;
+        return ToCode(SdkStatusCode::Ok);
+    }
+
+    const std::string allowed = FormatOutputTargetSizeList(capabilities.target_sizes);
+    if (message != NULL) {
+        *message = allowed.empty()
+            ? "unsupported output.target_size: " + std::to_string(profile->output_target_size)
+            : "unsupported output.target_size: " + std::to_string(profile->output_target_size) + ", allowed: " + allowed;
+    }
+    return ToCode(SdkStatusCode::InvalidParams);
 }
 
 SdkDeviceOpenResult DeviceFacade::OpenDevice(const AuthContext& auth_context, const SdkDeviceOpenRequest& request) const {

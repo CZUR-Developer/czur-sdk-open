@@ -31,6 +31,10 @@ public:
     virtual SdkSaneScanResult Scan(const SdkSaneScanRequest& request) = 0;
     virtual SdkSaneScanResult GetScan(const SdkSaneScanGetRequest& request) = 0;
     virtual SdkSaneScanResult CancelScan(const SdkSaneScanCancelRequest& request) = 0;
+    // Internal quiescence hook; terminal snapshots alone do not prove that the
+    // scanner worker and post-processing/event callback have stopped writing.
+    virtual bool SupportsTaskWait() const { return false; }
+    virtual bool WaitForTask(const std::string&, int /* timeout_ms */) { return false; }
 };
 
 } // namespace sdk

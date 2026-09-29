@@ -26,6 +26,7 @@ struct CapturePipelineRequest {
     // 硬拍已由 provider 取得原始图时使用。pipeline 直接写入当前 task
     // 输出目录，再继续走与普通 capture.take 相同的处理阶段。
     SdkCaptureResult raw_capture;
+    std::function<bool()> should_cancel;
 };
 
 struct CapturePipelineResult {

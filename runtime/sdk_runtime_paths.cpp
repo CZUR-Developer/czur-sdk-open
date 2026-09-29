@@ -6,6 +6,7 @@
 #include <cerrno>
 #include <cctype>
 #include <cstdlib>
+#include <mutex>
 #include <string>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -25,6 +26,20 @@ const char kSdkOpenWorkDirEnv[] = "SDK_OPEN_WORK_DIR";
 const char kSdkOpenLogDirEnv[] = "SDK_OPEN_LOG_DIR";
 const char kCzurSdkRuntimeDirEnv[] = "CZUR_SDK_RUNTIME_DIR";
 const char kSystemSdkOpenWorkDir[] = "/var/lib/czur/sdk-open";
+
+struct CorePaths {
+    std::mutex mutex;
+    bool initialized = false;
+    bool configured = false;
+    bool enable_file_logging = true;
+    std::string work_dir;
+    std::string log_dir;
+};
+
+CorePaths& GetCorePaths() {
+    static CorePaths paths;
+    return paths;
+}
 
 bool IsAbsolutePath(const std::string& path) {
     if (path.empty()) {
@@ -209,12 +224,54 @@ bool EnsureDirectoryRecursive(const std::string& path) {
     return DirectoryExists(path);
 }
 
+bool ConfigureSdkCorePaths(const std::string& work_dir,
+                           const std::string& log_dir,
+                           bool enable_file_logging) {
+    if (work_dir.empty()) {
+        return false;
+    }
+    CorePaths& paths = GetCorePaths();
+    std::lock_guard<std::mutex> lock(paths.mutex);
+    if (paths.initialized) {
+        return paths.configured && paths.work_dir == work_dir &&
+               paths.log_dir == log_dir &&
+               paths.enable_file_logging == enable_file_logging;
+    }
+    paths.work_dir = work_dir;
+    paths.log_dir = log_dir;
+    paths.enable_file_logging = enable_file_logging;
+    paths.configured = true;
+    paths.initialized = true;
+    return true;
+}
+
 const std::string& GetSdkOpenWorkDir() {
-    static const std::string work_dir = ResolveSdkOpenWorkDir();
-    return work_dir;
+    CorePaths& paths = GetCorePaths();
+    std::lock_guard<std::mutex> lock(paths.mutex);
+    if (!paths.initialized) {
+        paths.work_dir = ResolveSdkOpenWorkDir();
+        paths.initialized = true;
+    }
+    // Once initialized this string is immutable, so the reference remains safe
+    // after the lock is released, including for legacy Open Runtime callers.
+    return paths.work_dir;
+}
+
+bool IsSdkCoreFileLoggingEnabled() {
+    GetSdkOpenWorkDir();
+    CorePaths& paths = GetCorePaths();
+    std::lock_guard<std::mutex> lock(paths.mutex);
+    return paths.enable_file_logging;
 }
 
 std::string ResolveSdkOpenLogDir() {
+    {
+        CorePaths& paths = GetCorePaths();
+        std::lock_guard<std::mutex> lock(paths.mutex);
+        if (paths.configured) {
+            return paths.log_dir.empty() ? JoinPath(paths.work_dir, "logs") : paths.log_dir;
+        }
+    }
     const char* override_dir = std::getenv(kSdkOpenLogDirEnv);
     if (override_dir != NULL && override_dir[0] != '\0') {
         return std::string(override_dir);

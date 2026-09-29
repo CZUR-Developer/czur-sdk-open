@@ -3,6 +3,8 @@
 
 #include "image_enhance_task_service.h"
 
+#include "image_enhance_quota.h"
+
 #include <algorithm>
 #include <cctype>
 #include <fstream>
@@ -121,56 +123,6 @@ bool CopyFile(const std::string& input_path, const std::string& output_path) {
     }
     out << in.rdbuf();
     return static_cast<bool>(out);
-}
-
-std::string NormalizeOnlineEnhanceCapability(const std::string& type) {
-    if (type == "document_rectify_enhance") {
-        return "doc_crop_enhance";
-    }
-    if (type == "remove_background_texture") {
-        return "doc_repair";
-    }
-    return type;
-}
-
-bool IsOnlineEnhanceCapability(const std::string& type) {
-    const std::string normalized = NormalizeOnlineEnhanceCapability(type);
-    return normalized == "doc_crop_enhance" ||
-           normalized == "remove_handwriting" ||
-           normalized == "doc_repair" ||
-           normalized == "remove_moire";
-}
-
-QuotaConsumeResult ConfirmOnlineEnhanceQuota(const ProviderBundle& providers,
-                                             const SdkImageEnhanceTaskRequest& request,
-                                             const std::string& task_id,
-                                             const std::map<std::string, int>& usage_by_capability) {
-    QuotaConsumeResult result;
-    if (usage_by_capability.empty()) {
-        return result;
-    }
-    if (!providers.auth_provider) {
-        result.code = ToCode(SdkStatusCode::ProviderNotReady);
-        result.message = "auth provider is not available";
-        return result;
-    }
-    for (std::map<std::string, int>::const_iterator it = usage_by_capability.begin();
-         it != usage_by_capability.end();
-         ++it) {
-        QuotaConsumeRequest quota_request;
-        quota_request.token = request.online_api_key;
-        quota_request.session_token = request.online_session_token;
-        quota_request.authz_base_url = request.authz_base_url;
-        quota_request.capability = it->first;
-        quota_request.request_id = "image.enhance:" + task_id + ":" + it->first;
-        quota_request.units = it->second > 0 ? it->second : 1;
-        const QuotaConsumeResult quota_result = providers.auth_provider->ConsumeQuota(quota_request);
-        if (!IsOkStatusCode(quota_result.code)) {
-            return quota_result;
-        }
-        result = quota_result;
-    }
-    return result;
 }
 
 std::string PageOutputPath(const std::string& output_dir, int index, const std::string& format) {
@@ -323,6 +275,11 @@ void ImageEnhanceTaskService::SetEventSink(EventSink sink) {
 }
 
 SdkImageEnhanceTaskResult ImageEnhanceTaskService::StartTask(const SdkImageEnhanceTaskRequest& request) {
+    return StartTask(request, OutputPublisher());
+}
+
+SdkImageEnhanceTaskResult ImageEnhanceTaskService::StartTask(const SdkImageEnhanceTaskRequest& request,
+                                                          OutputPublisher publisher) {
     SdkImageEnhanceTaskResult result;
     if (request.input_paths.empty()) {
         result.code = ToCode(SdkStatusCode::InvalidParams);
@@ -383,21 +340,32 @@ SdkImageEnhanceTaskResult ImageEnhanceTaskService::StartTask(const SdkImageEnhan
         page.path = request.input_paths[i];
         task.pages.push_back(page);
     }
+    // Prepare every caller-visible result before the worker is started.  A
+    // snapshot copy can allocate; after submission such an exception must not
+    // make the caller believe the task was rejected while the worker runs.
+    result.accepted = true;
+    result.task_id = task_id;
+    result.task = task;
     {
         std::lock_guard<std::mutex> lock(mu_);
-        tasks_[task_id] = task;
-        active_worker_task_ids_.insert(task_id);
+        // Reserve before starting the worker.  std::thread construction starts
+        // execution immediately, so a later vector allocation failure must not
+        // leave a running worker without an owner.
+        workers_.reserve(workers_.size() + 1);
         try {
-            workers_.push_back(std::thread(&ImageEnhanceTaskService::RunTask, this, task_id, task_request));
+            tasks_[task_id] = task;
+            active_worker_task_ids_.insert(task_id);
+            std::thread worker(&ImageEnhanceTaskService::RunTask, this, task_id, task_request, std::move(publisher));
+            workers_.push_back(std::move(worker));
         } catch (...) {
             active_worker_task_ids_.erase(task_id);
             tasks_.erase(task_id);
             throw;
         }
     }
-    result.accepted = true;
-    result.task_id = task_id;
-    result.task = task;
+    // Submission has already succeeded once the worker is owned by workers_.
+    // An event sink is application code and must not turn that success into a
+    // caller-visible submission failure.
     PublishEvent(task);
     return result;
 }
@@ -449,6 +417,49 @@ SdkImageEnhanceTaskResult ImageEnhanceTaskService::CancelTask(const std::string&
     return result;
 }
 
+void ImageEnhanceTaskService::CancelAndWait(const std::string& connection_id) {
+    std::vector<SdkImageEnhanceTaskSnapshot> cancelled_events;
+    std::set<std::string> target_task_ids;
+    {
+        std::unique_lock<std::mutex> lock(mu_);
+        for (std::set<std::string>::const_iterator it = active_worker_task_ids_.begin();
+             it != active_worker_task_ids_.end();
+             ++it) {
+            std::map<std::string, SdkImageEnhanceTaskSnapshot>::iterator task_it = tasks_.find(*it);
+            if (!connection_id.empty() &&
+                (task_it == tasks_.end() || task_it->second.connection_id != connection_id)) {
+                continue;
+            }
+            target_task_ids.insert(*it);
+            cancel_requested_.insert(*it);
+            if (task_it != tasks_.end()) {
+                task_it->second.cancel_requested = true;
+                if (task_it->second.status == "queued") {
+                    task_it->second.status = "cancelled";
+                    task_it->second.phase = "cancelled";
+                    task_it->second.progress = 100;
+                    cancelled_events.push_back(task_it->second);
+                }
+            }
+        }
+        worker_cv_.wait(lock, [this, &target_task_ids]() {
+            for (std::set<std::string>::const_iterator it = target_task_ids.begin();
+                 it != target_task_ids.end();
+                 ++it) {
+                if (active_worker_task_ids_.find(*it) != active_worker_task_ids_.end()) {
+                    return false;
+                }
+            }
+            return true;
+        });
+    }
+    for (std::vector<SdkImageEnhanceTaskSnapshot>::const_iterator it = cancelled_events.begin();
+         it != cancelled_events.end();
+         ++it) {
+        PublishEvent(*it);
+    }
+}
+
 std::size_t ImageEnhanceTaskService::ActiveTaskCount() const {
     std::lock_guard<std::mutex> lock(mu_);
     return active_worker_task_ids_.size();
@@ -469,31 +480,67 @@ std::size_t ImageEnhanceTaskService::ClearFinishedTasks() {
     return count;
 }
 
-void ImageEnhanceTaskService::RunTask(const std::string& task_id, SdkImageEnhanceTaskRequest request) {
+void ImageEnhanceTaskService::RunTask(const std::string& task_id, SdkImageEnhanceTaskRequest request,
+                                     OutputPublisher publisher) noexcept {
+    struct WorkerExitGuard {
+        ImageEnhanceTaskService* service;
+        const std::string* task_id;
+
+        ~WorkerExitGuard() noexcept {
+            try {
+                service->MarkWorkerExited(*task_id);
+            } catch (...) {
+            }
+        }
+    } worker_exit_guard = {this, &task_id};
+
     try {
-        RunTaskImpl(task_id, request);
+        RunTaskImpl(task_id, request, publisher);
     } catch (const std::exception& e) {
-        SDK_OPEN_LOG_ERROR("[image_enhance_task] worker failed task_id={} err={}", task_id, e.what());
-        std::lock_guard<std::mutex> lock(mu_);
-        SdkImageEnhanceTaskSnapshot& task = tasks_[task_id];
-        task.status = "failed";
-        task.phase = "failed";
-        task.progress = 100;
-        task.error = e.what();
+        try {
+            SDK_OPEN_LOG_ERROR("[image_enhance_task] worker failed task_id={} err={}", task_id, e.what());
+        } catch (...) {
+        }
+        try {
+            std::lock_guard<std::mutex> lock(mu_);
+            std::map<std::string, SdkImageEnhanceTaskSnapshot>::iterator it = tasks_.find(task_id);
+            if (it != tasks_.end()) {
+                it->second.status = "failed";
+                it->second.phase = "failed";
+                it->second.progress = 100;
+                it->second.error = e.what();
+            }
+        } catch (...) {
+        }
     } catch (...) {
-        SDK_OPEN_LOG_ERROR("[image_enhance_task] worker failed task_id={} err=<unknown>", task_id);
-        std::lock_guard<std::mutex> lock(mu_);
-        SdkImageEnhanceTaskSnapshot& task = tasks_[task_id];
-        task.status = "failed";
-        task.phase = "failed";
-        task.progress = 100;
-        task.error = "image enhance task failed";
+        try {
+            SDK_OPEN_LOG_ERROR("[image_enhance_task] worker failed task_id={} err=<unknown>", task_id);
+        } catch (...) {
+        }
+        try {
+            std::lock_guard<std::mutex> lock(mu_);
+            std::map<std::string, SdkImageEnhanceTaskSnapshot>::iterator it = tasks_.find(task_id);
+            if (it != tasks_.end()) {
+                it->second.status = "failed";
+                it->second.phase = "failed";
+                it->second.progress = 100;
+                it->second.error = "image enhance task failed";
+            }
+        } catch (...) {
+        }
     }
-    std::lock_guard<std::mutex> lock(mu_);
-    active_worker_task_ids_.erase(task_id);
 }
 
-void ImageEnhanceTaskService::RunTaskImpl(const std::string& task_id, SdkImageEnhanceTaskRequest request) {
+void ImageEnhanceTaskService::MarkWorkerExited(const std::string& task_id) {
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        active_worker_task_ids_.erase(task_id);
+    }
+    worker_cv_.notify_all();
+}
+
+void ImageEnhanceTaskService::RunTaskImpl(const std::string& task_id, SdkImageEnhanceTaskRequest request,
+                                         const OutputPublisher& publisher) {
     std::vector<SdkImageEnhancePage> pages;
     std::map<std::string, int> online_usage_by_capability;
     SdkImageEnhanceTaskSnapshot event_task;
@@ -667,7 +714,7 @@ void ImageEnhanceTaskService::RunTaskImpl(const std::string& task_id, SdkImageEn
             convert_result.message = "file convert provider is not available";
         }
         std::lock_guard<std::mutex> lock(mu_);
-        SdkImageEnhanceTaskSnapshot& task = tasks_[task_id];
+        SdkImageEnhanceTaskSnapshot task = tasks_[task_id];
         if (!IsOkStatusCode(convert_result.code)) {
             task.status = "failed";
             task.phase = "failed";
@@ -683,6 +730,9 @@ void ImageEnhanceTaskService::RunTaskImpl(const std::string& task_id, SdkImageEn
             task.status = "completed";
             task.phase = "completed";
             task.progress = 100;
+        }
+        if (!publisher) {
+            tasks_[task_id] = task;
         }
         final_task = task;
     } else {
@@ -714,12 +764,17 @@ void ImageEnhanceTaskService::RunTaskImpl(const std::string& task_id, SdkImageEn
             ++output_index;
         }
         std::lock_guard<std::mutex> lock(mu_);
-        SdkImageEnhanceTaskSnapshot& task = tasks_[task_id];
+        SdkImageEnhanceTaskSnapshot task = tasks_[task_id];
         if (output_paths.empty()) {
             task.status = "failed";
             task.phase = "failed";
             task.progress = 100;
             task.error = "failed to write enhanced image outputs";
+        } else if (publisher && output_paths.size() != pages.size()) {
+            task.status = "failed";
+            task.phase = "failed";
+            task.progress = 100;
+            task.error = "failed to write all enhanced image outputs";
         } else {
             task.pages = pages;
             task.output_path = output_paths.front();
@@ -727,6 +782,9 @@ void ImageEnhanceTaskService::RunTaskImpl(const std::string& task_id, SdkImageEn
             task.status = "completed";
             task.phase = "completed";
             task.progress = 100;
+        }
+        if (!publisher) {
+            tasks_[task_id] = task;
         }
         final_task = task;
     }
@@ -744,8 +802,12 @@ void ImageEnhanceTaskService::RunTaskImpl(const std::string& task_id, SdkImageEn
         }
         AttachAssetUrls(task_id, &final_task.assets);
 
+        OnlineEnhanceQuotaCredentials quota_credentials;
+        quota_credentials.online_api_key = request.online_api_key;
+        quota_credentials.online_session_token = request.online_session_token;
+        quota_credentials.authz_base_url = request.authz_base_url;
         const QuotaConsumeResult quota_result =
-            ConfirmOnlineEnhanceQuota(providers_, request, task_id, online_usage_by_capability);
+            ConfirmOnlineEnhanceQuota(providers_, quota_credentials, task_id, online_usage_by_capability);
         if (!IsOkStatusCode(quota_result.code)) {
             final_task.status = "failed";
             final_task.phase = "failed";
@@ -756,29 +818,101 @@ void ImageEnhanceTaskService::RunTaskImpl(const std::string& task_id, SdkImageEn
             final_task.assets.clear();
         }
 
+        if (publisher && final_task.status == "completed") {
+            PublishOutputs(task_id, publisher, &final_task);
+        }
         std::lock_guard<std::mutex> lock(mu_);
+        if (publisher) {
+            final_task.cancel_requested = cancel_requested_.count(task_id) != 0;
+        }
+        tasks_[task_id] = final_task;
+    } else if (publisher) {
+        std::lock_guard<std::mutex> lock(mu_);
+        final_task.cancel_requested = cancel_requested_.count(task_id) != 0;
         tasks_[task_id] = final_task;
     }
     PublishEvent(final_task);
 }
 
-void ImageEnhanceTaskService::PublishEvent(const SdkImageEnhanceTaskSnapshot& task) const {
-    EventSink sink;
+void ImageEnhanceTaskService::PublishOutputs(const std::string& task_id,
+                                            const OutputPublisher& publisher,
+                                            SdkImageEnhanceTaskSnapshot* task) {
     {
         std::lock_guard<std::mutex> lock(mu_);
-        sink = event_sink_;
+        if (cancel_requested_.count(task_id) != 0) {
+            task->status = "cancelled";
+            task->phase = "cancelled";
+            task->cancel_requested = true;
+            task->output_path.clear();
+            task->output_paths.clear();
+            task->assets.clear();
+            return;
+        }
     }
-    if (!sink || task.connection_id.empty()) {
+    // This is the publication boundary. Cancellation arriving afterwards is
+    // recorded, but cannot interrupt a filesystem commit already in progress.
+    const OutputPublication published = publisher(task->output_paths);
+    if (!IsOkStatusCode(published.code) || published.output_paths.empty() ||
+        published.output_paths.size() != task->output_paths.size() ||
+        std::find(published.output_paths.begin(), published.output_paths.end(), std::string()) !=
+            published.output_paths.end()) {
+        task->status = "failed";
+        task->phase = "failed";
+        task->code = IsOkStatusCode(published.code) ? ToCode(SdkStatusCode::InternalError) : published.code;
+        task->message = IsOkStatusCode(published.code) ? "invalid published output paths" : published.message;
+        task->error = task->message;
+        task->output_path.clear();
+        task->output_paths.clear();
+        task->assets.clear();
         return;
     }
-    SdkImageEnhanceTaskSnapshot event_task = task;
-    AttachAssetUrls(event_task.task_id, &event_task.assets);
-    sink(event_task.connection_id,
-         BuildWsEvent("image.enhance_changed",
-                      Json{{"task_id", event_task.task_id},
-                           {"task", BuildImageEnhanceTaskJson(event_task)}},
-                      event_task.code,
-                      event_task.message));
+    for (auto& page : task->pages) {
+        for (std::size_t i = 0; i < task->output_paths.size(); ++i) {
+            if (page.path == task->output_paths[i]) {
+                page.path = published.output_paths[i];
+                break;
+            }
+        }
+    }
+    for (std::size_t i = 0; i < task->assets.size(); ++i) {
+        task->assets[i].path = published.output_paths[i];
+        task->assets[i].url.clear();
+        task->assets[i].download_url.clear();
+    }
+    task->output_paths = published.output_paths;
+    task->output_path = task->output_paths.front();
+    AttachAssetUrls(task_id, &task->assets);
+}
+
+void ImageEnhanceTaskService::PublishEvent(const SdkImageEnhanceTaskSnapshot& task) const {
+    try {
+        EventSink sink;
+        {
+            std::lock_guard<std::mutex> lock(mu_);
+            sink = event_sink_;
+        }
+        if (!sink || task.connection_id.empty()) {
+            return;
+        }
+        SdkImageEnhanceTaskSnapshot event_task = task;
+        AttachAssetUrls(event_task.task_id, &event_task.assets);
+        sink(event_task.connection_id,
+             BuildWsEvent("image.enhance_changed",
+                          Json{{"task_id", event_task.task_id},
+                               {"task", BuildImageEnhanceTaskJson(event_task)}},
+                          event_task.code,
+                          event_task.message));
+    } catch (const std::exception& e) {
+        try {
+            SDK_OPEN_LOG_ERROR("[image_enhance_task] event sink failed task_id={} err={}", task.task_id, e.what());
+        } catch (...) {
+        }
+    } catch (...) {
+        try {
+            SDK_OPEN_LOG_ERROR("[image_enhance_task] event sink failed task_id={} err=<unknown>", task.task_id);
+        } catch (...) {
+        }
+    }
 }
 
 SdkImageEnhanceTaskSnapshot ImageEnhanceTaskService::GetTaskUnlocked(const std::string& task_id) const {
