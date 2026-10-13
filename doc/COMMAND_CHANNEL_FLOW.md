@@ -87,25 +87,6 @@ Unified response format:
 }
 ```
 
-### Unique device SN in `device.open`
-
-After a successful open, response `data` includes the optional string `device_sn` only when
-a device command returns a valid unique SN. This is neither the UVC enumeration/connection
-serial nor `device_id`; neither those identifiers nor cached values are used as a fallback.
-If reading is unsupported, fails, or returns invalid data, `device_sn` is omitted (not an empty
-string or `null`), without changing the original open result. `device.list` and `device.get`
-do not return this field. Clients must allow it to be absent.
-
-Partial `data` example with an illustrative SN; all other response fields remain unchanged:
-
-```json
-{
-  "device_id": "04fc:6333:01.00.00:b1d6",
-  "opened": true,
-  "device_sn": "AM3300123456789A"
-}
-```
-
 ## Event Shape
 
 Server-pushed events stay separate from request/response traffic:
