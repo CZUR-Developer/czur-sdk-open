@@ -4,6 +4,12 @@
 
 All notable changes to the CZUR Open SDK are documented in this file.
 
+## [0.0.9] - 2026-10-13
+
+### Added
+
+- `device.open` now returns the device serial number (SN) after successfully opening the device.
+
 ## [0.0.8] - 2026-09-28
 
 ### Changed
