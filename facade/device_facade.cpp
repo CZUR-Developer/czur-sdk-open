@@ -325,7 +325,6 @@ SdkDeviceOpenResult OpenProviderDeviceWithCApi(const SdkDeviceOpenRequest& reque
         result.message = IsOkStatusCode(result.code) ? "ok" : "private device failed";
     }
     result.opened = BoolField(response, "opened");
-    result.device_sn = StringField(response, "device_sn");
     Json::const_iterator device_it = response.find("device");
     if (device_it != response.end()) {
         result.device = DeviceDescriptorFromJson(*device_it);

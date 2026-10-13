@@ -3895,9 +3895,6 @@ Json CommandApplicationService::HandleDeviceOpen(const std::string& connection_i
     data["device_id"] = result.device.device_id.empty() ? open_request.device_id : result.device.device_id;
     data["opened"] = result.opened;
     data["provider"] = ProviderNameOrEmpty(provider_names_, "device");
-    if (!result.device_sn.empty()) {
-        data["device_sn"] = result.device_sn;
-    }
     if (result.opened) {
         RememberOpenedDevice(connection_id, open_request.device_id);
     }
