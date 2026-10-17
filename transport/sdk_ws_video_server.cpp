@@ -350,6 +350,17 @@ void SdkWsVideoServer::Stop() {
     SDK_OPEN_LOG_INFO("[sdk_ws_video_server] stopped");
 }
 
+bool SdkWsVideoServer::ReloadTls() {
+    if (!tls_config_.enabled) {
+        return true;
+    }
+    if (!running_.load()) {
+        return Start();
+    }
+    Stop();
+    return Start();
+}
+
 void SdkWsVideoServer::PublishFrame(const SdkVideoFrame& frame) {
     if (!impl_ || frame.stream_id.empty() || frame.payload.empty()) {
         return;

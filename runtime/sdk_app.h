@@ -6,7 +6,10 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <condition_variable>
+#include <mutex>
 #include <string>
+#include <thread>
 
 #include "../application/admin_application_service.h"
 #include "../application/command_application_service.h"
@@ -42,6 +45,10 @@ private:
     Json BuildLogReadJson(const std::string& log_id, std::size_t tail_bytes) const;
     Json BuildRecordsJson() const;
     uint64_t UptimeSeconds() const;
+    void StartTlsRotationMonitor();
+    void StopTlsRotationMonitor();
+    void RunTlsRotationMonitor();
+    bool ReloadTlsListeners();
 
     SdkConfig config_;
     ProviderBundle providers_;
@@ -56,6 +63,10 @@ private:
     SdkWsCommandServer command_ws_server_;
     SdkWsVideoServer video_ws_server_;
     std::atomic<bool> running_;
+    std::atomic<bool> tls_rotation_stop_;
+    std::condition_variable tls_rotation_cv_;
+    std::mutex tls_rotation_mu_;
+    std::thread tls_rotation_thread_;
     std::chrono::steady_clock::time_point start_time_;
 };
 

@@ -222,6 +222,7 @@ set(SDK_OPEN_RUNTIME_SRCS
     runtime/sdk_app.cpp
     runtime/sdk_json_utils.cpp
     runtime/sdk_config.cpp
+    runtime/sdk_tls_certificate_manager.cpp
     transport/sdk_http_server.cpp
     transport/sdk_tls_utils.cpp
     transport/sdk_ws_command_server.cpp
@@ -380,6 +381,18 @@ if(BUILD_SDK_OPEN_TESTS)
     )
     add_test(NAME sdk_open.status_software
              COMMAND sdk_open_status_software_test)
+
+    if(SDK_OPEN_ENABLE_TLS)
+        add_executable(sdk_open_tls_certificate_manager_test
+            test/tls_certificate_manager_test.cpp
+        )
+        target_link_libraries(sdk_open_tls_certificate_manager_test PRIVATE
+            sdk_open_runtime
+        )
+        add_test(NAME sdk_open.tls_certificate_manager
+                 COMMAND sdk_open_tls_certificate_manager_test
+                         "${CMAKE_CURRENT_BINARY_DIR}/tls-certificate-manager-test")
+    endif()
 endif()
 if(WIN32 AND SDK_OPEN_USE_PRIVATE_PROVIDER)
     target_sources(sdk_open_app PRIVATE

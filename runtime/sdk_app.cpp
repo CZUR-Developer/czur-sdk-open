@@ -28,6 +28,7 @@
 #include "sdk_runtime_paths.h"
 #include "sdk_open_version.h"
 #include "sdk_tls_utils.h"
+#include "sdk_tls_certificate_manager.h"
 
 namespace editor {
 namespace sdk {
@@ -319,6 +320,7 @@ SdkApp::SdkApp(const SdkConfig& config, ProviderBundle providers)
       command_ws_server_(config_.bind_host, config_.command_ws_port, config_.tls),
       video_ws_server_(config_.bind_host, config_.video_ws_port, config_.tls),
       running_(false),
+      tls_rotation_stop_(false),
       start_time_(std::chrono::steady_clock::now()) {
 #if defined(SDK_USE_PRIVATE_PROVIDER) && defined(_WIN32)
     provider_names_ = Json{{"device", "czur-device-provider"},
@@ -560,6 +562,7 @@ bool SdkApp::Start() {
 
     start_time_ = std::chrono::steady_clock::now();
     running_.store(true);
+    StartTlsRotationMonitor();
     SDK_OPEN_LOG_INFO("[sdk_app] started");
     return true;
 }
@@ -571,6 +574,7 @@ void SdkApp::Stop() {
     }
 
     SDK_OPEN_LOG_INFO("[sdk_app] stopping...");
+    StopTlsRotationMonitor();
     if (command_application_service_) {
         // 先收口 sdk_open 自己登记的视频流和设备，再停止 WS/HTTP 服务。
         // 否则设备会残留到 private 层/DeviceManager release 阶段才兜底关闭。
@@ -586,6 +590,67 @@ void SdkApp::Stop() {
         admin_http_server_.Stop();
     }
     SDK_OPEN_LOG_INFO("[sdk_app] stopped");
+}
+
+bool SdkApp::ReloadTlsListeners() {
+    if (!running_.load() || !config_.tls.enabled) {
+        return true;
+    }
+    std::lock_guard<std::mutex> lock(tls_rotation_mu_);
+    for (int attempt = 1; attempt <= 2; ++attempt) {
+        SDK_OPEN_LOG_INFO("[tls.rotation.reload] restarting TLS listeners, attempt={}", attempt);
+        const bool asset_ok = asset_http_server_.ReloadTls();
+        const bool command_ok = command_ws_server_.ReloadTls();
+        const bool video_ok = video_ws_server_.ReloadTls();
+        if (asset_ok && command_ok && video_ok) {
+            SDK_OPEN_LOG_INFO("[tls.rotation.reload_succeeded] TLS listeners restarted");
+            return true;
+        }
+        SDK_OPEN_LOG_WARN("[tls.rotation.reload_failed] attempt={} asset={} command={} video={}",
+                          attempt, asset_ok, command_ok, video_ok);
+    }
+    SDK_OPEN_LOG_ERROR("[tls.rotation.reload_failed] one or more TLS listeners remain unavailable");
+    return false;
+}
+
+void SdkApp::StartTlsRotationMonitor() {
+    if (!config_.tls.enabled || tls_rotation_thread_.joinable()) {
+        return;
+    }
+    tls_rotation_stop_.store(false);
+    tls_rotation_thread_ = std::thread(&SdkApp::RunTlsRotationMonitor, this);
+}
+
+void SdkApp::StopTlsRotationMonitor() {
+    tls_rotation_stop_.store(true);
+    tls_rotation_cv_.notify_all();
+    if (tls_rotation_thread_.joinable()) {
+        tls_rotation_thread_.join();
+    }
+}
+
+void SdkApp::RunTlsRotationMonitor() {
+    const SdkTlsRotationPolicy policy;
+    const SdkTlsCertificatePaths paths = SdkTlsCertificateManager::PathsFromConfig(config_.tls);
+    for (;;) {
+        std::unique_lock<std::mutex> lock(tls_rotation_mu_);
+        if (tls_rotation_cv_.wait_for(lock,
+                                      std::chrono::seconds(policy.check_interval_seconds),
+                                      [this]() { return tls_rotation_stop_.load(); })) {
+            return;
+        }
+        lock.unlock();
+
+        bool rotated = false;
+        std::string error;
+        if (!SdkTlsCertificateManager::RotateIfNeeded(paths, policy, &rotated, &error)) {
+            SDK_OPEN_LOG_ERROR("[tls.rotation.failed] periodic check failed: {}", error);
+            continue;
+        }
+        if (rotated && !ReloadTlsListeners()) {
+            SDK_OPEN_LOG_ERROR("[tls.rotation.failed] certificate was rotated but listeners could not reload");
+        }
+    }
 }
 
 bool SdkApp::IsRunning() const {

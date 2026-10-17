@@ -23,11 +23,16 @@ CXX_FLAGS=(-std=c++11 -O1 -DASIO_STANDALONE -D_WEBSOCKETPP_CPP11_STL_ -DSDK_OPEN
 "${CXX:-clang++}" "${CXX_FLAGS[@]}" "${INCLUDES[@]}" -Wl,-dead_strip \
     "$SDK_ROOT/test/mac_runtime_config_test.cpp" \
     "$SDK_ROOT/runtime/sdk_config.cpp" "$SDK_ROOT/runtime/sdk_runtime_paths.cpp" \
+    "$SDK_ROOT/runtime/sdk_tls_certificate_manager.cpp" \
     -o "$TEST_ROOT/mac_runtime_config_test"
 
 mkdir -p "$TEST_ROOT/tls"
-printf 'test certificate\n' > "$TEST_ROOT/tls/sdk-runtime.localhost.fullchain.pem"
-printf 'test private key\n' > "$TEST_ROOT/tls/sdk-runtime.localhost.key.pem"
+printf 'current certificate\n' > "$TEST_ROOT/tls/sdk-runtime.localhost.fullchain.pem"
+printf 'legacy certificate\n' > "$TEST_ROOT/tls/legacy-sdk-runtime.localhost.pem"
+printf 'default private key\n' > "$TEST_ROOT/tls/sdk-runtime.localhost.key.pem"
+printf 'root certificate\n' > "$TEST_ROOT/tls/local-runtime-root-ca.crt"
+printf 'root private key\n' > "$TEST_ROOT/tls/local-runtime-root-ca.key.pem"
+printf '{"mode":"managed"}\n' > "$TEST_ROOT/tls/tls-state.json"
 # Do not inherit SDK overrides from the developer's running environment.
 while IFS= read -r variable; do
     case "$variable" in SDK_*|CZUR_SDK_RUNTIME_DIR) unset "$variable" ;; esac

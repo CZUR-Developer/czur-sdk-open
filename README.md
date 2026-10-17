@@ -15,7 +15,10 @@ The runtime keeps third-party integration boundaries stable through public DTOs,
 
 ## Platform Support
 
-The SDK Open runtime targets multi-platform support. The Linux version is implemented at this stage, and Windows and macOS support will be added gradually.
+The SDK Open runtime and its local TLS lifecycle are supported by the official Linux,
+Windows, and macOS packages. The transport and certificate manager use the same leaf
+validity, renewal threshold, and customer-certificate preservation rules on all three
+platforms.
 
 ## Release Package
 
@@ -249,14 +252,19 @@ export SDK_ASSET_BASE_URL=https://sdk.example.com:18082
 
 ### Default TLS for the local runtime
 
-The official Windows and Linux SDK Open packages include a default certificate and private
-key intended only for the local runtime. During installation they:
+The official Windows, macOS, and Linux SDK Open packages generate a machine-local root CA
+and leaf key pair during installation. The reusable root private key is not shipped in the
+package. During installation they:
 
 - enable `HTTPS 18082`, `WSS 18090`, and `WSS 18091` while retaining the plaintext ports;
 - map `sdk-runtime.localhost` to `127.0.0.1`, with the TLS listeners bound to loopback only;
 - add the Local Runtime Root CA to the operating-system trust store, so clients using that
   store can access `https://sdk-runtime.localhost:18082` without a default self-signed warning;
 - use `https://sdk-runtime.localhost:18082` as the default asset URL.
+
+The generated leaf is valid for 397 days and is renewed automatically when fewer than 90
+days remain. Windows services, macOS LaunchAgents, and Linux systemd services use the same
+rotation policy and reload their TLS listeners after a successful renewal.
 
 The service certificate and private key can be replaced without being overwritten by an
 upgrade:
@@ -267,10 +275,13 @@ upgrade:
 - Linux: `/etc/czur/sdk-open/tls/sdk-runtime.localhost.fullchain.pem` and
   `/etc/czur/sdk-open/tls/sdk-runtime.localhost.key.pem`; configuration is in
   `/etc/czur/sdk-open/runtime.env`.
+- macOS: `/Library/CZUR/sdk-open/tls` contains the machine-managed files, while the
+  LaunchAgent uses the per-user copy under `~/Library/Application Support/CZUR/sdk-open/tls`.
 
 Replace the certificate chain and private key as a matching pair, then restart `sdk-open`.
 If paths, host name, or ports change, update `runtime.env` too. A replacement private CA
-must be trusted by the calling client. The default credentials and loopback mapping are for
+must be trusted by the calling client. Customer-provided certificate pairs are preserved and
+are excluded from automatic rotation. The default credentials and loopback mapping are for
 the local runtime only, never for internet-facing or cross-customer use. When using
 `SDK_TLS_BIND_HOST=0.0.0.0` or NAT/DNS, set `SDK_ASSET_BASE_URL` to the actual public HTTPS
 address. TLS encrypts transport only; API keys, session tokens, asset authorization, and

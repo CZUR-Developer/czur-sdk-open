@@ -590,5 +590,16 @@ void SdkHttpServer::Stop() {
     SDK_OPEN_LOG_INFO("[sdk_http_server] {} stopped", site_name_);
 }
 
+bool SdkHttpServer::ReloadTls() {
+    if (!tls_config_.enabled) {
+        return true;
+    }
+    if (!running_.load()) {
+        return Start();
+    }
+    Stop();
+    return Start();
+}
+
 } // namespace sdk
 } // namespace editor
