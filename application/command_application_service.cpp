@@ -795,6 +795,24 @@ SdkCropBorderOptions ParseCropBorderOptions(const Json& obj,
     return options;
 }
 
+SdkCropCenterOptions ParseCropCenterOptions(const Json& obj,
+                                            bool default_enabled = false,
+                                            int default_margin = 0) {
+    SdkCropCenterOptions options;
+    options.enabled = default_enabled;
+    options.margin = default_margin;
+    const Json crop_json = GetOptionalObjectField(obj, "crop_center");
+    if (!crop_json.empty()) {
+        options.enabled = GetOptionalBoolField(crop_json, "enabled", options.enabled);
+        options.margin = GetOptionalIntField(crop_json, "margin", options.margin);
+    }
+    options.margin = ClampCropMargin(options.margin);
+    if (!options.enabled) {
+        options.margin = 0;
+    }
+    return options;
+}
+
 SdkSinglePageOptions ParseSinglePageOptions(const Json& obj, const SdkSinglePageOptions& defaults) {
     SdkSinglePageOptions options = defaults;
     options.realtime_detect_rects =
@@ -845,6 +863,9 @@ SdkCurvedBookOptions ParseCurvedBookOptions(const Json& obj, const SdkCurvedBook
                                                  options.crop_border.enabled,
                                                  options.crop_border.width,
                                                  options.crop_border.height);
+    options.crop_center = ParseCropCenterOptions(obj,
+                                                 options.crop_center.enabled,
+                                                 options.crop_center.margin);
     options.auto_complete = GetOptionalBoolAnyField(obj, {"auto_complete", "autoComplete"}, options.auto_complete);
     if (options.finger_type != "without_sleeve") {
         options.finger_type = "with_sleeve";
