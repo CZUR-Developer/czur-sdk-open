@@ -1008,6 +1008,12 @@ int main(int argc, char* argv[]) {
     SDK_OPEN_LOG_INFO("[sdk_open_app] shutdown requested, signal={}", signal_number);
     app->Stop();
 #endif
+
+#if defined(SDK_USE_PRIVATE_PROVIDER) && !defined(_WIN32)
+    // Cached CZOCR handlers must be destroyed before the dynamically loaded
+    // algorithm library tears down its process-global logging state.
+    editor::sdk::private_impl::ShutdownOcrRuntime();
+#endif
     return 0;
 }
 #endif
