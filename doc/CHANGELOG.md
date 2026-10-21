@@ -4,23 +4,20 @@
 
 All notable changes to the CZUR Open SDK are documented in this file.
 
-## [Unreleased]
-
-### Added
-
-- Added the optional `params.language` CZOCR language code to `ocr.extract_text` and `ocr.recognize`, with `auto` preserving the engine default.
-- Added a shared OCR language selector to the demo for text extraction and OCR export.
-
-### Compatibility Notes
-
-- Omitting `language` keeps existing behavior. The current `auto` behavior uses the Simplified Chinese model and does not promise universal language detection.
-- Empty, non-string, unknown, and currently disabled language codes return `InvalidParams`.
-
 ## [0.0.9] - 2026-10-13
 
 ### Added
 
 - `device.open` now returns the device serial number (SN) after successfully opening the device.
+- Added a rotation mechanism for the local TLS CA certificate.
+
+### Changed
+
+- Upgraded the CZOCR recognition model to support 89 languages.
+
+### Fixed
+
+- Fixed an issue where Safari on macOS rejected the CA certificate because its validity period was too long.
 
 ## [0.0.8] - 2026-09-28
 
