@@ -607,6 +607,7 @@ struct SdkOcrRecognizeRequest {
     std::string output_dir;
     std::string format = "docx";
     std::string export_type = "multi-page";
+    std::string language = "auto";
     std::string ext_params_json;
 };
 
@@ -664,6 +665,7 @@ struct SdkOcrTextBlock {
 struct SdkOcrExtractTextRequest {
     std::string input_upload_id;
     std::string input_path;
+    std::string language = "auto";
 };
 
 struct SdkOcrExtractTextResult {

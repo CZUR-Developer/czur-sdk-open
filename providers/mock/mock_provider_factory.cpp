@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "sdk_logger.h"
+#include "sdk_ocr_language.h"
 #include "sdk_runtime_paths.h"
 #include "sdk_status_code.h"
 
@@ -1278,6 +1279,11 @@ public:
     std::string ProviderName() const override { return "mock-ocr-provider"; }
     SdkOcrRecognizeResult Recognize(const SdkOcrRecognizeRequest& request) override {
         SdkOcrRecognizeResult result;
+        if (!IsSupportedSdkOcrLanguage(request.language)) {
+            result.code = ToCode(SdkStatusCode::InvalidParams);
+            result.message = "unsupported ocr language";
+            return result;
+        }
         result.task_id = "mock-ocr-task-" + std::to_string(next_task_id_++);
         result.task.task_id = result.task_id;
         result.task.status = "completed";
@@ -1330,6 +1336,11 @@ public:
     }
     SdkOcrExtractTextResult ExtractText(const SdkOcrExtractTextRequest& request) override {
         SdkOcrExtractTextResult result;
+        if (!IsSupportedSdkOcrLanguage(request.language)) {
+            result.code = ToCode(SdkStatusCode::InvalidParams);
+            result.message = "unsupported ocr language";
+            return result;
+        }
         result.recognized = true;
         result.input_path = request.input_path;
         result.width = 1200;

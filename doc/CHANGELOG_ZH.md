@@ -4,6 +4,18 @@
 
 本文档记录 CZUR Open SDK 项目的重要版本变更。
 
+## [未发布]
+
+### 新增
+
+- `ocr.extract_text` 和 `ocr.recognize` 新增可选的 `params.language` CZOCR 语言代码，`auto` 保持引擎默认行为。
+- Demo 新增文字提取与 OCR 导出共用的识别语言选择。
+
+### 兼容性说明
+
+- 省略 `language` 时保持现有行为。当前 `auto` 实际使用简体中文模型，不承诺真正的全语种自动检测。
+- 空值、非字符串、未知代码和当前暂缓上线的语言代码返回 `InvalidParams`。
+
 ## [0.0.9] - 2026-10-13
 
 ### 新增

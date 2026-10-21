@@ -382,6 +382,20 @@ if(BUILD_SDK_OPEN_TESTS)
     add_test(NAME sdk_open.status_software
              COMMAND sdk_open_status_software_test)
 
+    add_executable(sdk_open_ocr_language_contract_test
+        test/ocr_language_contract_test.cpp
+    )
+    target_include_directories(sdk_open_ocr_language_contract_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/providers/mock"
+    )
+    target_link_libraries(sdk_open_ocr_language_contract_test PRIVATE
+        sdk_open_runtime
+        sdk_mock_providers
+    )
+    add_test(NAME sdk_open.ocr_language_contract
+             COMMAND sdk_open_ocr_language_contract_test
+                     "${CMAKE_CURRENT_BINARY_DIR}/ocr-language-contract-test")
+
     if(SDK_OPEN_ENABLE_TLS)
         add_executable(sdk_open_tls_certificate_manager_test
             test/tls_certificate_manager_test.cpp

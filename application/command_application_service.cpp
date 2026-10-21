@@ -20,6 +20,7 @@
 #include "sdk_runtime_paths.h"
 #include "sdk_entitlement_policy.h"
 #include "sdk_logger.h"
+#include "sdk_ocr_language.h"
 
 namespace editor {
 namespace sdk {
@@ -5122,6 +5123,10 @@ Json CommandApplicationService::HandleOcrRecognize(const std::string& connection
     }
 
     SdkOcrRecognizeRequest ocr_request;
+    std::string language_error;
+    if (!ReadSdkOcrLanguage(request.params, &ocr_request.language, &language_error)) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, language_error);
+    }
     ocr_request.input_upload_ids = GetOptionalStringArrayField(request.params, "input_upload_ids");
     const std::string single_upload_id = GetOptionalStringField(request.params, "input_upload_id");
     if (!single_upload_id.empty()) {
@@ -5180,6 +5185,9 @@ Json CommandApplicationService::HandleOcrRecognize(const std::string& connection
             ext_params[it.key()] = it.value();
         }
     }
+    // The validated public field is authoritative. Nested extension objects
+    // cannot select an unvalidated language.
+    ext_params.erase("language");
     const std::vector<const char*> ext_keys = {"encoding", "paperSize", "exportType", "ocrPreference", "quality", "exportFormat"};
     for (std::vector<const char*>::const_iterator it = ext_keys.begin(); it != ext_keys.end(); ++it) {
         const auto json_it = request.params.find(*it);
@@ -5370,6 +5378,10 @@ Json CommandApplicationService::HandleOcrExtractText(const std::string& connecti
     }
 
     SdkOcrExtractTextRequest extract_request;
+    std::string language_error;
+    if (!ReadSdkOcrLanguage(request.params, &extract_request.language, &language_error)) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, language_error);
+    }
     extract_request.input_upload_id = GetOptionalStringField(request.params, "input_upload_id");
     extract_request.input_path = GetOptionalStringField(request.params, "input_path");
     if (!extract_request.input_upload_id.empty()) {

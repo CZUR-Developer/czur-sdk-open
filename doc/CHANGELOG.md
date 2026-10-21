@@ -4,6 +4,18 @@
 
 All notable changes to the CZUR Open SDK are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Added the optional `params.language` CZOCR language code to `ocr.extract_text` and `ocr.recognize`, with `auto` preserving the engine default.
+- Added a shared OCR language selector to the demo for text extraction and OCR export.
+
+### Compatibility Notes
+
+- Omitting `language` keeps existing behavior. The current `auto` behavior uses the Simplified Chinese model and does not promise universal language detection.
+- Empty, non-string, unknown, and currently disabled language codes return `InvalidParams`.
+
 ## [0.0.9] - 2026-10-13
 
 ### Added
