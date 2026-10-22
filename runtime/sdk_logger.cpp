@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "sdk_runtime_paths.h"
+#include "spdlog/details/os.h"
 #include "spdlog/sinks/rotating_file_sink.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
 
@@ -70,6 +71,16 @@ spdlog::level::level_enum ResolveSdkOpenLogLevel() {
 #endif
 }
 
+spdlog::filename_t ToSpdlogFilename(const std::string& path) {
+#if defined(_WIN32) && defined(SPDLOG_WCHAR_FILENAMES)
+    spdlog::wmemory_buf_t wide_path;
+    spdlog::details::os::utf8_to_wstrbuf(path, wide_path);
+    return spdlog::filename_t(wide_path.data(), wide_path.size());
+#else
+    return path;
+#endif
+}
+
 std::shared_ptr<spdlog::logger> BuildSdkOpenLogger(std::string* init_warning) {
     std::vector<spdlog::sink_ptr> sinks;
     sinks.push_back(std::make_shared<spdlog::sinks::stdout_color_sink_mt>());
@@ -80,7 +91,7 @@ std::shared_ptr<spdlog::logger> BuildSdkOpenLogger(std::string* init_warning) {
         g_sdk_open_log_path = JoinPath(g_sdk_open_log_dir, kSdkOpenLogFileName);
         try {
             sinks.push_back(std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-                g_sdk_open_log_path, kSdkOpenMaxLogFileSize, kSdkOpenMaxLogFiles));
+                ToSpdlogFilename(g_sdk_open_log_path), kSdkOpenMaxLogFileSize, kSdkOpenMaxLogFiles));
         } catch (const spdlog::spdlog_ex& ex) {
             g_sdk_open_log_path.clear();
             if (init_warning != NULL) {

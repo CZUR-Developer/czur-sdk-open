@@ -99,6 +99,10 @@ Json CropBorderToJson(const SdkCropBorderOptions& options) {
     return Json{{"enabled", options.enabled}, {"width", options.width}, {"height", options.height}};
 }
 
+Json CropCenterToJson(const SdkCropCenterOptions& options) {
+    return Json{{"enabled", options.enabled}, {"margin", options.margin}};
+}
+
 Json SinglePageToJson(const SdkSinglePageOptions& options) {
     return Json{{"realtime_detect_rects", options.realtime_detect_rects},
                 {"crop_border", CropBorderToJson(options.crop_border)},
@@ -113,6 +117,7 @@ Json CurvedBookToJson(const SdkCurvedBookOptions& options) {
                 {"finger_type", options.finger_type},
                 {"smart_paging", options.smart_paging},
                 {"crop_border", CropBorderToJson(options.crop_border)},
+                {"crop_center", CropCenterToJson(options.crop_center)},
                 {"auto_complete", options.auto_complete}};
 }
 

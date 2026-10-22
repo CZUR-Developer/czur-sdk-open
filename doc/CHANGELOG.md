@@ -4,6 +4,21 @@
 
 All notable changes to the CZUR Open SDK are documented in this file.
 
+## [0.0.9] - 2026-10-22
+
+### Added
+
+- `device.open` now returns the device serial number (SN) after successfully opening the device.
+- Added a rotation mechanism for the local TLS CA certificate.
+
+### Changed
+
+- Upgraded the CZOCR recognition model to support 89 languages.
+
+### Fixed
+
+- Fixed an issue where Safari on macOS rejected the CA certificate because its validity period was too long.
+
 ## [0.0.8] - 2026-09-28
 
 ### Changed

@@ -36,6 +36,7 @@ public:
     void RunOnIoThreadSync(const std::function<void()>& task);
     bool Start();
     void Stop();
+    bool ReloadTls();
     Stats GetStats() const;
 
 private:

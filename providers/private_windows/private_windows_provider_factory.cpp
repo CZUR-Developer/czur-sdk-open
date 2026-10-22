@@ -272,6 +272,7 @@ Json OcrRecognizeRequestToJson(const SdkOcrRecognizeRequest& request) {
                 {"output_dir", request.output_dir},
                 {"format", request.format},
                 {"export_type", request.export_type},
+                {"language", request.language},
                 {"ext_params_json", request.ext_params_json}};
 }
 
@@ -682,7 +683,9 @@ public:
         Json response;
         std::string error;
         if (!InvokePrivateProviderCApi(api.ocr_extract_text,
-                                       Json{{"input_upload_id", request.input_upload_id}, {"input_path", request.input_path}},
+                                       Json{{"input_upload_id", request.input_upload_id},
+                                            {"input_path", request.input_path},
+                                            {"language", request.language}},
                                        &response,
                                        &error)) {
             result.code = ToCode(SdkStatusCode::ProviderNotReady);

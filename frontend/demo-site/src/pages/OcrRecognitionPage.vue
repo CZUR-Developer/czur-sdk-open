@@ -49,12 +49,22 @@
 
         <div class="space-y-4">
           <KeyValueGrid :items="runtimeItems" />
+          <label class="field-label">
+            {{ t('pages.ocrRecognition.language') }}
+            <select v-model="ocrLanguage" class="field-input">
+              <option v-for="option in ocrLanguageOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </select>
+            <span class="text-xs font-normal text-slate-500">{{ t('pages.ocrRecognition.languageDescription') }}</span>
+          </label>
+          <button type="button" class="secondary-button w-full justify-center" :disabled="selectedImages.length === 0 || uploadRunning" @click="handleUploadClick">
+            {{ uploadRunning ? t('pages.ocrRecognition.uploading') : t('pages.ocrRecognition.uploadAll') }}
+          </button>
           <div class="grid grid-cols-2 gap-2">
-            <button type="button" class="secondary-button" :disabled="selectedImages.length === 0 || uploadRunning" @click="handleUploadClick">
-              {{ uploadRunning ? t('pages.ocrRecognition.uploading') : t('pages.ocrRecognition.uploadAll') }}
-            </button>
             <button type="button" class="primary-button justify-center" :disabled="!canRunActive" @click="runExtractText">
               {{ runningAction === 'extract' ? t('pages.ocrRecognition.running') : t('pages.ocrRecognition.extractText') }}
+            </button>
+            <button type="button" class="primary-button justify-center" :disabled="!canRun" @click="runOcrRecognize">
+              {{ runningAction === 'recognize' ? t('pages.ocrRecognition.running') : t('pages.ocrRecognition.submitRecognize') }}
             </button>
           </div>
           <div class="grid grid-cols-2 gap-2">
@@ -115,9 +125,6 @@
               <input v-model.number="ocrParams.quality" type="number" min="1" max="100" class="field-input" />
             </label>
           </div>
-          <button type="button" class="primary-button w-full justify-center" :disabled="!canRun" @click="runOcrRecognize">
-            {{ runningAction === 'recognize' ? t('pages.ocrRecognition.running') : t('pages.ocrRecognition.submitRecognize') }}
-          </button>
           <p class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
             {{ t('pages.ocrRecognition.recognizeNotice') }}
           </p>
@@ -150,6 +157,12 @@ import StatusPill from '../components/cards/StatusPill.vue';
 import { authSessionState, sendBoundCommand } from '../services/auth-session';
 import { openImageViewer } from '../services/image-viewer';
 import { buildAssetApiUrl, isOkResponse } from '../services/protocol';
+import {
+  SDK_OCR_LANGUAGES,
+  buildOcrExtractTextParams,
+  buildOcrRecognizeParams,
+  getOcrLanguageLabel,
+} from '../utils/ocr-language.js';
 import { buildOcrDefaultOutputDir, buildOcrDefaultOutputPath } from '../utils/ocr-output-paths.js';
 
 type RunningAction = '' | 'extract' | 'recognize' | 'barcode' | 'get' | 'cancel';
@@ -175,7 +188,7 @@ interface SelectedImage {
   uploadId: string;
 }
 
-const { t } = useI18n();
+const { locale, t } = useI18n();
 
 const ocrFormats = ['txt', 'pdf', 'docx', 'xlsx', 'ofd', 'json'];
 const selectedImages = ref<SelectedImage[]>([]);
@@ -187,6 +200,7 @@ const lastResponse = ref<Record<string, unknown> | null>(null);
 const lastRequest = ref<Record<string, unknown> | null>(null);
 const lastError = ref('');
 const lastTaskId = ref('');
+const ocrLanguage = ref('auto');
 const ocrFormat = ref('txt');
 const exportType = ref<'multi-page' | 'single-page'>('multi-page');
 const outputPath = ref(defaultOutputPath('txt'));
@@ -197,6 +211,10 @@ const ocrParams = reactive({
 });
 
 const activeImage = computed(() => selectedImages.value[activeImageIndex.value] ?? null);
+const ocrLanguageOptions = computed(() => SDK_OCR_LANGUAGES.map((language) => ({
+  value: language,
+  label: getOcrLanguageLabel(language, locale.value, t('pages.ocrRecognition.autoLanguage')),
+})));
 const inputPreviewUrl = computed(() => activeImage.value?.previewUrl ?? '');
 const selectedFileSummary = computed(() => {
   if (selectedImages.value.length === 0) {
@@ -393,17 +411,20 @@ async function handleUploadClick(): Promise<void> {
 }
 
 async function runExtractText(): Promise<void> {
-  await runActiveCommandWithUpload('extract', 'ocr.extract_text', (inputUploadId) => ({ input_upload_id: inputUploadId }));
+  await runActiveCommandWithUpload('extract', 'ocr.extract_text', (inputUploadId) =>
+    buildOcrExtractTextParams(inputUploadId, ocrLanguage.value));
 }
 
 async function runOcrRecognize(): Promise<void> {
-  await runCommandWithAllUploads('recognize', 'ocr.recognize', (inputUploadIds) => ({
-    input_upload_ids: inputUploadIds,
-    ...(exportType.value === 'single-page' ? { output_dir: outputDir.value } : { output_path: outputPath.value }),
-    format: ocrFormat.value,
+  await runCommandWithAllUploads('recognize', 'ocr.recognize', (inputUploadIds) => buildOcrRecognizeParams({
+    inputUploadIds,
     exportType: exportType.value,
+    outputPath: outputPath.value,
+    outputDir: outputDir.value,
+    format: ocrFormat.value,
     encoding: ocrParams.encoding,
     quality: ocrParams.quality,
+    language: ocrLanguage.value,
   }));
 }
 
@@ -479,14 +500,16 @@ async function runCommandWithAllUploads(
 function buildRecognizeRequestPreview(): Record<string, unknown> {
   return {
     method: 'ocr.recognize',
-    params: {
-      input_upload_ids: uploadIds.value.length ? uploadIds.value : ['<upload_id>'],
-      ...(exportType.value === 'single-page' ? { output_dir: outputDir.value } : { output_path: outputPath.value }),
-      format: ocrFormat.value,
+    params: buildOcrRecognizeParams({
+      inputUploadIds: uploadIds.value.length ? uploadIds.value : ['<upload_id>'],
       exportType: exportType.value,
+      outputPath: outputPath.value,
+      outputDir: outputDir.value,
+      format: ocrFormat.value,
       encoding: ocrParams.encoding,
       quality: ocrParams.quality,
-    },
+      language: ocrLanguage.value,
+    }),
   };
 }
 
