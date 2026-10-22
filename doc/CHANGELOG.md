@@ -4,7 +4,7 @@
 
 All notable changes to the CZUR Open SDK are documented in this file.
 
-## [0.0.9] - 2026-10-13
+## [0.0.9] - 2026-10-22
 
 ### Added
 
