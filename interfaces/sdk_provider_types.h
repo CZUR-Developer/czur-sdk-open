@@ -391,6 +391,13 @@ struct SdkCropBorderOptions {
     int height = 0;
 };
 
+struct SdkCropCenterOptions {
+    // Used by curved_book processing; disabled cropping passes a zero margin to CZCV.
+    bool enabled = false;
+    // Positive values crop inward; negative values expand outward. JSON input is clamped to [-100, 100].
+    int margin = 0;
+};
+
 struct SdkSinglePageOptions {
     bool realtime_detect_rects = false;
     SdkCropBorderOptions crop_border;
@@ -405,6 +412,7 @@ struct SdkCurvedBookOptions {
     std::string finger_type = "with_sleeve";
     bool smart_paging = true;
     SdkCropBorderOptions crop_border;
+    SdkCropCenterOptions crop_center;
     bool auto_complete = false;
 };
 
@@ -597,6 +605,7 @@ struct SdkOcrRecognizeRequest {
     std::string output_dir;
     std::string format = "docx";
     std::string export_type = "multi-page";
+    std::string language = "auto";
     std::string ext_params_json;
 };
 
@@ -654,6 +663,7 @@ struct SdkOcrTextBlock {
 struct SdkOcrExtractTextRequest {
     std::string input_upload_id;
     std::string input_path;
+    std::string language = "auto";
 };
 
 struct SdkOcrExtractTextResult {

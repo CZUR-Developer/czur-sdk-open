@@ -391,11 +391,15 @@ Demo 站点通过资源服务的 `POST /api/uploads/files` 上传浏览器选择
 
 OCR 与识别方法：
 
-- `ocr.extract_text`：对单张图片做轻量 OCR，返回文字块和图片坐标系下的矩形。
-- `ocr.recognize`：提交异步 OCR 导出任务。支持 `input_upload_ids` 或 `input_files`、可选 `output_path` 或 `output_dir`、`format`，以及 `encoding`、`paperSize`、`exportType`、`ocrPreference`、`quality`、`exportFormat` 等导出参数。导出格式支持 `txt`、`pdf`、`docx`、`xlsx`、`ofd`、`json`。其中 `quality` 继续作为现有公开参数使用；在 Linux 版 PDF/OFD OCR 导出中，它控制双层 PDF/OFD 图片层的导出压缩质量。OCR 识别阶段仍使用原始上传/输入图片，不会先压缩后识别，避免降低识别率。
+- `ocr.extract_text`：对单张图片做轻量 OCR，返回文字块和图片坐标系下的矩形。可选的 `language` 参数用于选择 CZOCR 识别语言。
+- `ocr.recognize`：提交异步 OCR 导出任务。支持 `input_upload_ids` 或 `input_files`、可选 `output_path` 或 `output_dir`、`format`、`language`，以及 `encoding`、`paperSize`、`exportType`、`ocrPreference`、`quality`、`exportFormat` 等导出参数。同一任务的所有输入图片使用一种语言。导出格式支持 `txt`、`pdf`、`docx`、`xlsx`、`ofd`、`json`。其中 `quality` 继续作为现有公开参数使用；在 Linux 版 PDF/OFD OCR 导出中，它控制双层 PDF/OFD 图片层的导出压缩质量。OCR 识别阶段仍使用原始上传/输入图片，不会先压缩后识别，避免降低识别率。
 - `ocr.get`：查询 OCR 任务状态。
 - `ocr.cancel`：请求取消 OCR 任务。
 - `recognition.barcode_detect`：对静态图片做条码/二维码识别。实时条码识别归属采集/视频流，不由该方法启动。
+
+两个 OCR 方法都通过 `params.language` 接收一个 CZOCR 语言代码。省略该字段等同于 `"auto"`。`auto` 保持当前引擎默认值，现阶段实际使用简体中文（`ch`）模型，不承诺真正的全语种自动检测。显式传空值、非字符串、未知代码或当前暂缓上线的代码时返回 `InvalidParams`，不会静默回退。
+
+支持的代码为：`auto`、`ch`、`hu`、`en`、`rs_latin`、`fr`、`id`、`de`、`oc`、`japan`、`is`、`korean`、`lt`、`chinese_cht`、`mi`、`af`、`ms`、`it`、`nl`、`es`、`no`、`bs`、`pl`、`pt`、`sk`、`cs`、`sl`、`cy`、`sq`、`da`、`sv`、`et`、`sw`、`ga`、`tl`、`hr`、`tr`、`uz`、`la`、`ru`、`be`、`uk`、`th`、`el`、`ku`、`lv`、`mt`、`ro`、`fi`、`eu`、`gl`、`lb`、`rm`、`ca`、`qu`、`te`、`rs_cyrillic`、`bg`、`mn`、`ady`、`kbd`、`av`、`inh`、`ce`、`lki`、`lez`、`kk`、`ky`、`tg`、`mk`、`tt`、`ba`、`udm`、`kv`、`bua`、`xal`、`tyv`、`sah`、`kaa`、`ar`、`hi`、`mr`、`ne`、`bh`、`mai`、`bho`、`mah`、`new`、`gom`、`ta`。
 
 OCR 文字块提取示例：
 
@@ -404,7 +408,8 @@ OCR 文字块提取示例：
   "request_id": "req-ocr-text-001",
   "method": "ocr.extract_text",
   "params": {
-    "input_upload_id": "img-1760000000-1"
+    "input_upload_id": "img-1760000000-1",
+    "language": "en"
   }
 }
 ```
@@ -419,6 +424,7 @@ OCR 导出示例：
     "input_upload_ids": ["img-1760000000-1", "img-1760000000-2"],
     "output_path": "/tmp/demo.txt",
     "format": "txt",
+    "language": "en",
     "exportType": "multi-page",
     "encoding": "utf-8",
     "quality": 90

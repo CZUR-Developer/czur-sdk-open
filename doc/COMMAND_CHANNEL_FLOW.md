@@ -391,11 +391,15 @@ For `selected_area`, pass frontend-scaled points in `params.selected_area.points
 
 OCR and recognition methods:
 
-- `ocr.extract_text`: runs lightweight OCR on one image and returns text blocks with image-space rectangles.
-- `ocr.recognize`: starts an asynchronous OCR export task. It accepts `input_upload_ids` or `input_files`, optional `output_path` or `output_dir`, `format`, and optional export parameters such as `encoding`, `paperSize`, `exportType`, `ocrPreference`, `quality`, and `exportFormat`. Supported export formats are `txt`, `pdf`, `docx`, `xlsx`, `ofd`, and `json`. `quality` remains the existing public parameter; for Linux PDF/OFD OCR export it controls image-layer export compression quality. OCR recognition still runs on the original uploaded/input images, not on compressed temporary export images, to avoid reducing recognition accuracy.
+- `ocr.extract_text`: runs lightweight OCR on one image and returns text blocks with image-space rectangles. The optional `language` parameter selects the CZOCR recognition language.
+- `ocr.recognize`: starts an asynchronous OCR export task. It accepts `input_upload_ids` or `input_files`, optional `output_path` or `output_dir`, `format`, `language`, and optional export parameters such as `encoding`, `paperSize`, `exportType`, `ocrPreference`, `quality`, and `exportFormat`. One language applies to every input image in the task. Supported export formats are `txt`, `pdf`, `docx`, `xlsx`, `ofd`, and `json`. `quality` remains the existing public parameter; for Linux PDF/OFD OCR export it controls image-layer export compression quality. OCR recognition still runs on the original uploaded/input images, not on compressed temporary export images, to avoid reducing recognition accuracy.
 - `ocr.get`: returns the current OCR task snapshot.
 - `ocr.cancel`: requests cancellation of one OCR task.
 - `recognition.barcode_detect`: detects barcode/QR content from one static image. Realtime barcode recognition belongs to the capture/video flow and is not started by this method.
+
+Both OCR methods accept one CZOCR language code in `params.language`. Omitting it is equivalent to `"auto"`. `auto` preserves the current engine default, which currently uses the Simplified Chinese (`ch`) model; it does not promise universal language detection. An explicitly empty value, a non-string value, an unknown code, or a currently disabled code returns `InvalidParams` instead of silently falling back.
+
+Supported codes are: `auto`, `ch`, `hu`, `en`, `rs_latin`, `fr`, `id`, `de`, `oc`, `japan`, `is`, `korean`, `lt`, `chinese_cht`, `mi`, `af`, `ms`, `it`, `nl`, `es`, `no`, `bs`, `pl`, `pt`, `sk`, `cs`, `sl`, `cy`, `sq`, `da`, `sv`, `et`, `sw`, `ga`, `tl`, `hr`, `tr`, `uz`, `la`, `ru`, `be`, `uk`, `th`, `el`, `ku`, `lv`, `mt`, `ro`, `fi`, `eu`, `gl`, `lb`, `rm`, `ca`, `qu`, `te`, `rs_cyrillic`, `bg`, `mn`, `ady`, `kbd`, `av`, `inh`, `ce`, `lki`, `lez`, `kk`, `ky`, `tg`, `mk`, `tt`, `ba`, `udm`, `kv`, `bua`, `xal`, `tyv`, `sah`, `kaa`, `ar`, `hi`, `mr`, `ne`, `bh`, `mai`, `bho`, `mah`, `new`, `gom`, and `ta`.
 
 OCR text extraction example:
 
@@ -404,7 +408,8 @@ OCR text extraction example:
   "request_id": "req-ocr-text-001",
   "method": "ocr.extract_text",
   "params": {
-    "input_upload_id": "img-1760000000-1"
+    "input_upload_id": "img-1760000000-1",
+    "language": "en"
   }
 }
 ```
@@ -419,6 +424,7 @@ OCR export example:
     "input_upload_ids": ["img-1760000000-1", "img-1760000000-2"],
     "output_path": "/tmp/demo.txt",
     "format": "txt",
+    "language": "en",
     "exportType": "multi-page",
     "encoding": "utf-8",
     "quality": 90
