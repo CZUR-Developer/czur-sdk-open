@@ -205,6 +205,8 @@ struct SdkDeviceOpenResult {
     std::string message = "ok";
     bool opened = false;
     SdkDeviceDescriptor device;
+    // Optional unique SN read through a device command, never the UVC serial.
+    std::string device_sn;
 };
 
 struct SdkDeviceCloseRequest {
