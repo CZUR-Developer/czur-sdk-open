@@ -4,6 +4,12 @@
 
 All notable changes to the CZUR Open SDK are documented in this file.
 
+## [0.1.0] - 2026-10-23
+
+### Fixed
+
+- Fixed an issue where frames could be dropped during photo capture in specific scenarios.
+
 ## [0.0.9] - 2026-10-22
 
 ### Added
