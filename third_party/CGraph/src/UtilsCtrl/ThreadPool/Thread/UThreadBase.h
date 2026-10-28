@@ -194,7 +194,7 @@ protected:
      * 设置线程亲和性，仅针对linux系统
      */
     CVoid setAffinity(int index) {
-#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__OHOS__)
         if (!config_->bind_cpu_enable_ || CGRAPH_CPU_NUM == 0 || index < 0) {
             return;
         }
