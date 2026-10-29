@@ -1,0 +1,14 @@
+/.hvigor/
+/build/
+/outputs/
+/oh_modules/
+/sdkopen/.cxx/
+/sdkopen/build/
+/sdkopen/oh_modules/
+/sdkopen/src/main/resources/rawfile/sdkopen_web/
+/sdkopen/src/main/resources/rawfile/sdkopen_czcv_model/
+/sdkopen/src/main/resources/rawfile/sdkopen_czocr_model/
+/sdkopen_tray/build/
+/sdkopen_tray/oh_modules/
+/local.properties
+/.idea/

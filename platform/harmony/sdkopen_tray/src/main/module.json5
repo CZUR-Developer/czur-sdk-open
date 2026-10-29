@@ -1,0 +1,57 @@
+{
+  "module": {
+    "name": "sdkopen_tray",
+    "type": "entry",
+    "srcEntry": "./ets/TrayAbilityStage.ets",
+    "description": "$string:tray_module_desc",
+    "mainElement": "SdkOpenLauncherAbility",
+    "deviceTypes": ["2in1"],
+    "deliveryWithInstall": true,
+    "installationFree": false,
+    "pages": "$profile:main_pages",
+    "requestPermissions": [
+      { "name": "ohos.permission.INTERNET" },
+      { "name": "ohos.permission.PREPARE_APP_TERMINATE" },
+      { "name": "ohos.permission.START_INVISIBLE_ABILITY" }
+    ],
+    "extensionAbilities": [
+      {
+        "name": "SdkOpenStatusBarAbility",
+        "srcEntry": "./ets/statusbar/SdkOpenStatusBarAbility.ets",
+        "type": "statusBarView",
+        "icon": "$media:app_icon",
+        "description": "$string:tray_module_desc",
+        "exported": true
+      }
+    ],
+    "abilities": [
+      {
+        "name": "SdkOpenTrayAbility",
+        "startWindowIcon": "$media:app_icon",
+        "startWindowBackground": "$color:start_window_background",
+        "launchType": "singleton",
+        "srcEntry": "./ets/entryability/SdkOpenTrayAbility.ets",
+        "excludeFromMissions": true,
+        "exported": false
+      },
+      {
+        "name": "SdkOpenLauncherAbility",
+        "launchType": "singleton",
+        "excludeFromMissions": true,
+        "srcEntry": "./ets/entryability/SdkOpenTrayAbility.ets",
+        "description": "$string:ability_desc",
+        "icon": "$media:app_icon",
+        "label": "$string:ability_label",
+        "startWindowIcon": "$media:app_icon",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": true,
+        "skills": [
+          {
+            "entities": ["entity.system.home"],
+            "actions": ["ohos.want.action.home"]
+          }
+        ]
+      }
+    ]
+  }
+}

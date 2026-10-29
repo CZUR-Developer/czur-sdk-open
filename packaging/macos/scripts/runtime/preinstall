@@ -1,0 +1,9 @@
+#!/bin/bash
+set -euo pipefail
+
+CONSOLE_USER="$(stat -f '%Su' /dev/console 2>/dev/null || true)"
+if [[ -n "${CONSOLE_USER}" && "${CONSOLE_USER}" != "root" && "${CONSOLE_USER}" != "loginwindow" ]]; then
+    CONSOLE_UID="$(id -u "${CONSOLE_USER}")"
+    launchctl bootout "gui/${CONSOLE_UID}/com.czur.sdk-open" 2>/dev/null || true
+fi
+exit 0

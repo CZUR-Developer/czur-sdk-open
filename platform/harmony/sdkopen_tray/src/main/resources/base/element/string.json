@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "tray_module_desc",
+      "value": "CZUR SDK Open 托盘控制模块"
+    },
+    {
+      "name": "ability_desc",
+      "value": "控制 CZUR SDK Open 后台服务"
+    },
+    {
+      "name": "ability_label",
+      "value": "CZUR SDK Open"
+    }
+  ]
+}

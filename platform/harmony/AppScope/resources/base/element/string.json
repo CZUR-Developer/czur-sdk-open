@@ -1,0 +1,7 @@
+{
+  "string": [
+    { "name": "app_name", "value": "CZUR SDK Open Service" },
+    { "name": "module_desc", "value": "CZUR SDK Open HarmonyOS service" },
+    { "name": "service_desc", "value": "CZUR SDK Open background service" }
+  ]
+}

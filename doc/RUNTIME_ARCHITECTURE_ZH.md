@@ -2,7 +2,7 @@
 
 > 状态：目标架构设计
 >
-> 适用范围：`src/sdk_open/` 与 `src/app/process/sdk/`
+> 适用范围：`src/sdk_open/` 与 `src/sdk_open/runtime/legacy/`
 >
 > 本文档只描述最终目标架构、协议模型和目录边界。
 
@@ -15,7 +15,7 @@
 - `src/sdk_open/runtime/sdk_open_main.cpp`
   - 开源独立入口
   - 默认装配 mock providers
-- `src/app/process/sdk/sdk_main.cpp`
+- `src/sdk_open/runtime/legacy/sdk_main.cpp`
   - 主仓内部入口
   - 由仓库构建开关决定装配 mock providers 或 private providers
 
@@ -257,54 +257,40 @@ wss://127.0.0.1:18091?session_token=ss-v2-xxxx&stream_id=stream-001
 
 ## 5. 目录边界
 
-最终目录如下：
+`src/sdk_open` 是 SDK Open 的完整产品子工程边界，目录如下：
 
 ```text
-src/
-  sdk_open/
-    runtime/
-      sdk_app.h
-      sdk_app.cpp
-      sdk_config.h
-      sdk_config.cpp
-      sdk_logger.h
-      sdk_logger.cpp
-      sdk_json_utils.h
-      sdk_json_utils.cpp
-      sdk_open_main.cpp
-    transport/
-      sdk_http_server.h
-      sdk_http_server.cpp
-      sdk_ws_command_server.h
-      sdk_ws_command_server.cpp
-      sdk_ws_video_server.h
-      sdk_ws_video_server.cpp
-    application/
-      command_application_service.h
-      command_application_service.cpp
-      authorization_service.h
-      authorization_service.cpp
-      video_session_service.h
-      video_session_service.cpp
-      admin_application_service.h
-      admin_application_service.cpp
-    facade/
-      device_facade.h
-      device_facade.cpp
-      graphic_facade.h
-      graphic_facade.cpp
-      ocr_facade.h
-      ocr_facade.cpp
-      ofd_facade.h
-      ofd_facade.cpp
-    interfaces/
-      ...
-    providers/
-      mock/
-        ...
-    doc/
-      ...
+src/sdk_open/
+  interfaces/               公共 DTO、Provider 接口
+  transport/                HTTP、WebSocket
+  application/              会话、鉴权编排、业务路由
+  facade/                   能力门面
+  providers/
+    mock/                   保持原有实现和装配
+    private/                真实 Provider、auth、graphic、support
+    private_windows/        Windows 装配接口
+  runtime/                  运行时、入口与装配；legacy/ 保留 sdk_app 目标
+  platform/harmony/         AppScope、服务 HAP、托盘 HAP、native 桥接
+  bindings/                 C ABI 与 Java/JNA
+  tools/auth/               SDK 鉴权工具
+  cmake/                    根路径约定、Provider 源码清单、模型复制
+  scripts/                  构建、安装、打包、发布、探测
+  ci/                       SDK CI helper、构建与发布脚本及其测试
+  packaging/                Debian、Windows、macOS 安装配置
+  version/version.ini       SDK 版本源
+  test/                     公共契约与真实 Provider 测试
+  frontend/                 管理页与 Demo 源码
+  web/                      生成的网页资源
+  doc/                      SDK 设计、平台、运维文档
 ```
+
+主工程保留共享算法、设备、文档模块、三方库及 CI 接入入口；SDK 专用代码不再放在
+`src/sdk_private`、根部 `sdk_open_harmony` 或主程序的 SDK process 目录。
+
+构建统一使用 `SDK_OPEN_SOURCE_ROOT`、`SDK_OPEN_HOST_SOURCE_ROOT`、
+`SDK_OPEN_THIRD_PARTY_ROOT`。真实 Provider 显式引用主工程共享模块；鸿蒙宿主复用
+同一份 Provider 源码清单，不改写 `CMAKE_SOURCE_DIR`，不向源码目录创建符号链接。
+完整迁移与验证说明见 [SDK_PROJECT_MIGRATION_ZH.md](SDK_PROJECT_MIGRATION_ZH.md)。
 
 ## 6. 依赖边界
 
@@ -315,15 +301,15 @@ src/
 - `application` -> `facade` + `interfaces`
 - `facade` -> `interfaces`
 - `providers/mock` -> `interfaces`
-- `sdk_private/providers` -> `interfaces` + 私有能力库
+- `providers/private` -> `interfaces` + 主工程共享能力库
 
 禁止依赖方向：
 
 - `transport` -> `providers/mock`
-- `transport` -> `sdk_private`
+- `transport` -> `providers/private`
 - `application` -> 私有能力库
 - `facade` -> HTTP/WS server 实现
-- `sdk_open` -> `sdk_private` 头文件或目标
+- `transport`、`application`、`facade` -> 真实 Provider 实现头文件；仅运行时负责装配
 
 ## 7. Provider 公共接口原则
 
@@ -362,15 +348,15 @@ src/
 
 约束：
 
-- 只链接 `sdk_open` 核心库与 `sdk_mock_providers`
-- 不得 include `sdk_private` 头文件
-- 不得链接 `sdk_private` 目标
+- 默认链接核心库与 `sdk_mock_providers`
+- 启用 `BUILD_SDK_PRIVATE` 和 `SDK_OPEN_USE_PRIVATE_PROVIDER` 时链接真实 Provider
+- 公共接口与传输、应用、门面层仍不依赖真实 Provider 实现
 
 ### 8.2 `sdk_app`
 
 定位：
 
-- 主仓内部可执行入口
+- 子工程 `runtime/legacy` 中保留的兼容可执行入口
 - 用于复用相同协议和核心库，但按构建开关装配内部 provider
 
 约束：

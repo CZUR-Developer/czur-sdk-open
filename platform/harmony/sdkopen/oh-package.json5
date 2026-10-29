@@ -1,0 +1,11 @@
+{
+  "name": "sdkopen",
+  "version": "1.0.0",
+  "description": "CZUR SDK Open HarmonyOS service HAP.",
+  "main": "",
+  "author": "CZUR",
+  "license": "",
+  "dependencies": {
+    "libsdkopen_harmony.so": "file:./src/main/cpp/types/libsdkopen_harmony"
+  }
+}

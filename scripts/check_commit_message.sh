@@ -12,7 +12,7 @@ if [[ ! -f "${msg_file}" ]]; then
   exit 1
 fi
 
-first_line="$(sed -n '1{s/[[:space:]]*$//;p;q}' "${msg_file}")"
+first_line="$(sed -n '1{s/[[:space:]]*$//;p;}' "${msg_file}")"
 
 # Allow Git-generated merge/revert commits.
 if [[ "${first_line}" =~ ^Merge[[:space:]] ]] || [[ "${first_line}" =~ ^Revert[[:space:]] ]]; then

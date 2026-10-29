@@ -1,0 +1,267 @@
+#!/bin/bash
+set -e
+
+install -d -m 0755 /var/lib/czur/sdk-open
+install -d -m 0755 /var/lib/czur/sdk-open/logs
+install -d -m 0755 /var/lib/czur/sdk-open/sane/config
+
+sdk_open_install_dir=/opt/apps/sdk-open
+if [ -x /opt/apps/sdk-open/files/sdk_open_app ]; then
+    sdk_open_install_dir=/opt/apps/sdk-open/files
+fi
+
+tls_seed_dir="$sdk_open_install_dir/tls/default"
+tls_config_dir=/etc/czur/sdk-open
+tls_dir="$tls_config_dir/tls"
+legacy_certificate_sha256_5y=6519c52926b4cc3399b242dd44077f38b39457e080c56b6fe2f09a8af92ad32e
+legacy_certificate_sha256_825d=3b70d132fef144f6da10e732c8265029794757f1ebb258c9cb5541e4485b18b0
+legacy_private_key_sha256=ceae324c3be1d43a19ea983c8bbd2f757001486265c7a6596ece42134f01cf11
+legacy_root_certificate_sha256=4405b523122776ada5d3559bad492689b6edf161f9186e6893c0a5700575793c
+install -d -m 0755 "$tls_config_dir"
+install -d -m 0700 "$tls_dir"
+
+# 新安装由 sdk_open_app 在本机生成根 CA 私钥和叶证书；客户自定义证书对保持不变。
+certificate_path="$tls_dir/sdk-runtime.localhost.fullchain.pem"
+private_key_path="$tls_dir/sdk-runtime.localhost.key.pem"
+root_certificate_path="$tls_dir/local-runtime-root-ca.crt"
+root_private_key_path="$tls_dir/local-runtime-root-ca.key.pem"
+state_path="$tls_dir/tls-state.json"
+
+file_sha256() {
+    sha256sum "$1" | awk '{print $1}'
+}
+
+is_known_legacy_certificate() {
+    local certificate_sha256
+    certificate_sha256=$(file_sha256 "$certificate_path")
+    [ "$certificate_sha256" = "$legacy_certificate_sha256_5y" ] ||
+        [ "$certificate_sha256" = "$legacy_certificate_sha256_825d" ]
+}
+
+migrate_legacy_tls_defaults() {
+    local remove_legacy_leaf_pair="$1"
+    local backup_dir
+    local index
+    local migration_auxiliary_paths=(
+        "${root_certificate_path}.next"
+        "${root_private_key_path}.next"
+        "${certificate_path}.next"
+        "${private_key_path}.next"
+        "${state_path}.next"
+        "${certificate_path}.rotation"
+        "${certificate_path}.rotation.next"
+        "${certificate_path}.previous"
+        "${private_key_path}.rotation"
+        "${private_key_path}.rotation.next"
+        "${private_key_path}.previous"
+    )
+    local migration_auxiliary_backup_names=(
+        root-certificate.next
+        root-private-key.next
+        certificate.next
+        private-key.next
+        state.next
+        certificate.rotation
+        certificate.rotation.next
+        certificate.previous
+        private-key.rotation
+        private-key.rotation.next
+        private-key.previous
+    )
+    backup_dir=$(mktemp -d "$tls_dir/.legacy-migration.XXXXXX")
+    chmod 0700 "$backup_dir"
+
+    if [ -e "$certificate_path" ] && [ -e "$private_key_path" ]; then
+        cp -p "$certificate_path" "$backup_dir/certificate"
+        cp -p "$private_key_path" "$backup_dir/private-key"
+    fi
+    if [ -e "$root_certificate_path" ]; then
+        cp -p "$root_certificate_path" "$backup_dir/root-certificate"
+    fi
+    for index in "${!migration_auxiliary_paths[@]}"; do
+        if [ -e "${migration_auxiliary_paths[$index]}" ]; then
+            cp -p "${migration_auxiliary_paths[$index]}" \
+                "$backup_dir/${migration_auxiliary_backup_names[$index]}"
+        fi
+    done
+
+    if ! {
+        rm -f "$root_certificate_path" &&
+            { [ "$remove_legacy_leaf_pair" != true ] ||
+              rm -f "$certificate_path" "$private_key_path"; } &&
+            rm -f "${migration_auxiliary_paths[@]}" &&
+            "$sdk_open_install_dir/sdk_open_app" \
+                --provision-tls --provision-tls-dir "$tls_dir"
+    }; then
+        if ! rm -f "$certificate_path" "$private_key_path" "$root_certificate_path" \
+            "$root_private_key_path" "$state_path" "${migration_auxiliary_paths[@]}"; then
+            echo "sdk-open: failed to clean partial TLS migration; backup preserved at $backup_dir" >&2
+            exit 1
+        fi
+        if [ -e "$backup_dir/certificate" ] && [ -e "$backup_dir/private-key" ]; then
+            if ! cp -p "$backup_dir/certificate" "$certificate_path" ||
+               ! cp -p "$backup_dir/private-key" "$private_key_path"; then
+                echo "sdk-open: failed to restore the legacy TLS certificate pair; backup preserved at $backup_dir" >&2
+                exit 1
+            fi
+        fi
+        if [ -e "$backup_dir/root-certificate" ]; then
+            if ! cp -p "$backup_dir/root-certificate" "$root_certificate_path"; then
+                echo "sdk-open: failed to restore the legacy TLS root; backup preserved at $backup_dir" >&2
+                exit 1
+            fi
+        fi
+        for index in "${!migration_auxiliary_paths[@]}"; do
+            if [ -e "$backup_dir/${migration_auxiliary_backup_names[$index]}" ] &&
+               ! cp -p "$backup_dir/${migration_auxiliary_backup_names[$index]}" \
+                   "${migration_auxiliary_paths[$index]}"; then
+                echo "sdk-open: failed to restore TLS migration temporary files; backup preserved at $backup_dir" >&2
+                exit 1
+            fi
+        done
+        rm -f "$backup_dir/certificate" "$backup_dir/private-key" \
+            "$backup_dir/root-certificate"
+        for index in "${!migration_auxiliary_backup_names[@]}"; do
+            rm -f "$backup_dir/${migration_auxiliary_backup_names[$index]}"
+        done
+        rmdir "$backup_dir"
+        echo "sdk-open: failed to replace legacy TLS defaults; original credentials restored" >&2
+        exit 1
+    fi
+
+    rm -f "$backup_dir/certificate" "$backup_dir/private-key" \
+        "$backup_dir/root-certificate"
+    for index in "${!migration_auxiliary_backup_names[@]}"; do
+        rm -f "$backup_dir/${migration_auxiliary_backup_names[$index]}"
+    done
+    rmdir "$backup_dir"
+}
+
+if { [ -e "$certificate_path" ] && [ ! -e "$private_key_path" ]; } ||
+   { [ ! -e "$certificate_path" ] && [ -e "$private_key_path" ]; }; then
+    echo "sdk-open: TLS certificate and key must be replaced as a matching pair" >&2
+    exit 1
+fi
+
+# 旧版安装包携带固定根证书、叶证书和私钥，但没有根私钥与轮换状态。只有所有
+# 已存在文件都精确匹配已知默认值时才迁移，避免覆盖客户证书或未知 CA。
+legacy_leaf_pair=false
+legacy_root_certificate=false
+if [ ! -e "$state_path" ] && [ ! -e "$root_private_key_path" ] &&
+   command -v sha256sum >/dev/null 2>&1; then
+    if [ -e "$certificate_path" ] && [ -e "$private_key_path" ] &&
+       is_known_legacy_certificate &&
+       [ "$(file_sha256 "$private_key_path")" = "$legacy_private_key_sha256" ]; then
+        legacy_leaf_pair=true
+    fi
+    if [ -e "$root_certificate_path" ] &&
+       [ "$(file_sha256 "$root_certificate_path")" = "$legacy_root_certificate_sha256" ]; then
+        legacy_root_certificate=true
+    fi
+fi
+
+if [ "$legacy_root_certificate" = true ]; then
+    # 客户证书对旁边残留的已知旧根也要移除，但客户证书对本身保持不变并进入
+    # custom 模式；旧固定叶证书对才会一起替换。
+    migrate_legacy_tls_defaults "$legacy_leaf_pair"
+elif [ "$legacy_leaf_pair" = true ] && [ ! -e "$root_certificate_path" ]; then
+    migrate_legacy_tls_defaults true
+fi
+
+if { [ -e "$root_certificate_path" ] && [ ! -e "$root_private_key_path" ]; } ||
+   { [ ! -e "$root_certificate_path" ] && [ -e "$root_private_key_path" ]; }; then
+    echo "sdk-open: TLS root certificate and private key are incomplete; existing files were preserved" >&2
+    exit 1
+fi
+
+state_mode=
+if [ -e "$state_path" ]; then
+    if grep -Eq '"mode"[[:space:]]*:[[:space:]]*"managed"' "$state_path"; then
+        state_mode=managed
+    elif grep -Eq '"mode"[[:space:]]*:[[:space:]]*"custom"' "$state_path"; then
+        state_mode=custom
+    else
+        echo "sdk-open: TLS state mode is invalid; existing files were preserved" >&2
+        exit 1
+    fi
+fi
+
+if [ "$state_mode" = managed ] &&
+   { [ ! -e "$root_certificate_path" ] || [ ! -e "$root_private_key_path" ]; }; then
+    echo "sdk-open: managed TLS state is missing its root certificate pair; existing files were preserved" >&2
+    exit 1
+fi
+
+if [ "$state_mode" = custom ] &&
+   [ ! -e "$certificate_path" ] && [ ! -e "$private_key_path" ]; then
+    echo "sdk-open: custom TLS state is missing its certificate pair; existing files were preserved" >&2
+    exit 1
+fi
+
+# Provision 自身持有文件锁并保证幂等：managed 状态保持原 CA，custom 状态只补齐
+# 元数据/本机根对且不覆盖客户叶证书。每次安装都调用，避免升级后留下半初始化状态。
+"$sdk_open_install_dir/sdk_open_app" --provision-tls --provision-tls-dir "$tls_dir"
+
+if [ ! -e "$state_path" ]; then
+    echo "sdk-open: TLS provisioning did not create a state file" >&2
+    exit 1
+elif grep -Eq '"mode"[[:space:]]*:[[:space:]]*"managed"' "$state_path"; then
+    state_mode=managed
+elif grep -Eq '"mode"[[:space:]]*:[[:space:]]*"custom"' "$state_path"; then
+    state_mode=custom
+else
+    echo "sdk-open: TLS provisioning produced an invalid state mode" >&2
+    exit 1
+fi
+
+if [ ! -e "$certificate_path" ] || [ ! -e "$private_key_path" ]; then
+    echo "sdk-open: TLS certificate and key must be replaced as a matching pair" >&2
+    exit 1
+fi
+
+if [ ! -e "$tls_config_dir/runtime.env" ]; then
+    install -m 0644 "$tls_seed_dir/runtime.env" "$tls_config_dir/runtime.env"
+fi
+
+trusted_root_path=/usr/local/share/ca-certificates/local-runtime-root-ca.crt
+if [ "$state_mode" = managed ] &&
+   [ -e "$root_certificate_path" ] && [ -e "$root_private_key_path" ]; then
+    install -D -m 0644 "$root_certificate_path" \
+        "$trusted_root_path"
+    if ! command -v update-ca-certificates >/dev/null 2>&1; then
+        echo "sdk-open: update-ca-certificates is required to trust the managed root CA" >&2
+        exit 1
+    fi
+    update-ca-certificates
+elif [ "$state_mode" = custom ] && [ -e "$trusted_root_path" ] &&
+     command -v sha256sum >/dev/null 2>&1 &&
+     [ "$(file_sha256 "$trusted_root_path")" = "$legacy_root_certificate_sha256" ]; then
+    if ! command -v update-ca-certificates >/dev/null 2>&1; then
+        echo "sdk-open: update-ca-certificates is required to remove the legacy root CA" >&2
+        exit 1
+    fi
+
+    trusted_root_backup=$(mktemp "${trusted_root_path}.backup.XXXXXX")
+    chmod 0600 "$trusted_root_backup"
+    cp -p "$trusted_root_path" "$trusted_root_backup"
+    rm -f "$trusted_root_path"
+    if ! update-ca-certificates; then
+        cp -p "$trusted_root_backup" "$trusted_root_path"
+        rm -f "$trusted_root_backup"
+        update-ca-certificates >/dev/null 2>&1 || true
+        echo "sdk-open: failed to remove the legacy root CA; original trust source restored" >&2
+        exit 1
+    fi
+    rm -f "$trusted_root_backup"
+fi
+
+# 不覆盖客户已有的 sdk-runtime.localhost 映射；没有映射时固定到本机 runtime。
+if [ -f /etc/hosts ] && ! grep -Eq '^[[:space:]]*[^#]*[[:space:]]sdk-runtime\.localhost([[:space:]]|$)' /etc/hosts; then
+    printf '%s\n' '127.0.0.1 sdk-runtime.localhost # Local SDK runtime' >> /etc/hosts
+fi
+
+systemctl daemon-reload
+systemctl start sdk-open.service
+systemctl enable sdk-open.service
+
+exit 0

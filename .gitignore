@@ -12,3 +12,13 @@ web/demo/*
 # Editor/OS
 .DS_Store
 .idea/
+
+# Build state and local credentials
+/build/
+packaging/tls/**/*.key.pem
+platform/harmony/local.properties
+
+# Local test/package artifacts
+__pycache__/
+*.pyc
+packaging/*/output/

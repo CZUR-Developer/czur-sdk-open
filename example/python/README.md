@@ -130,7 +130,7 @@ python3 sdk_open_demo.py \
 
 该路径适用于安装了默认 CA 的 Linux；其他环境请使用自己 SDK 部署对应的根 CA 文件。
 在此源码目录中也可使用默认开发 CA：
-`../../../../../packaging/sdk_open/tls/runtime/local-runtime-root-ca.crt`。
+`../../../../../src/sdk_open/packaging/tls/runtime/local-runtime-root-ca.crt`。
 只使用根证书 `.crt`，不要使用私钥 `.key.pem`，也不要信任来自未知服务的证书。
 
 程序保持证书和主机名校验开启，不自动降级 HTTP，也不修改全局证书库。

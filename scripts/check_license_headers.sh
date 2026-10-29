@@ -7,7 +7,10 @@ cd "${ROOT_DIR}"
 readonly HEADER_COPYRIGHT='// Copyright (c) 2026 CZUR Tech. All rights reserved.'
 readonly HEADER_SPDX='// SPDX-License-Identifier: Apache-2.0'
 
-mapfile -t CPP_FILES < <(find interfaces providers runtime -type f \
+CPP_FILES=()
+while IFS= read -r file; do
+  CPP_FILES+=("${file}")
+done < <(find interfaces providers runtime -type f ! -path 'providers/private/*' ! -path 'runtime/legacy/*' \
   \( -name '*.h' -o -name '*.hpp' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' \) | sort)
 
 if [[ ${#CPP_FILES[@]} -eq 0 ]]; then

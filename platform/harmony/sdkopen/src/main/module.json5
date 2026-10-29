@@ -1,0 +1,24 @@
+{
+  "module": {
+    "name": "sdkopen",
+    "type": "feature",
+    "description": "$string:module_desc",
+    "mainElement": "SdkOpenServiceExtension",
+    "deviceTypes": ["2in1"],
+    "deliveryWithInstall": true,
+    "installationFree": false,
+    "requestPermissions": [
+      { "name": "ohos.permission.INTERNET" },
+      { "name": "ohos.permission.SUPPORT_APP_SERVICE_EXTENSION" }
+    ],
+    "extensionAbilities": [
+      {
+        "name": "SdkOpenServiceExtension",
+        "srcEntry": "./ets/services/SdkOpenServiceExtension.ets",
+        "description": "$string:service_desc",
+        "type": "appService",
+        "exported": true
+      }
+    ]
+  }
+}

@@ -4,7 +4,7 @@ Thank you for contributing to `sdk_open`.
 
 ## License Header Policy (C/C++ Sources)
 
-All C/C++ source and header files under `interfaces/`, `providers/`, and `runtime/` must include this exact two-line header at the top of the file:
+Except the migrated implementation under `providers/private/` and `runtime/legacy/` (which retains its existing licensing), all C/C++ source and header files under `interfaces/`, `providers/`, and `runtime/` must include this exact two-line header at the top of the file:
 
 ```cpp
 // Copyright (c) 2026 CZUR Tech. All rights reserved.

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>CZUR SDK Open (@ARCH@)</title>
+    <organization>com.czur</organization>
+    <domains enable_localSystem="true" enable_currentUserHome="false" enable_anywhere="false"/>
+    <options customize="never" require-scripts="true" hostArchitectures="@ARCH@"/>
+    <choices-outline>
+        <line choice="helper"/>
+        <line choice="runtime"/>
+    </choices-outline>
+    <choice id="helper" visible="false">
+        <pkg-ref id="com.czur.device-helper"/>
+    </choice>
+    <choice id="runtime" visible="false">
+        <pkg-ref id="com.czur.sdk-open.runtime"/>
+    </choice>
+    <pkg-ref id="com.czur.device-helper" version="@HELPER_VERSION@">device-helper.pkg</pkg-ref>
+    <pkg-ref id="com.czur.sdk-open.runtime" version="@VERSION@">sdk-open-runtime.pkg</pkg-ref>
+</installer-gui-script>

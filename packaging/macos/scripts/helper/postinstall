@@ -1,0 +1,81 @@
+#!/bin/bash
+set -euo pipefail
+
+CANDIDATE_VERSION="@HELPER_VERSION@"
+HELPER_PATH="/Library/PrivilegedHelperTools/com.czur.device-helper"
+PLIST_PATH="/Library/LaunchDaemons/com.czur.device-helper.plist"
+STAGING_PARENT="/Library/Application Support/CZUR/DeviceHelperUpdate"
+STAGING_ROOT="${STAGING_PARENT}/${CANDIDATE_VERSION}"
+CANDIDATE_HELPER="${STAGING_ROOT}/com.czur.device-helper"
+CANDIDATE_PLIST="${STAGING_ROOT}/com.czur.device-helper.plist"
+
+numeric_version_at_least() {
+    /usr/bin/awk -v installed="$1" -v required="$2" '
+        BEGIN {
+            if (installed !~ /^[0-9]+([.][0-9]+)*$/ ||
+                required !~ /^[0-9]+([.][0-9]+)*$/) {
+                exit 2
+            }
+            installed_count = split(installed, installed_parts, ".")
+            required_count = split(required, required_parts, ".")
+            count = installed_count > required_count ? installed_count : required_count
+            for (part_index = 1; part_index <= count; ++part_index) {
+                installed_part = part_index <= installed_count ? installed_parts[part_index] + 0 : 0
+                required_part = part_index <= required_count ? required_parts[part_index] + 0 : 0
+                if (installed_part > required_part) exit 0
+                if (installed_part < required_part) exit 1
+            }
+            exit 0
+        }
+    '
+}
+
+read_helper_version() {
+    if [[ ! -f "$1" ]]; then
+        return 1
+    fi
+    /usr/bin/plutil -p "$1" 2>/dev/null |
+        /usr/bin/sed -n 's/.*"CFBundleVersion" => "\([0-9.][0-9.]*\)".*/\1/p' |
+        /usr/bin/head -1
+}
+
+cleanup_staging() {
+    /bin/rm -f "${CANDIDATE_HELPER}" "${CANDIDATE_PLIST}"
+    /bin/rmdir "${STAGING_ROOT}" 2>/dev/null || true
+    /bin/rmdir "${STAGING_PARENT}" 2>/dev/null || true
+}
+
+/bin/mkdir -p /Library/Logs/CZUR
+
+candidate_binary_version="$(read_helper_version "${CANDIDATE_HELPER}" || true)"
+if [[ "${candidate_binary_version}" != "${CANDIDATE_VERSION}" || ! -f "${CANDIDATE_PLIST}" ]]; then
+    echo "Invalid staged device helper payload: expected ${CANDIDATE_VERSION}, got '${candidate_binary_version}'." >&2
+    exit 1
+fi
+if ! /usr/bin/codesign --verify --strict "${CANDIDATE_HELPER}" 2>/dev/null; then
+    echo "Invalid staged device helper code signature for version ${CANDIDATE_VERSION}." >&2
+    exit 1
+fi
+
+# 安装前后都比较一次，以防其他安装事务在两段脚本之间更新了共享 helper。
+installed_version="$(read_helper_version "${HELPER_PATH}" || true)"
+installed_signature_valid=0
+if [[ -f "${HELPER_PATH}" ]] &&
+   /usr/bin/codesign --verify --strict "${HELPER_PATH}" 2>/dev/null; then
+    installed_signature_valid=1
+fi
+if [[ "${installed_signature_valid}" -eq 1 && -n "${installed_version}" ]] &&
+   numeric_version_at_least "${installed_version}" "${CANDIDATE_VERSION}"; then
+    cleanup_staging
+    echo "Preserved backward-compatible device helper ${installed_version}."
+    exit 0
+fi
+
+/bin/launchctl bootout system/com.czur.device-helper 2>/dev/null || true
+/usr/bin/install -d -o root -g wheel -m 755 /Library/PrivilegedHelperTools /Library/LaunchDaemons
+/usr/bin/install -o root -g wheel -m 755 "${CANDIDATE_HELPER}" "${HELPER_PATH}"
+/usr/bin/install -o root -g wheel -m 644 "${CANDIDATE_PLIST}" "${PLIST_PATH}"
+cleanup_staging
+/bin/launchctl bootstrap system "${PLIST_PATH}" 2>/dev/null || true
+/bin/launchctl kickstart -k system/com.czur.device-helper 2>/dev/null || true
+exit 0

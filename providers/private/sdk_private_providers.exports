@@ -1,0 +1,8 @@
+{
+    global:
+        _ZN6editor3sdk12private_impl20CreateProviderBundleEb;
+        _ZN6editor3sdk12private_impl18ShutdownOcrRuntimeEv;
+        czur_sdk_private_*;
+    local:
+        *;
+};

@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <title>CZUR application icon</title>
+  <defs>
+    <clipPath id="corners">
+      <rect width="48" height="48" rx="10"/>
+    </clipPath>
+    <linearGradient id="background" x1="0" y1="0" x2="44" y2="45" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#13d3e1"/>
+      <stop offset=".26" stop-color="#337bce"/>
+      <stop offset=".56" stop-color="#302394"/>
+      <stop offset=".79" stop-color="#442398"/>
+      <stop offset="1" stop-color="#a83db4"/>
+    </linearGradient>
+    <radialGradient id="purple" cx="49" cy="32" r="28" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#c63cbc" stop-opacity=".85"/>
+      <stop offset="1" stop-color="#5423a0" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ribbon" x1="24" y1="38" x2="45" y2="49" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffe790"/>
+      <stop offset=".35" stop-color="#ffba55"/>
+      <stop offset=".66" stop-color="#f66e63"/>
+      <stop offset="1" stop-color="#e660b4"/>
+    </linearGradient>
+    <linearGradient id="ribbonEdge" x1="24" y1="48" x2="49" y2="29" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ff8d55"/>
+      <stop offset=".53" stop-color="#fa745f"/>
+      <stop offset="1" stop-color="#f76b75"/>
+    </linearGradient>
+  </defs>
+  <g clip-path="url(#corners)">
+    <path fill="url(#background)" d="M0 0h48v48H0z"/>
+    <path fill="url(#purple)" d="M0 0h48v48H0z"/>
+    <g fill="none" stroke="#fff" stroke-width="1.8" stroke-linejoin="miter" stroke-linecap="square">
+      <path d="M11.6 32.5V17.6L24 10.9l12 6.7v14.9"/>
+      <path d="M16 21v14.4l8-4.6 7.6 4.6V21"/>
+    </g>
+    <path fill="url(#ribbon)" d="M21 48c2.5-2.6 1.8-7.4 4.3-9.6 1.7-1.5 4.8-.7 8.4-1.1C41 36.6 45.7 31 48 23v25Z"/>
+    <path fill="url(#ribbonEdge)" d="M20.5 48c5.8-3.8 13.2-3.5 19.2-7.4 4.7-3.1 6.7-7.5 8.3-14.8v7.3c-1.2 6.5-4.6 10.5-9.5 14.9Z"/>
+  </g>
+</svg>

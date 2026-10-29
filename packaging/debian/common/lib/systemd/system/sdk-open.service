@@ -1,0 +1,19 @@
+[Unit]
+Description=SDK Open Runtime
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/apps/sdk-open/sdk_open_app --config /etc/czur/sdk-open/runtime.env
+Restart=on-failure
+RestartSec=2
+WorkingDirectory=/opt/apps/sdk-open
+Environment=LD_LIBRARY_PATH=/opt/apps/sdk-open
+Environment=SDK_OPEN_WORK_DIR=/var/lib/czur/sdk-open
+Environment=SDK_OPEN_LOG_DIR=/var/lib/czur/sdk-open/logs
+Environment=CZUR_SDK_RUNTIME_DIR=/var/lib/czur/sdk-open
+Environment=CZUR_SDK_DEVICE_CONFIG_PATH=/opt/apps/sdk-open/configs/device_config_compact.conf
+Environment=CZUR_SANE_CONFIG_DIR=/var/lib/czur/sdk-open/sane/config
+
+[Install]
+WantedBy=multi-user.target

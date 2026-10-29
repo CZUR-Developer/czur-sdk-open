@@ -1,3 +1,13 @@
+cmake_minimum_required(VERSION 3.16)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    project(CzurSdkOpen LANGUAGES C CXX)
+    option(BUILD_SDK_OPEN_TESTS "Build SDK Open focused tests" OFF)
+    if(BUILD_SDK_OPEN_TESTS)
+        enable_testing()
+    endif()
+endif()
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/Dependencies.cmake")
+
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -9,23 +19,9 @@ option(SDK_OPEN_ENABLE_HTTP_SERVER "Start sdk_open embedded admin/demo HTTP serv
 option(SDK_OPEN_USE_PREBUILT_WEB "Use prebuilt sdk_open/web assets without running pnpm" OFF)
 option(SDK_OPEN_ENABLE_TLS "Enable HTTPS/WSS listeners for sdk_open transport services" ON)
 
-set(SDK_OPEN_VERSION_FILE_CANDIDATES
-    "${CMAKE_SOURCE_DIR}/version/sdk-open/version.ini"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../version/sdk-open/version.ini"
-    "${CMAKE_CURRENT_SOURCE_DIR}/version/sdk-open/version.ini"
-)
-set(SDK_OPEN_VERSION_FILE "")
-foreach(_sdk_open_version_file IN LISTS SDK_OPEN_VERSION_FILE_CANDIDATES)
-    if(EXISTS "${_sdk_open_version_file}")
-        get_filename_component(SDK_OPEN_VERSION_FILE "${_sdk_open_version_file}" ABSOLUTE)
-        break()
-    endif()
-endforeach()
+set(SDK_OPEN_VERSION_FILE "${SDK_OPEN_SOURCE_ROOT}/version/version.ini")
 
-if(NOT EXISTS "${SDK_OPEN_VERSION_FILE}")
-    message(FATAL_ERROR "SDK Open版本源文件不存在: version/sdk-open/version.ini")
-endif()
-
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${SDK_OPEN_VERSION_FILE}")
 file(READ "${SDK_OPEN_VERSION_FILE}" SDK_OPEN_VERSION_CONTENT)
 
 set(SDK_OPEN_VERSION "0.0.0")
@@ -59,16 +55,28 @@ string(TIMESTAMP SDK_OPEN_BUILD_TIME "%H:%M:%S" UTC)
 
 find_package(Git QUIET)
 if(GIT_FOUND)
+    # Refresh build identity when the SDK submodule advances, including git worktrees.
+    execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --absolute-git-dir
+        WORKING_DIRECTORY "${SDK_OPEN_SOURCE_ROOT}"
+        OUTPUT_VARIABLE _sdk_git_dir OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    execute_process(COMMAND ${GIT_EXECUTABLE} symbolic-ref -q HEAD
+        WORKING_DIRECTORY "${SDK_OPEN_SOURCE_ROOT}"
+        OUTPUT_VARIABLE _sdk_git_ref OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    foreach(_sdk_git_state "${_sdk_git_dir}/HEAD" "${_sdk_git_dir}/${_sdk_git_ref}" "${_sdk_git_dir}/packed-refs")
+        if(EXISTS "${_sdk_git_state}" AND NOT IS_DIRECTORY "${_sdk_git_state}")
+            set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_sdk_git_state}")
+        endif()
+    endforeach()
     execute_process(
         COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        WORKING_DIRECTORY "${SDK_OPEN_SOURCE_ROOT}"
         OUTPUT_VARIABLE SDK_OPEN_GIT_COMMIT_HASH
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET
     )
     execute_process(
         COMMAND ${GIT_EXECUTABLE} rev-parse --abbrev-ref HEAD
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        WORKING_DIRECTORY "${SDK_OPEN_SOURCE_ROOT}"
         OUTPUT_VARIABLE SDK_OPEN_GIT_BRANCH
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET
@@ -116,7 +124,7 @@ set(SDK_OPEN_ASIO_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/asio/asio/include")
 set(SDK_OPEN_NLOHMANN_JSON_DIR "${SDK_OPEN_THIRD_PARTY_DIR}")
 set(SDK_OPEN_SPDLOG_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/spdlog")
 set(SDK_OPEN_CGRAPH_DIR "${SDK_OPEN_THIRD_PARTY_DIR}/CGraph")
-set(SDK_OPEN_OPENSSL3_DIR "${CMAKE_SOURCE_DIR}/third_party_repo/openssl3")
+set(SDK_OPEN_OPENSSL3_DIR "${SDK_OPEN_THIRD_PARTY_ROOT}/openssl3")
 
 add_library(sdk_open_tls_deps INTERFACE)
 if(SDK_OPEN_ENABLE_TLS)
@@ -280,7 +288,7 @@ if(SDK_OPEN_ENABLE_TLS)
     # 因此必须从本目标移除旧路径并显式把 OpenSSL 3 放到最前面。
     get_target_property(SDK_OPEN_RUNTIME_INCLUDE_DIRS sdk_open_runtime INCLUDE_DIRECTORIES)
     list(REMOVE_ITEM SDK_OPEN_RUNTIME_INCLUDE_DIRS
-        "${CMAKE_SOURCE_DIR}/third_party_repo/openssl/include/${THIRD_PARTY_SYSTEM}"
+        "${SDK_OPEN_THIRD_PARTY_ROOT}/openssl/include/${THIRD_PARTY_SYSTEM}"
     )
     set_property(TARGET sdk_open_runtime PROPERTY INCLUDE_DIRECTORIES "${SDK_OPEN_RUNTIME_INCLUDE_DIRS}")
     target_include_directories(sdk_open_runtime BEFORE PRIVATE "${SDK_OPEN_OPENSSL3_INCLUDE_DIR}")
@@ -426,8 +434,8 @@ function(czur_configure_sdk_open_twain_runtime target_name)
         message(FATAL_ERROR "SDK Open TWAIN runtime target does not exist: ${target_name}")
     endif()
 
-    set(_twain_dsm_x64_dir "${CMAKE_SOURCE_DIR}/third_party_repo/twain/windows/x64")
-    set(_twain_dsm_x86_dir "${CMAKE_SOURCE_DIR}/third_party_repo/twain/windows/x86")
+    set(_twain_dsm_x64_dir "${SDK_OPEN_THIRD_PARTY_ROOT}/twain/windows/x64")
+    set(_twain_dsm_x86_dir "${SDK_OPEN_THIRD_PARTY_ROOT}/twain/windows/x86")
     set(_twain_dsm_x86_compat_230_dir "${_twain_dsm_x86_dir}/compat/2.3.0")
     set(_twain_dsm_x64 "${_twain_dsm_x64_dir}/TWAINDSM.dll")
     set(_twain_dsm_x86 "${_twain_dsm_x86_dir}/TWAINDSM.dll")
@@ -437,9 +445,9 @@ function(czur_configure_sdk_open_twain_runtime target_name)
     set(_twain_dsm_x86_compat_230_license
         "${_twain_dsm_x86_compat_230_dir}/LICENSE-LGPL-2.1.txt")
     set(_twain_dsm_x64_manifest
-        "${CMAKE_SOURCE_DIR}/packaging/windows/twain/TWAINDSM-x64-VERSION-SHA256.txt")
+        "${SDK_OPEN_HOST_SOURCE_ROOT}/packaging/windows/twain/TWAINDSM-x64-VERSION-SHA256.txt")
     set(_twain_dsm_x86_manifest
-        "${CMAKE_SOURCE_DIR}/packaging/windows/twain/TWAINDSM-x86-VERSION-SHA256.txt")
+        "${SDK_OPEN_HOST_SOURCE_ROOT}/packaging/windows/twain/TWAINDSM-x86-VERSION-SHA256.txt")
     set(_twain_dsm_x86_compat_230_manifest
         "${_twain_dsm_x86_compat_230_dir}/TWAINDSM-x86-2.3.0-VERSION-SHA256.txt")
 
@@ -474,7 +482,7 @@ function(czur_configure_sdk_open_twain_runtime target_name)
                 "-DTWAIN_DSM_X86_COMPAT_230=${_twain_dsm_x86_compat_230}"
                 "-DTWAIN_DSM_X86_COMPAT_230_LICENSE=${_twain_dsm_x86_compat_230_license}"
                 "-DTWAIN_DSM_X86_COMPAT_230_MANIFEST=${_twain_dsm_x86_compat_230_manifest}"
-                -P "${CMAKE_SOURCE_DIR}/cmake/VerifyTwainRuntime.cmake"
+                -P "${SDK_OPEN_HOST_SOURCE_ROOT}/cmake/VerifyTwainRuntime.cmake"
             COMMAND "${CMAKE_COMMAND}" -E remove_directory
                 "$<TARGET_FILE_DIR:${target_name}>/twain"
             COMMAND "${CMAKE_COMMAND}" -E rm -f
@@ -509,7 +517,7 @@ function(czur_configure_sdk_open_twain_runtime target_name)
                 "-DTWAIN_RUNTIME_DIR=$<TARGET_FILE_DIR:${target_name}>"
                 -DTWAIN_SDK_OPEN_ISOLATED_RUNTIME=ON
                 -DTWAIN_SDK_OPEN_ARCH=x86
-                -P "${CMAKE_SOURCE_DIR}/cmake/VerifyTwainRuntime.cmake"
+                -P "${SDK_OPEN_HOST_SOURCE_ROOT}/cmake/VerifyTwainRuntime.cmake"
             COMMENT "Copy and verify the Win32 sdk_open TWAIN runtime"
             VERBATIM
         )
@@ -529,7 +537,7 @@ function(czur_configure_sdk_open_twain_runtime target_name)
             "-DTWAIN_DSM_X86_COMPAT_230=${_twain_dsm_x86_compat_230}"
             "-DTWAIN_DSM_X86_COMPAT_230_LICENSE=${_twain_dsm_x86_compat_230_license}"
             "-DTWAIN_DSM_X86_COMPAT_230_MANIFEST=${_twain_dsm_x86_compat_230_manifest}"
-            -P "${CMAKE_SOURCE_DIR}/cmake/VerifyTwainRuntime.cmake"
+            -P "${SDK_OPEN_HOST_SOURCE_ROOT}/cmake/VerifyTwainRuntime.cmake"
         COMMAND "${CMAKE_COMMAND}" -E remove_directory
             "$<TARGET_FILE_DIR:${target_name}>/twain"
         COMMAND "${CMAKE_COMMAND}" -E make_directory
@@ -571,7 +579,7 @@ function(czur_configure_sdk_open_twain_runtime target_name)
             -DTWAIN_REQUIRE_X86_RUNTIME=ON
             -DTWAIN_SDK_OPEN_ISOLATED_RUNTIME=ON
             -DTWAIN_SDK_OPEN_ARCH=x64
-            -P "${CMAKE_SOURCE_DIR}/cmake/VerifyTwainRuntime.cmake"
+            -P "${SDK_OPEN_HOST_SOURCE_ROOT}/cmake/VerifyTwainRuntime.cmake"
         COMMENT "Copy and verify the sdk_open TWAIN runtime"
         VERBATIM
     )
@@ -694,32 +702,32 @@ endif()
 
 if(BUILD_SDK_PRIVATE)
     if(WIN32)
-        set(SDK_OPEN_LIBXML2_DLL_SRC "$<$<CONFIG:Debug>:${CMAKE_SOURCE_DIR}/third_party_repo/libxml2/lib/win_debug/libxml2d.dll>$<$<NOT:$<CONFIG:Debug>>:${CMAKE_SOURCE_DIR}/third_party_repo/libxml2/lib/${LIB_ARCH}/libxml2.dll>")
+        set(SDK_OPEN_LIBXML2_DLL_SRC "$<$<CONFIG:Debug>:${SDK_OPEN_THIRD_PARTY_ROOT}/libxml2/lib/win_debug/libxml2d.dll>$<$<NOT:$<CONFIG:Debug>>:${SDK_OPEN_THIRD_PARTY_ROOT}/libxml2/lib/${LIB_ARCH}/libxml2.dll>")
         set(SDK_OPEN_LIBXML2_DLL_DST "$<$<CONFIG:Debug>:$<TARGET_FILE_DIR:sdk_open_app>/libxml2d.dll>$<$<NOT:$<CONFIG:Debug>>:$<TARGET_FILE_DIR:sdk_open_app>/libxml2.dll>")
-        set(SDK_OPEN_ZLIB_DLL_SRC "$<$<CONFIG:Debug>:${CMAKE_SOURCE_DIR}/third_party_repo/zlib/lib/win_debug/zlib.dll>$<$<NOT:$<CONFIG:Debug>>:${CMAKE_SOURCE_DIR}/third_party_repo/zlib/lib/${LIB_ARCH}/zlib.dll>")
-        set(SDK_OPEN_ZLIB1_DLL_SRC "$<$<CONFIG:Debug>:${CMAKE_SOURCE_DIR}/third_party_repo/zlib/lib/win_debug/zlib1.dll>$<$<NOT:$<CONFIG:Debug>>:${CMAKE_SOURCE_DIR}/third_party_repo/zlib/lib/${LIB_ARCH}/zlib1.dll>")
-        set(SDK_OPEN_OPENCV_DLL_SRC "$<$<CONFIG:Debug>:${CMAKE_SOURCE_DIR}/third_party_repo/opencv/lib/win_debug/opencv_world450d.dll>$<$<NOT:$<CONFIG:Debug>>:${CMAKE_SOURCE_DIR}/third_party_repo/opencv/lib/${LIB_ARCH}/opencv_world450.dll>")
+        set(SDK_OPEN_ZLIB_DLL_SRC "$<$<CONFIG:Debug>:${SDK_OPEN_THIRD_PARTY_ROOT}/zlib/lib/win_debug/zlib.dll>$<$<NOT:$<CONFIG:Debug>>:${SDK_OPEN_THIRD_PARTY_ROOT}/zlib/lib/${LIB_ARCH}/zlib.dll>")
+        set(SDK_OPEN_ZLIB1_DLL_SRC "$<$<CONFIG:Debug>:${SDK_OPEN_THIRD_PARTY_ROOT}/zlib/lib/win_debug/zlib1.dll>$<$<NOT:$<CONFIG:Debug>>:${SDK_OPEN_THIRD_PARTY_ROOT}/zlib/lib/${LIB_ARCH}/zlib1.dll>")
+        set(SDK_OPEN_OPENCV_DLL_SRC "$<$<CONFIG:Debug>:${SDK_OPEN_THIRD_PARTY_ROOT}/opencv/lib/win_debug/opencv_world450d.dll>$<$<NOT:$<CONFIG:Debug>>:${SDK_OPEN_THIRD_PARTY_ROOT}/opencv/lib/${LIB_ARCH}/opencv_world450.dll>")
         set(SDK_OPEN_OPENCV_DLL_DST "$<$<CONFIG:Debug>:$<TARGET_FILE_DIR:sdk_open_app>/opencv_world450d.dll>$<$<NOT:$<CONFIG:Debug>>:$<TARGET_FILE_DIR:sdk_open_app>/opencv_world450.dll>")
-        set(SDK_OPEN_CAIRO_DLL_SRC "$<$<CONFIG:Debug>:${CMAKE_SOURCE_DIR}/third_party_repo/cairo/lib/win_debug/cairo.dll>$<$<NOT:$<CONFIG:Debug>>:${CMAKE_SOURCE_DIR}/third_party_repo/cairo/lib/${LIB_ARCH}/cairo.dll>")
-        set(SDK_OPEN_FONTCONFIG_DLL_SRC "$<$<CONFIG:Debug>:${CMAKE_SOURCE_DIR}/third_party_repo/fontconfig/lib/win_debug/fontconfig.dll>$<$<NOT:$<CONFIG:Debug>>:${CMAKE_SOURCE_DIR}/third_party_repo/fontconfig/lib/${LIB_ARCH}/fontconfig.dll>")
-        set(SDK_OPEN_ICONV_DLL_SRC "$<$<CONFIG:Debug>:${CMAKE_SOURCE_DIR}/third_party_repo/libiconv/lib/${LIB_ARCH}/libiconvD.dll>$<$<NOT:$<CONFIG:Debug>>:${CMAKE_SOURCE_DIR}/third_party_repo/libiconv/lib/${LIB_ARCH}/libiconv.dll>")
+        set(SDK_OPEN_CAIRO_DLL_SRC "$<$<CONFIG:Debug>:${SDK_OPEN_THIRD_PARTY_ROOT}/cairo/lib/win_debug/cairo.dll>$<$<NOT:$<CONFIG:Debug>>:${SDK_OPEN_THIRD_PARTY_ROOT}/cairo/lib/${LIB_ARCH}/cairo.dll>")
+        set(SDK_OPEN_FONTCONFIG_DLL_SRC "$<$<CONFIG:Debug>:${SDK_OPEN_THIRD_PARTY_ROOT}/fontconfig/lib/win_debug/fontconfig.dll>$<$<NOT:$<CONFIG:Debug>>:${SDK_OPEN_THIRD_PARTY_ROOT}/fontconfig/lib/${LIB_ARCH}/fontconfig.dll>")
+        set(SDK_OPEN_ICONV_DLL_SRC "$<$<CONFIG:Debug>:${SDK_OPEN_THIRD_PARTY_ROOT}/libiconv/lib/${LIB_ARCH}/libiconvD.dll>$<$<NOT:$<CONFIG:Debug>>:${SDK_OPEN_THIRD_PARTY_ROOT}/libiconv/lib/${LIB_ARCH}/libiconv.dll>")
         set(SDK_OPEN_ICONV_DLL_DST "$<$<CONFIG:Debug>:$<TARGET_FILE_DIR:sdk_open_app>/libiconvD.dll>$<$<NOT:$<CONFIG:Debug>>:$<TARGET_FILE_DIR:sdk_open_app>/libiconv.dll>")
-        set(SDK_OPEN_FREEIMAGE_DLL_SRC "$<$<CONFIG:Debug>:${CMAKE_SOURCE_DIR}/third_party_repo/freeimage/lib/win_debug/FreeImaged.dll>$<$<NOT:$<CONFIG:Debug>>:${CMAKE_SOURCE_DIR}/third_party_repo/freeimage/lib/${LIB_ARCH}/FreeImage.dll>")
+        set(SDK_OPEN_FREEIMAGE_DLL_SRC "$<$<CONFIG:Debug>:${SDK_OPEN_THIRD_PARTY_ROOT}/freeimage/lib/win_debug/FreeImaged.dll>$<$<NOT:$<CONFIG:Debug>>:${SDK_OPEN_THIRD_PARTY_ROOT}/freeimage/lib/${LIB_ARCH}/FreeImage.dll>")
         set(SDK_OPEN_FREEIMAGE_DLL_DST "$<$<CONFIG:Debug>:$<TARGET_FILE_DIR:sdk_open_app>/FreeImaged.dll>$<$<NOT:$<CONFIG:Debug>>:$<TARGET_FILE_DIR:sdk_open_app>/FreeImage.dll>")
-        set(SDK_OPEN_TIFF_DLL_SRC "$<$<CONFIG:Debug>:${CMAKE_SOURCE_DIR}/third_party_repo/tiff/lib/win_debug/tiffd.dll>$<$<NOT:$<CONFIG:Debug>>:${CMAKE_SOURCE_DIR}/third_party_repo/tiff/lib/${LIB_ARCH}/tiff.dll>")
+        set(SDK_OPEN_TIFF_DLL_SRC "$<$<CONFIG:Debug>:${SDK_OPEN_THIRD_PARTY_ROOT}/tiff/lib/win_debug/tiffd.dll>$<$<NOT:$<CONFIG:Debug>>:${SDK_OPEN_THIRD_PARTY_ROOT}/tiff/lib/${LIB_ARCH}/tiff.dll>")
         set(SDK_OPEN_TIFF_DLL_DST "$<$<CONFIG:Debug>:$<TARGET_FILE_DIR:sdk_open_app>/tiffd.dll>$<$<NOT:$<CONFIG:Debug>>:$<TARGET_FILE_DIR:sdk_open_app>/tiff.dll>")
-        set(SDK_OPEN_LIBPNG_DLL_SRC "$<$<CONFIG:Debug>:${CMAKE_SOURCE_DIR}/third_party_repo/libpng/lib/win_debug/libpng16d.dll>$<$<NOT:$<CONFIG:Debug>>:${CMAKE_SOURCE_DIR}/third_party_repo/libpng/lib/${LIB_ARCH}/libpng16.dll>")
+        set(SDK_OPEN_LIBPNG_DLL_SRC "$<$<CONFIG:Debug>:${SDK_OPEN_THIRD_PARTY_ROOT}/libpng/lib/win_debug/libpng16d.dll>$<$<NOT:$<CONFIG:Debug>>:${SDK_OPEN_THIRD_PARTY_ROOT}/libpng/lib/${LIB_ARCH}/libpng16.dll>")
         set(SDK_OPEN_LIBPNG_DLL_DST "$<$<CONFIG:Debug>:$<TARGET_FILE_DIR:sdk_open_app>/libpng16d.dll>$<$<NOT:$<CONFIG:Debug>>:$<TARGET_FILE_DIR:sdk_open_app>/libpng16.dll>")
-        set(SDK_OPEN_JPEG_DLL_SRC "$<$<CONFIG:Debug>:${CMAKE_SOURCE_DIR}/third_party_repo/libjpeg-turbo/lib/win_debug/jpeg8.dll>$<$<NOT:$<CONFIG:Debug>>:${CMAKE_SOURCE_DIR}/third_party_repo/libjpeg-turbo/lib/${LIB_ARCH}/jpeg8.dll>")
-        set(SDK_OPEN_TURBOJPEG_DLL_SRC "$<$<CONFIG:Debug>:${CMAKE_SOURCE_DIR}/third_party_repo/libjpeg-turbo/lib/win_debug/turbojpeg.dll>$<$<NOT:$<CONFIG:Debug>>:${CMAKE_SOURCE_DIR}/third_party_repo/libjpeg-turbo/lib/${LIB_ARCH}/turbojpeg.dll>")
-        set(SDK_OPEN_CZCV_DLL_SRC "$<$<CONFIG:Debug>:${CMAKE_SOURCE_DIR}/third_party_repo/czcv/lib/win_debug/czcv_scan.dll>$<$<NOT:$<CONFIG:Debug>>:${CMAKE_SOURCE_DIR}/third_party_repo/czcv/lib/${LIB_ARCH}/czcv_scan.dll>")
-        set(SDK_OPEN_OPENJPEG_DLL_SRC "$<$<CONFIG:Debug>:${CMAKE_SOURCE_DIR}/third_party_repo/openjpeg/lib/win_debug/libopenjp2.dll>$<$<NOT:$<CONFIG:Debug>>:${CMAKE_SOURCE_DIR}/third_party_repo/openjpeg/lib/${LIB_ARCH}/libopenjp2.dll>")
-        set(SDK_OPEN_LZMA_DLL_SRC "$<$<CONFIG:Debug>:${CMAKE_SOURCE_DIR}/third_party_repo/xz/lib/win_debug/liblzma.dll>$<$<NOT:$<CONFIG:Debug>>:${CMAKE_SOURCE_DIR}/third_party_repo/xz/lib/${LIB_ARCH}/liblzma.dll>")
-        set(SDK_OPEN_ZSTD_DLL_SRC "$<$<CONFIG:Debug>:${CMAKE_SOURCE_DIR}/third_party_repo/zstd/lib/win_debug/zstd.dll>$<$<NOT:$<CONFIG:Debug>>:${CMAKE_SOURCE_DIR}/third_party_repo/zstd/lib/${LIB_ARCH}/zstd.dll>")
-        set(SDK_OPEN_CZCV_MODEL_DIR "${CMAKE_SOURCE_DIR}/third_party_repo/czcv/models/x86-64")
-        set(SDK_OPEN_CZOCR_MODEL_DIR "${CMAKE_SOURCE_DIR}/third_party_repo/czocr/models/${LIB_ARCH}")
+        set(SDK_OPEN_JPEG_DLL_SRC "$<$<CONFIG:Debug>:${SDK_OPEN_THIRD_PARTY_ROOT}/libjpeg-turbo/lib/win_debug/jpeg8.dll>$<$<NOT:$<CONFIG:Debug>>:${SDK_OPEN_THIRD_PARTY_ROOT}/libjpeg-turbo/lib/${LIB_ARCH}/jpeg8.dll>")
+        set(SDK_OPEN_TURBOJPEG_DLL_SRC "$<$<CONFIG:Debug>:${SDK_OPEN_THIRD_PARTY_ROOT}/libjpeg-turbo/lib/win_debug/turbojpeg.dll>$<$<NOT:$<CONFIG:Debug>>:${SDK_OPEN_THIRD_PARTY_ROOT}/libjpeg-turbo/lib/${LIB_ARCH}/turbojpeg.dll>")
+        set(SDK_OPEN_CZCV_DLL_SRC "$<$<CONFIG:Debug>:${SDK_OPEN_THIRD_PARTY_ROOT}/czcv/lib/win_debug/czcv_scan.dll>$<$<NOT:$<CONFIG:Debug>>:${SDK_OPEN_THIRD_PARTY_ROOT}/czcv/lib/${LIB_ARCH}/czcv_scan.dll>")
+        set(SDK_OPEN_OPENJPEG_DLL_SRC "$<$<CONFIG:Debug>:${SDK_OPEN_THIRD_PARTY_ROOT}/openjpeg/lib/win_debug/libopenjp2.dll>$<$<NOT:$<CONFIG:Debug>>:${SDK_OPEN_THIRD_PARTY_ROOT}/openjpeg/lib/${LIB_ARCH}/libopenjp2.dll>")
+        set(SDK_OPEN_LZMA_DLL_SRC "$<$<CONFIG:Debug>:${SDK_OPEN_THIRD_PARTY_ROOT}/xz/lib/win_debug/liblzma.dll>$<$<NOT:$<CONFIG:Debug>>:${SDK_OPEN_THIRD_PARTY_ROOT}/xz/lib/${LIB_ARCH}/liblzma.dll>")
+        set(SDK_OPEN_ZSTD_DLL_SRC "$<$<CONFIG:Debug>:${SDK_OPEN_THIRD_PARTY_ROOT}/zstd/lib/win_debug/zstd.dll>$<$<NOT:$<CONFIG:Debug>>:${SDK_OPEN_THIRD_PARTY_ROOT}/zstd/lib/${LIB_ARCH}/zstd.dll>")
+        set(SDK_OPEN_CZCV_MODEL_DIR "${SDK_OPEN_THIRD_PARTY_ROOT}/czcv/models/x86-64")
+        set(SDK_OPEN_CZOCR_MODEL_DIR "${SDK_OPEN_THIRD_PARTY_ROOT}/czocr/models/${LIB_ARCH}")
         if(LIB_ARCH STREQUAL "windows32")
-            set(SDK_OPEN_CZOCR_MODEL_DIR "${CMAKE_SOURCE_DIR}/third_party_repo/czocr/models/windows64")
+            set(SDK_OPEN_CZOCR_MODEL_DIR "${SDK_OPEN_THIRD_PARTY_ROOT}/czocr/models/windows64")
         endif()
         if(LIB_ARCH STREQUAL "windows32")
             set(SDK_OPEN_OPENSSL11_CRYPTO_DLL_NAME "libcrypto-1_1.dll")
@@ -732,31 +740,31 @@ if(BUILD_SDK_PRIVATE)
             set(SDK_OPEN_OPENSSL3_CRYPTO_DLL_NAME "libcrypto-3-x64.dll")
             set(SDK_OPEN_OPENSSL3_SSL_DLL_NAME "libssl-3-x64.dll")
         endif()
-        set(SDK_OPEN_OPENSSL11_CRYPTO_DLL_SRC "${CMAKE_SOURCE_DIR}/third_party_repo/openssl/lib/${LIB_ARCH}/${SDK_OPEN_OPENSSL11_CRYPTO_DLL_NAME}")
-        set(SDK_OPEN_OPENSSL11_SSL_DLL_SRC "${CMAKE_SOURCE_DIR}/third_party_repo/openssl/lib/${LIB_ARCH}/${SDK_OPEN_OPENSSL11_SSL_DLL_NAME}")
-        set(SDK_OPEN_OPENSSL3_CRYPTO_DLL_SRC "${CMAKE_SOURCE_DIR}/third_party_repo/openssl3/lib/${LIB_ARCH}/${SDK_OPEN_OPENSSL3_CRYPTO_DLL_NAME}")
-        set(SDK_OPEN_OPENSSL3_SSL_DLL_SRC "${CMAKE_SOURCE_DIR}/third_party_repo/openssl3/lib/${LIB_ARCH}/${SDK_OPEN_OPENSSL3_SSL_DLL_NAME}")
+        set(SDK_OPEN_OPENSSL11_CRYPTO_DLL_SRC "${SDK_OPEN_THIRD_PARTY_ROOT}/openssl/lib/${LIB_ARCH}/${SDK_OPEN_OPENSSL11_CRYPTO_DLL_NAME}")
+        set(SDK_OPEN_OPENSSL11_SSL_DLL_SRC "${SDK_OPEN_THIRD_PARTY_ROOT}/openssl/lib/${LIB_ARCH}/${SDK_OPEN_OPENSSL11_SSL_DLL_NAME}")
+        set(SDK_OPEN_OPENSSL3_CRYPTO_DLL_SRC "${SDK_OPEN_THIRD_PARTY_ROOT}/openssl3/lib/${LIB_ARCH}/${SDK_OPEN_OPENSSL3_CRYPTO_DLL_NAME}")
+        set(SDK_OPEN_OPENSSL3_SSL_DLL_SRC "${SDK_OPEN_THIRD_PARTY_ROOT}/openssl3/lib/${LIB_ARCH}/${SDK_OPEN_OPENSSL3_SSL_DLL_NAME}")
     endif()
 
     set(SDK_OPEN_COPY_OCR_FONTS_COMMANDS)
-    if(EXISTS "${CMAKE_SOURCE_DIR}/resources/ocr/fonts")
+    if(EXISTS "${SDK_OPEN_HOST_SOURCE_ROOT}/resources/ocr/fonts")
         list(APPEND SDK_OPEN_COPY_OCR_FONTS_COMMANDS
             COMMAND "${CMAKE_COMMAND}" -E copy_directory
-                "${CMAKE_SOURCE_DIR}/resources/ocr/fonts"
+                "${SDK_OPEN_HOST_SOURCE_ROOT}/resources/ocr/fonts"
                 "$<TARGET_FILE_DIR:sdk_open_app>/ocr_fonts")
     endif()
 
     add_custom_command(TARGET sdk_open_app POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:sdk_open_app>/configs"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${CMAKE_SOURCE_DIR}/src/module/devices/device_config_compact.conf"
+            "${SDK_OPEN_HOST_SOURCE_ROOT}/src/module/devices/device_config_compact.conf"
             "$<TARGET_FILE_DIR:sdk_open_app>/configs/device_config_compact.conf"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-            "${CMAKE_SOURCE_DIR}/src/app/process/publicd/sane_open_source_devices.json"
+            "${SDK_OPEN_HOST_SOURCE_ROOT}/src/app/process/publicd/sane_open_source_devices.json"
             "$<TARGET_FILE_DIR:sdk_open_app>/configs/sane_open_source_devices.json"
         ${SDK_OPEN_COPY_OCR_FONTS_COMMANDS}
         COMMAND "${CMAKE_COMMAND}" -E copy_directory
-            "${CMAKE_SOURCE_DIR}/resources/ofd/fonts"
+            "${SDK_OPEN_HOST_SOURCE_ROOT}/resources/ofd/fonts"
             "$<TARGET_FILE_DIR:sdk_open_app>/ofd_fonts"
         COMMENT "Copy config and OCR/OFD font resources into sdk_open_app runtime directory"
     )
@@ -774,7 +782,7 @@ if(BUILD_SDK_PRIVATE)
             )
         endif()
         set(SDK_OPEN_OPENJPEG_DLL_COPY_COMMANDS)
-        if(EXISTS "${CMAKE_SOURCE_DIR}/third_party_repo/openjpeg/lib/${LIB_ARCH}/libopenjp2.dll")
+        if(EXISTS "${SDK_OPEN_THIRD_PARTY_ROOT}/openjpeg/lib/${LIB_ARCH}/libopenjp2.dll")
             list(APPEND SDK_OPEN_OPENJPEG_DLL_COPY_COMMANDS
                 COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                     "${SDK_OPEN_OPENJPEG_DLL_SRC}"
@@ -792,13 +800,13 @@ if(BUILD_SDK_PRIVATE)
                 "${SDK_OPEN_CZOCR_MODEL_DIR}"
                 "$<TARGET_FILE_DIR:sdk_open_app>/models"
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                "${CMAKE_SOURCE_DIR}/third_party_repo/czocr/models/x86-64/license.lic"
+                "${SDK_OPEN_THIRD_PARTY_ROOT}/czocr/models/x86-64/license.lic"
                 "$<TARGET_FILE_DIR:sdk_open_app>/models/license.lic"
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                "${CMAKE_SOURCE_DIR}/third_party_repo/czocr/models/x86-64/serial.txt"
+                "${SDK_OPEN_THIRD_PARTY_ROOT}/czocr/models/x86-64/serial.txt"
                 "$<TARGET_FILE_DIR:sdk_open_app>/models/serial.txt"
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                "${CMAKE_SOURCE_DIR}/third_party_repo/czocr/lib/${LIB_ARCH}/czcv_ocr.dll"
+                "${SDK_OPEN_THIRD_PARTY_ROOT}/czocr/lib/${LIB_ARCH}/czcv_ocr.dll"
                 "$<TARGET_FILE_DIR:sdk_open_app>/models/czcv_ocr.dll"
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                 "${SDK_OPEN_LIBXML2_DLL_SRC}"
@@ -819,7 +827,7 @@ if(BUILD_SDK_PRIVATE)
                 "${SDK_OPEN_CAIRO_DLL_SRC}"
                 "$<TARGET_FILE_DIR:sdk_open_app>/cairo.dll"
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                "${CMAKE_SOURCE_DIR}/third_party_repo/libzip/lib/${LIB_ARCH}/zip.dll"
+                "${SDK_OPEN_THIRD_PARTY_ROOT}/libzip/lib/${LIB_ARCH}/zip.dll"
                 "$<TARGET_FILE_DIR:sdk_open_app>/zip.dll"
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                 "${SDK_OPEN_FONTCONFIG_DLL_SRC}"
@@ -828,7 +836,7 @@ if(BUILD_SDK_PRIVATE)
                 "${SDK_OPEN_ICONV_DLL_SRC}"
                 "${SDK_OPEN_ICONV_DLL_DST}"
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                "${CMAKE_SOURCE_DIR}/third_party_repo/czocr/lib/${LIB_ARCH}/czcv_ocr_api.dll"
+                "${SDK_OPEN_THIRD_PARTY_ROOT}/czocr/lib/${LIB_ARCH}/czcv_ocr_api.dll"
                 "$<TARGET_FILE_DIR:sdk_open_app>/czcv_ocr_api.dll"
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                 "$<TARGET_FILE:docx>"
@@ -837,7 +845,7 @@ if(BUILD_SDK_PRIVATE)
                 "${SDK_OPEN_FREEIMAGE_DLL_SRC}"
                 "${SDK_OPEN_FREEIMAGE_DLL_DST}"
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                "${CMAKE_SOURCE_DIR}/third_party_repo/libexif/lib/${LIB_ARCH}/libexif.dll"
+                "${SDK_OPEN_THIRD_PARTY_ROOT}/libexif/lib/${LIB_ARCH}/libexif.dll"
                 "$<TARGET_FILE_DIR:sdk_open_app>/libexif.dll"
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                 "${SDK_OPEN_TIFF_DLL_SRC}"
@@ -958,4 +966,9 @@ elseif(BUILD_SDK_WEB)
         COMMAND "${CMAKE_COMMAND}" -E copy_directory "${SDK_WEB_DEMO_DIST_DIR}" "$<TARGET_FILE_DIR:sdk_open_app>/web/demo"
         COMMENT "Copy sdk web assets into sdk_open_app runtime directory"
     )
+endif()
+
+# SDK-specific targets are owned here, after the core targets have been declared.
+if(BUILD_SDK_PRIVATE AND NOT SDK_OPEN_HARMONY_HOST_BUILD)
+    add_subdirectory(providers/private)
 endif()
