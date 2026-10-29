@@ -1,10 +1,12 @@
 import { common, Want } from '@kit.AbilityKit';
 import { http } from '@kit.NetworkKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import rpc from '@ohos.rpc';
 
 const SERVICE_WANT: Want = {
   bundleName: 'com.czur.sdkopen', moduleName: 'sdkopen', abilityName: 'SdkOpenServiceExtension'
 };
+const REQUEST_PREPARE_STOP = 2;
 
 export interface ServiceState {
   running: boolean;
@@ -84,8 +86,83 @@ class TrayServiceControl {
     throw new Error(expected ? '服务启动超时' : '服务端口仍可访问');
   }
 
+  private async sendPrepareStop(remote: rpc.IRemoteObject): Promise<void> {
+    const data = rpc.MessageSequence.create();
+    const reply = rpc.MessageSequence.create();
+    try {
+      data.writeInterfaceToken('com.czur.sdkopen.Service');
+      const result = await remote.sendMessageRequest(
+        REQUEST_PREPARE_STOP, data, reply, new rpc.MessageOption(rpc.MessageOption.TF_SYNC));
+      if (result.errCode !== 0) {
+        throw new Error(`服务清理请求失败：${result.errCode}`);
+      }
+      const response = reply.readString();
+      if (!response.includes('"success":true')) {
+        throw new Error(`服务清理失败：${response}`);
+      }
+    } finally {
+      data.reclaim();
+      reply.reclaim();
+    }
+  }
+
+  private async prepareStopIfRunning(): Promise<void> {
+    // AppService connect can start a stopped service on some platform builds.
+    // Probe the already-running endpoint first and never connect when absent.
+    if (!await this.readStatus()) { return; }
+    const context = this.context;
+    if (!context) { throw new Error('托盘控制入口尚未初始化'); }
+    await new Promise<void>((resolve, reject): void => {
+      let connectionId: number = -1;
+      let completed: boolean = false;
+      const finish = (error?: Error): void => {
+        if (completed) { return; }
+        completed = true;
+        const settle = (): void => { error ? reject(error) : resolve(); };
+        if (connectionId < 0) {
+          settle();
+          return;
+        }
+        const disconnectFailed = (disconnectError: Object): void => {
+            if (error) {
+              reject(error);
+              return;
+            }
+            // The prepare-stop RPC already drained native and USB ownership.
+            // A connection cleanup failure must not leave the AppService
+            // ability alive with a stopped runtime that cannot be restarted.
+            hilog.warn(0, 'SdkOpenTray',
+              'Service cleanup connection disconnect failed: %{public}s', String(disconnectError));
+            resolve();
+        };
+        try {
+          context.disconnectAppServiceExtensionAbility(connectionId)
+            .then(settle)
+            .catch(disconnectFailed);
+        } catch (disconnectError) {
+          disconnectFailed(disconnectError);
+        }
+      };
+      const options: common.ConnectOptions = {
+        onConnect: (_element, remote): void => {
+          this.sendPrepareStop(remote)
+            .then((): void => finish())
+            .catch((error: Error): void => finish(error));
+        },
+        onDisconnect: (_element): void => finish(new Error('服务清理连接提前断开')),
+        onFailed: (code: number): void => finish(new Error(`无法连接运行中的服务：${code}`))
+      };
+      try {
+        connectionId = context.connectAppServiceExtensionAbility(SERVICE_WANT, options);
+      } catch (error) {
+        finish(new Error(String(error)));
+      }
+    });
+  }
+
   async stopForExit(): Promise<void> {
     if (!this.context) { return; }
+    await this.prepareStopIfRunning();
     try {
       await this.context.stopAppServiceExtensionAbility(SERVICE_WANT);
     } catch (error) {
@@ -114,6 +191,7 @@ class TrayServiceControl {
         await context.startAppServiceExtensionAbility(SERVICE_WANT);
         await this.waitForStatus(true);
       } else if (command === 'stop') {
+        await this.prepareStopIfRunning();
         await context.stopAppServiceExtensionAbility(SERVICE_WANT);
         await this.waitForStatus(false);
       } else {

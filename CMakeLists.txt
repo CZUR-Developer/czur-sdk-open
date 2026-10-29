@@ -390,6 +390,24 @@ if(BUILD_SDK_OPEN_TESTS)
     add_test(NAME sdk_open.status_software
              COMMAND sdk_open_status_software_test)
 
+    add_executable(sdk_open_ws_video_backpressure_test
+        test/sdk_ws_video_backpressure_test.cpp
+    )
+    target_include_directories(sdk_open_ws_video_backpressure_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/transport"
+    )
+    add_test(NAME sdk_open.ws_video_backpressure
+             COMMAND sdk_open_ws_video_backpressure_test)
+
+    add_executable(sdk_open_ws_video_server_integration_test
+        test/sdk_ws_video_server_integration_test.cpp
+    )
+    target_link_libraries(sdk_open_ws_video_server_integration_test PRIVATE
+        sdk_open_runtime
+    )
+    add_test(NAME sdk_open.ws_video_server_integration
+             COMMAND sdk_open_ws_video_server_integration_test)
+
     add_executable(sdk_open_ocr_language_contract_test
         test/ocr_language_contract_test.cpp
     )

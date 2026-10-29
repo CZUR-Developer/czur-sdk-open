@@ -744,6 +744,8 @@ Json SdkApp::BuildStatusJson() const {
                   {"authFailed", video_stats.auth_failed},
                   {"binaryFrames", video_stats.binary_frames},
                   {"binaryBytes", video_stats.binary_bytes},
+                  {"previewFramesDropped", video_stats.preview_frames_dropped},
+                  {"sendFailures", video_stats.send_failures},
               }},
          }},
         {"application",

@@ -8,6 +8,7 @@
 /sdkopen/src/main/resources/rawfile/sdkopen_web/
 /sdkopen/src/main/resources/rawfile/sdkopen_czcv_model/
 /sdkopen/src/main/resources/rawfile/sdkopen_czocr_model/
+/sdkopen/src/main/resources/rawfile/sdkopen_device_config.conf
 /sdkopen_tray/build/
 /sdkopen_tray/oh_modules/
 /local.properties

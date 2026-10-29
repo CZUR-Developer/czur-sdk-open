@@ -41,6 +41,7 @@ while [[ $# -gt 0 ]]; do
         "${PROJECT_DIR}/sdkopen/src/main/resources/rawfile/sdkopen_web" \
         "${PROJECT_DIR}/sdkopen/src/main/resources/rawfile/sdkopen_czcv_model" \
         "${PROJECT_DIR}/sdkopen/src/main/resources/rawfile/sdkopen_czocr_model" \
+        "${PROJECT_DIR}/sdkopen/src/main/resources/rawfile/sdkopen_device_config.conf" \
         "${PROJECT_DIR}/build" \
         "${PROJECT_DIR}/outputs"
       shift
@@ -57,6 +58,7 @@ while [[ $# -gt 0 ]]; do
         pnpm run build
       )
       rm -rf "${SDK_OPEN_SOURCE_ROOT}/web/demo" "${SDK_OPEN_SOURCE_ROOT}/web/admin"
+      mkdir -p "${SDK_OPEN_SOURCE_ROOT}/web"
       cp -R "${SDK_OPEN_SOURCE_ROOT}/frontend/demo-site/dist" "${SDK_OPEN_SOURCE_ROOT}/web/demo"
       cp -R "${SDK_OPEN_SOURCE_ROOT}/frontend/admin-site/dist" "${SDK_OPEN_SOURCE_ROOT}/web/admin"
       shift

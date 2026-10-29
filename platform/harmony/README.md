@@ -17,8 +17,9 @@
 - 弹窗在独立进程运行，通过 Want 将启停命令交给隐藏的 UIAbility；状态通过本机
   HTTP 查询。服务仍由 `AppServiceExtensionAbility` 托管。
 - 打开托盘、打开弹窗或刷新状态均不自动启动服务。
-- 系统“退出”经 `AbilityStage.onPrepareTerminationAsync()` 先停止 AppService，再结束
-  托盘；声明 `PREPARE_APP_TERMINATE` 以接收正常退出回调。
+- 系统“退出”经 `AbilityStage.onPrepareTerminationAsync()` 先向 AppService 发送私有
+  prepare-stop RPC，等待设备和 USB 清理完成，再停止 AppService 并结束托盘；声明
+  `PREPARE_APP_TERMINATE` 以接收正常退出回调。
 
 2026-10-29 模拟器实测：双模块整包已安装，系统托盘弹窗和 Demo 网页可打开，服务启动、
 停止、重启及 HTTP/命令 WS 检查通过。已修复旧包缺少 FreeImage/FreeType/libzip
@@ -39,15 +40,17 @@ OHOS 图像、OCR、文档三方库继续复用。视频 WS 的认证会话及�
 - graphic 直接复用主程序 `PrivateGraphicProvider`，已接入页面处理、曲面展平、
   四点裁切、色彩模式、JPG/PNG 转换与缩放、缩略图和组合 `image.process` 流水线。
 - recognition 直接复用主程序 ZXing Provider，已接入真实条码/二维码识别。
-- auth、imageEnhance、OCR、OFD 复用主程序 private provider 和对应 OHOS 底层库；
-  graphic、recognition 也继续复用真实 provider。Harmony 不编入桌面设备、SANE、TWAIN
-  后端。
+- device、auth、imageEnhance、OCR、OFD 复用主程序 private provider 和对应 OHOS 底层库；
+  graphic、recognition 也继续复用真实 provider。device 使用主仓 USB Host/C++ UVC 后端，
+  Harmony 不编入桌面设备、SANE、TWAIN 后端。
 
 当前真实 graphic provider 覆盖 `image.process_page`、`image.apply_color_mode`、
-`image.process`、单图 `file.convert` 和 capture 流水线内部的缩略图生成。Harmony
-Harmony 设备/扫描、PDF/OFD/TIFF 文档转换中的桌面设备采集部分、在线增强网络服务和 TLS
-尚未接入；本地 auth 会话、图像增强、OCR 识别/文本提取和 OFD/PDF 文档处理已经接入
-实际 provider。在线增强是否可用取决于请求是否配置可访问的服务端点。
+`image.process`、单图 `file.convert` 和 capture 流水线内部的缩略图生成。USB UVC 设备
+已经接入真实 provider，保留原始 MJPEG，仅在寻边、翻页检测或显式 BGR 输出时解码。
+桌面 SANE/TWAIN 扫描和 TLS 尚未接入；本地 auth 会话、图像增强、OCR 识别/文本提取
+和 OFD/PDF 文档处理已经接入实际 provider。在线增强是否可用取决于请求是否配置可访问
+的服务端点。正式托盘设备采集的真机验收状态见
+[`摄像头集成记录`](../../doc/sdk_open_harmony_camera_integration.md)。
 
 `AppServiceExtensionAbility` 不能由 `hdc shell aa start` 直接启动。`sdkopen_tray`
 通过 `UIAbilityContext.startAppServiceExtensionAbility()`、
@@ -68,6 +71,9 @@ profile 的 `app-identifier` 配置 `appIdentifierAllowList`，不能填写 bund
 
 如果安装位置不同，可通过 `JAVA_HOME`、`NODE_BIN`、`HVIGOR` 和
 `DEVECO_SDK_HOME` 覆盖。
+
+当前工程使用 Hvigor modelVersion `6.1.1`、compile/target SDK `6.1.1(24)`，
+最低兼容 `6.0.2(22)`；native 显式传入 `OHOS_COMPATIBLE_SDK_VERSION=22`。
 
 ## 构建
 
@@ -141,7 +147,9 @@ exist`）。可先执行 `hdc -t <target> shell bm uninstall -n com.czur.sdkopen
 服务启动后会把 `resources/rawfile/sdkopen_web` 复制到服务沙箱，并在首次启动时把
 `resources/rawfile/sdkopen_czcv_model` 写入 `runtime/czcv_model`、把
 `resources/rawfile/sdkopen_czocr_model` 写入 `runtime/models`，然后启动内嵌 runtime。
-Harmony 服务实际启用 `auth`、`imageEnhance`、`ocr`、`ofd` provider；OCR 的通用模型文件
+每次启动同时把 `sdkopen_device_config.conf` 写入 `runtime/configs/device_config_compact.conf`，
+并在异步启动 native runtime 前安装 USB Host 适配器。Harmony 服务实际启用
+`device`、`auth`、`imageEnhance`、`ocr`、`ofd` provider；OCR 的通用模型文件
 来自 `third_party_repo/czocr/models/x86-64`，其中 `libczcv_ocr.so` 替换为
 `third_party_repo/czocr/lib/ohos/libczcv_ocr.so`，不打包 `libczcv_ocr_naive.so`。
 CMake 原生输出与 HAP rawfile 使用相同布局；模型版本更新后，服务会重新写入沙箱模型并删除旧 naive 库。
@@ -178,7 +186,7 @@ sdk-open/runtime/czcv_model
 - 默认关闭完整 `BUILD_SDK_PRIVATE`、`SDK_OPEN_USE_PRIVATE_PROVIDER` 和 TLS；Harmony
   target 只选择性编入主程序真实 provider 及其处理器，不带桌面设备/扫描模块。
 - HAP 链接 `sdk_open_runtime`、mock bundle 容器、主程序 auth/imageEnhance/OCR/OFD/
-  graphic/recognition provider，以及对应的 OpenCV/CZCV/CZOCR/MuPDF/OFD OHOS 运行库。
+  device/graphic/recognition provider，以及对应的 OpenCV/CZCV/CZOCR/MuPDF/OFD OHOS 运行库。
 - `sdkopen` feature 模块只声明 `SdkOpenServiceExtension`，不得添加页面或 ArkWeb；
   `sdkopen_tray` 是唯一 entry 模块，只负责服务控制和状态展示。
 - 网页资源和 CZCV 模型由模块 `hvigorfile.ts` 在构建时同步，生成目录不提交版本库。

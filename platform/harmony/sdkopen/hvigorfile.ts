@@ -11,6 +11,8 @@ const modelSourceRoot = path.join(thirdPartyRoot, 'czcv/models/arm64');
 const modelTargetRoot = path.resolve(__dirname, 'src/main/resources/rawfile/sdkopen_czcv_model');
 const ocrModelSourceRoot = path.join(thirdPartyRoot, 'czocr/models/x86-64');
 const ocrModelTargetRoot = path.resolve(__dirname, 'src/main/resources/rawfile/sdkopen_czocr_model');
+const deviceConfigSource = path.join(repoRoot, 'src/module/devices/device_config_compact.conf');
+const deviceConfigTarget = path.resolve(__dirname, 'src/main/resources/rawfile/sdkopen_device_config.conf');
 
 function copyTree(source: string, target: string): void {
   if (!fs.existsSync(source)) {
@@ -55,6 +57,8 @@ function syncCzocrModels(): void {
 syncSdkOpenWeb();
 syncCzcvModels();
 syncCzocrModels();
+fs.mkdirSync(path.dirname(deviceConfigTarget), { recursive: true });
+fs.copyFileSync(deviceConfigSource, deviceConfigTarget);
 
 export default {
   system: hapTasks,

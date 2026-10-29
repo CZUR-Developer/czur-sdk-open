@@ -38,6 +38,7 @@
 #include "image_write_utils.h"
 #include "opencv2/opencv.hpp"
 #include "private_sdk_support.h"
+#include "private_device_frame_codec.h"
 #include "support/private_sdk_executable_path.h"
 #include "support/private_sdk_logger.h"
 #include "sdk_status_code.h"
@@ -1142,10 +1143,15 @@ SdkVideoStartResult PrivateDeviceProvider::StartVideo(const SdkVideoStartRequest
     }
 
     editor::devices::DeviceManager* manager = editor::devices::DeviceManager::GetInstance();
-    editor::devices::DeviceStreamOptions stream_options;
-    stream_options.decodeFrame = output_pixel_format == "bgr24";
-    stream_options.deliverNativeMjpeg = !stream_options.decodeFrame;
-    stream_options.captureRawOnly = false;
+#if defined(OS_OHOS)
+    // The OHOS USB backend deliberately exposes complete native MJPEG frames.
+    // Decode only inside the provider when an SDK feature explicitly needs BGR.
+    const bool force_native_mjpeg = true;
+#else
+    const bool force_native_mjpeg = false;
+#endif
+    const editor::devices::DeviceStreamOptions stream_options =
+        device_frame_codec::BuildStreamOptions(output_pixel_format, force_native_mjpeg);
 
     // 底层 startStreaming 会根据导出目标映射 48M 固件拍照档位（含裁切方案）。
     device->setExportResolution(export_width, export_height);
@@ -1163,18 +1169,31 @@ SdkVideoStartResult PrivateDeviceProvider::StartVideo(const SdkVideoStartRequest
                 return;
             }
 
-            const size_t expected_size = static_cast<size_t>(frame->width) * static_cast<size_t>(frame->height) * 3;
             const bool has_native_mjpeg = !frame->native_mjpeg.empty();
-            bool needs_bgr_processing = RealtimeDetectRectsEnabled(request.device_id);
-            if (!needs_bgr_processing) {
+            const bool realtime_detect_rects = RealtimeDetectRectsEnabled(request.device_id);
+            bool turn_detect_enabled = false;
+            if (output_pixel_format != "bgr24" && !realtime_detect_rects) {
                 std::lock_guard<std::mutex> lock(state_mu_);
                 const std::map<std::string, TurnDetectState>::const_iterator it =
                     turn_detect_states_.find(request.device_id);
-                needs_bgr_processing =
-                    it != turn_detect_states_.end() && it->second.enabled;
+                turn_detect_enabled = it != turn_detect_states_.end() && it->second.enabled;
             }
+            const bool needs_bgr_processing = device_frame_codec::NeedsBgrFrame(
+                output_pixel_format, realtime_detect_rects, turn_detect_enabled);
+            size_t expected_size =
+                static_cast<size_t>(frame->width) * static_cast<size_t>(frame->height) * 3;
             if (frame->data.size() < expected_size &&
                 has_native_mjpeg && needs_bgr_processing && device) {
+#if defined(OS_OHOS)
+                if (!device_frame_codec::DecodeNativeMjpegFrame(frame)) {
+                    SDK_PRIVATE_LOG_WARN(
+                        "device.video_frame on_demand_decode_failed device={} dimensions={}x{} mjpeg_size={}",
+                        SafeDeviceId(request.device_id),
+                        frame->width,
+                        frame->height,
+                        static_cast<uint64_t>(frame->native_mjpeg.size()));
+                }
+#else
 #if defined(_WIN32)
                 editor::devices::RawFrameBuffer mjpeg_frame;
                 mjpeg_frame.data = frame->native_mjpeg.data();
@@ -1198,7 +1217,10 @@ SdkVideoStartResult PrivateDeviceProvider::StartVideo(const SdkVideoStartRequest
                         frame->height,
                         static_cast<uint64_t>(frame->native_mjpeg.size()));
                 }
+#endif
             }
+            expected_size =
+                static_cast<size_t>(frame->width) * static_cast<size_t>(frame->height) * 3;
             const bool has_valid_bgr =
                 frame->width > 0 && frame->height > 0 && frame->data.size() >= expected_size;
             std::vector<SdkRect4P> detected_rects;
@@ -2483,6 +2505,12 @@ std::string PrivateDeviceProvider::ResolveDeviceManagerLogPath() const {
 }
 
 std::string PrivateDeviceProvider::ResolveDeviceConfigPath() const {
+#if defined(OS_OHOS)
+    // The Harmony host stages the bundled device configuration into the
+    // service runtime directory before the provider is initialized. Host
+    // source paths and process cwd are not stable inside an installed HAP.
+    return device_frame_codec::OhosDeviceConfigPath(GetSdkRuntimeDir());
+#else
     const std::string exe_config_path = JoinPath(GetSdkExecutableDir(), "configs/device_config_compact.conf");
     if (FileExists(exe_config_path)) {
         return exe_config_path;
@@ -2501,6 +2529,7 @@ std::string PrivateDeviceProvider::ResolveDeviceConfigPath() const {
 #endif
 
     return cwd_config_path;
+#endif
 }
 
 } // namespace private_impl
