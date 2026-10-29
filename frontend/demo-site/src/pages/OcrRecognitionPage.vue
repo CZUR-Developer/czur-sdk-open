@@ -431,7 +431,6 @@ async function runOcrRecognize(): Promise<void> {
 async function runBarcodeDetect(): Promise<void> {
   await runActiveCommandWithUpload('barcode', 'recognition.barcode_detect', (inputUploadId) => ({
     input_upload_id: inputUploadId,
-    formats: ['qrcode', 'pdf417', 'code128', 'ean13', 'ean8'],
   }));
 }
 
