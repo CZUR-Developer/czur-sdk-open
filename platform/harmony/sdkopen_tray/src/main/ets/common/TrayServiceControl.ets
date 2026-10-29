@@ -1,12 +1,12 @@
-import { common, Want } from '@kit.AbilityKit';
+import { common, contextConstant } from '@kit.AbilityKit';
 import { http } from '@kit.NetworkKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import rpc from '@ohos.rpc';
 
-const SERVICE_WANT: Want = {
-  bundleName: 'com.czur.sdkopen', moduleName: 'sdkopen', abilityName: 'SdkOpenServiceExtension'
-};
-const REQUEST_PREPARE_STOP = 2;
+export interface TrayRuntimeControl {
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  stopForExit(): Promise<void>;
+}
 
 export interface ServiceState {
   running: boolean;
@@ -14,14 +14,21 @@ export interface ServiceState {
   message: string;
 }
 
-// The popup runs in a separate process and routes commands to the hidden UIAbility.
+// The popup imports only this control module, never the native runtime. Its
+// commands are delivered to the resident UIAbility in the tray's owner process.
 class TrayServiceControl {
   private context: common.UIAbilityContext | null = null;
   private popupContext: common.UIExtensionContext | null = null;
+  private runtime: TrayRuntimeControl | null = null;
+  private exiting: boolean = false;
   private state: ServiceState = { running: false, busy: false, message: '服务未启动' };
   private listeners: Array<(state: ServiceState) => void> = [];
 
-  initialize(context: common.UIAbilityContext): void { this.context = context; }
+  initialize(context: common.UIAbilityContext, runtime: TrayRuntimeControl): void {
+    this.context = context;
+    this.runtime = runtime;
+  }
+
   initializePopup(context: common.UIExtensionContext): void { this.popupContext = context; }
 
   async openDemo(): Promise<void> {
@@ -70,9 +77,9 @@ class TrayServiceControl {
   }
 
   async refresh(): Promise<void> {
-    if (this.state.busy) { return; }
+    if (this.state.busy || this.exiting) { return; }
     const running = await this.readStatus();
-    if (this.state.busy) { return; }
+    if (this.state.busy || this.exiting) { return; }
     this.state.running = running;
     this.state.message = running ? '服务运行中' : '服务未启动';
     this.notify();
@@ -86,127 +93,69 @@ class TrayServiceControl {
     throw new Error(expected ? '服务启动超时' : '服务端口仍可访问');
   }
 
-  private async sendPrepareStop(remote: rpc.IRemoteObject): Promise<void> {
-    const data = rpc.MessageSequence.create();
-    const reply = rpc.MessageSequence.create();
-    try {
-      data.writeInterfaceToken('com.czur.sdkopen.Service');
-      const result = await remote.sendMessageRequest(
-        REQUEST_PREPARE_STOP, data, reply, new rpc.MessageOption(rpc.MessageOption.TF_SYNC));
-      if (result.errCode !== 0) {
-        throw new Error(`服务清理请求失败：${result.errCode}`);
-      }
-      const response = reply.readString();
-      if (!response.includes('"success":true')) {
-        throw new Error(`服务清理失败：${response}`);
-      }
-    } finally {
-      data.reclaim();
-      reply.reclaim();
-    }
-  }
-
-  private async prepareStopIfRunning(): Promise<void> {
-    // AppService connect can start a stopped service on some platform builds.
-    // Probe the already-running endpoint first and never connect when absent.
-    if (!await this.readStatus()) { return; }
-    const context = this.context;
-    if (!context) { throw new Error('托盘控制入口尚未初始化'); }
-    await new Promise<void>((resolve, reject): void => {
-      let connectionId: number = -1;
-      let completed: boolean = false;
-      const finish = (error?: Error): void => {
-        if (completed) { return; }
-        completed = true;
-        const settle = (): void => { error ? reject(error) : resolve(); };
-        if (connectionId < 0) {
-          settle();
-          return;
-        }
-        const disconnectFailed = (disconnectError: Object): void => {
-            if (error) {
-              reject(error);
-              return;
-            }
-            // The prepare-stop RPC already drained native and USB ownership.
-            // A connection cleanup failure must not leave the AppService
-            // ability alive with a stopped runtime that cannot be restarted.
-            hilog.warn(0, 'SdkOpenTray',
-              'Service cleanup connection disconnect failed: %{public}s', String(disconnectError));
-            resolve();
-        };
-        try {
-          context.disconnectAppServiceExtensionAbility(connectionId)
-            .then(settle)
-            .catch(disconnectFailed);
-        } catch (disconnectError) {
-          disconnectFailed(disconnectError);
-        }
-      };
-      const options: common.ConnectOptions = {
-        onConnect: (_element, remote): void => {
-          this.sendPrepareStop(remote)
-            .then((): void => finish())
-            .catch((error: Error): void => finish(error));
-        },
-        onDisconnect: (_element): void => finish(new Error('服务清理连接提前断开')),
-        onFailed: (code: number): void => finish(new Error(`无法连接运行中的服务：${code}`))
-      };
-      try {
-        connectionId = context.connectAppServiceExtensionAbility(SERVICE_WANT, options);
-      } catch (error) {
-        finish(new Error(String(error)));
-      }
-    });
-  }
-
   async stopForExit(): Promise<void> {
-    if (!this.context) { return; }
-    await this.prepareStopIfRunning();
+    const runtime = this.runtime;
+    if (!runtime) { return; }
+    this.exiting = true;
+    this.state.busy = true;
+    this.notify();
     try {
-      await this.context.stopAppServiceExtensionAbility(SERVICE_WANT);
+      await runtime.stopForExit();
+      this.state.running = false;
+      this.state.message = '服务已停止';
+      hilog.info(0, 'SdkOpenTray', 'SDK Open runtime stopped before system tray exit');
     } catch (error) {
-      if (await this.readStatus()) { throw new Error(String(error)); }
+      this.exiting = false;
+      this.state.message = `退出清理失败：${String(error)}`;
+      throw new Error(String(error));
+    } finally {
+      this.state.busy = false;
+      this.notify();
     }
-    await this.waitForStatus(false, 5);
-    hilog.info(0, 'SdkOpenTray', 'SDK Open service stopped before system tray exit');
   }
 
   async execute(command: string): Promise<void> {
-    if (this.state.busy) { return; }
+    if (this.state.busy || this.exiting) { return; }
     this.state.busy = true;
     this.state.message = command === 'start' ? '正在启动服务…' : '正在停止服务…';
     this.notify();
     try {
-      const context = this.context;
-      if (!context && this.popupContext) {
-        await this.popupContext.startAbility({
-          bundleName: 'com.czur.sdkopen', moduleName: 'sdkopen_tray', abilityName: 'SdkOpenTrayAbility',
-          parameters: { serviceCommand: command }
-        });
-        await this.waitForStatus(command === 'start');
-      } else if (!context) {
-        throw new Error('托盘控制入口尚未初始化');
-      } else if (command === 'start') {
-        await context.startAppServiceExtensionAbility(SERVICE_WANT);
-        await this.waitForStatus(true);
-      } else if (command === 'stop') {
-        await this.prepareStopIfRunning();
-        await context.stopAppServiceExtensionAbility(SERVICE_WANT);
-        await this.waitForStatus(false);
-      } else {
+      const runtime = this.runtime;
+      if (command !== 'start' && command !== 'stop') {
         throw new Error('未知的服务控制操作');
       }
+      if (runtime && this.context) {
+        if (command === 'start') {
+          await runtime.start();
+        } else {
+          await runtime.stop();
+        }
+      } else if (this.popupContext) {
+        await this.popupContext.startAbility({
+          bundleName: 'com.czur.opensdk', moduleName: 'sdkopen_tray', abilityName: 'SdkOpenTrayAbility',
+          parameters: { serviceCommand: command }
+        }, {
+          processMode: contextConstant.ProcessMode.ATTACH_TO_STATUS_BAR_ITEM,
+          startupVisibility: contextConstant.StartupVisibility.STARTUP_HIDE
+        });
+        await this.waitForStatus(command === 'start');
+      } else {
+        throw new Error('托盘控制入口尚未初始化');
+      }
+      if (this.exiting) { return; }
       this.state.running = command === 'start';
       this.state.message = this.state.running ? '服务运行中' : '服务已停止';
       hilog.info(0, 'SdkOpenTray', 'SDK Open system tray command completed: %{public}s', command);
     } catch (error) {
+      if (this.exiting) { return; }
       this.state.running = await this.readStatus();
       this.state.message = `操作失败：${String(error)}`;
       hilog.error(0, 'SdkOpenTray', 'SDK Open system tray command failed: %{public}s', String(error));
     } finally {
-      this.state.busy = false;
-      this.notify();
+      if (!this.exiting) {
+        this.state.busy = false;
+        this.notify();
+      }
     }
   }
 }

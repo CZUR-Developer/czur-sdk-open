@@ -1,5 +1,22 @@
 {
   "apiType": "stageMode",
+  "buildOption": {
+    "externalNativeOptions": {
+      "path": "../CMakeLists.txt",
+      "arguments": [
+        "-DOHOS_PLATFORM=OHOS",
+        "-DOHOS_COMPATIBLE_SDK_VERSION=22",
+        "-DOHOS_STL=c++_shared",
+        "-DSDK_OPEN_ENABLE_TLS=OFF",
+        "-DSDK_OPEN_USE_PRIVATE_PROVIDER=OFF",
+        "-DBUILD_SDK_PRIVATE=OFF"
+      ],
+      "cFlags": "-fPIC",
+      "cppFlags": "-std=c++11",
+      "abiFilters": ["arm64-v8a"],
+      "targets": ["sdkopen_harmony"]
+    }
+  },
   "targets": [
     { "name": "default", "runtimeOS": "HarmonyOS" }
   ]

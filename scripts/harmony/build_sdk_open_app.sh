@@ -15,10 +15,11 @@ usage() {
   cat <<USAGE
 Usage: $(basename "$0") [--clean] [--build-web] [--release]
 
-Build the SDK Open HarmonyOS application package. The sdkopen feature HAP hosts
-the AppServiceExtensionAbility and the sdkopen_tray entry HAP controls its
-lifecycle. This project is not listed in the CapEditor root build-profile.json5
-and does not change desktop build.sh/src/sdk_open/scripts/package-sdkopen.sh behavior.
+Build the SDK Open HarmonyOS tray application package. The sdkopen_tray entry
+HAP owns the native runtime and USB Host lifecycle; no feature HAP or
+AppServiceExtensionAbility is required. This project is not listed in the
+CapEditor root build-profile.json5 and does not change desktop build.sh or
+src/sdk_open/scripts/package-sdkopen.sh behavior.
 
 Environment:
   DEVECO_SDK_HOME  DevEco SDK root (default: ${SDK_HOME})
@@ -35,13 +36,12 @@ while [[ $# -gt 0 ]]; do
     --clean)
       rm -rf \
         "${PROJECT_DIR}/.hvigor" \
-        "${PROJECT_DIR}/sdkopen/.cxx" \
-        "${PROJECT_DIR}/sdkopen/build" \
+        "${PROJECT_DIR}/sdkopen_tray/.cxx" \
         "${PROJECT_DIR}/sdkopen_tray/build" \
-        "${PROJECT_DIR}/sdkopen/src/main/resources/rawfile/sdkopen_web" \
-        "${PROJECT_DIR}/sdkopen/src/main/resources/rawfile/sdkopen_czcv_model" \
-        "${PROJECT_DIR}/sdkopen/src/main/resources/rawfile/sdkopen_czocr_model" \
-        "${PROJECT_DIR}/sdkopen/src/main/resources/rawfile/sdkopen_device_config.conf" \
+        "${PROJECT_DIR}/sdkopen_tray/src/main/resources/rawfile/sdkopen_web" \
+        "${PROJECT_DIR}/sdkopen_tray/src/main/resources/rawfile/sdkopen_czcv_model" \
+        "${PROJECT_DIR}/sdkopen_tray/src/main/resources/rawfile/sdkopen_czocr_model" \
+        "${PROJECT_DIR}/sdkopen_tray/src/main/resources/rawfile/sdkopen_device_config.conf" \
         "${PROJECT_DIR}/build" \
         "${PROJECT_DIR}/outputs"
       shift
@@ -92,4 +92,4 @@ JAVA_HOME="${JAVA_HOME}" \
 "${HVIGOR}" --mode project -p product=default -p "buildMode=${BUILD_MODE}" \
   assembleApp --analyze=normal --parallel --incremental --no-daemon
 python3 "${SDK_OPEN_SOURCE_ROOT}/scripts/harmony/verify_sdk_open_native.py" \
-  "${PROJECT_DIR}/sdkopen/build/default/outputs/default/sdkopen-default-unsigned.hap" --sdk "${SDK_HOME}"
+  "${PROJECT_DIR}/sdkopen_tray/build/default/outputs/default/sdkopen_tray-default-unsigned.hap" --sdk "${SDK_HOME}"

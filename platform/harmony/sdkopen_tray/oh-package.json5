@@ -1,8 +1,11 @@
 {
   "name": "sdkopen_tray",
   "version": "1.0.0",
-  "description": "CZUR SDK Open HarmonyOS tray controller.",
+  "description": "CZUR Open SDK HarmonyOS tray runtime.",
   "main": "",
   "author": "CZUR",
-  "license": ""
+  "license": "",
+  "dependencies": {
+    "libsdkopen_harmony.so": "file:./src/main/cpp/types/libsdkopen_harmony"
+  }
 }

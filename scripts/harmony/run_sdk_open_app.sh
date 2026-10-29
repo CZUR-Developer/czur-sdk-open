@@ -7,7 +7,7 @@ SDK_HOME="${DEVECO_SDK_HOME:-/Applications/DevEco-Studio.app/Contents/sdk}"
 HDC="${HDC:-${SDK_HOME}/default/openharmony/toolchains/hdc}"
 APP_PATH="${SDK_OPEN_HARMONY_APP:-${SDK_OPEN_SOURCE_ROOT}/platform/harmony/build/outputs/default/harmony-default-unsigned.app}"
 TARGET="${SDK_OPEN_HARMONY_TARGET:-}"
-BUNDLE="${SDK_OPEN_HARMONY_BUNDLE:-com.czur.sdkopen}"
+BUNDLE="${SDK_OPEN_HARMONY_BUNDLE:-com.czur.opensdk}"
 MODULE="${SDK_OPEN_HARMONY_MODULE:-sdkopen_tray}"
 ABILITY="${SDK_OPEN_HARMONY_ABILITY:-SdkOpenLauncherAbility}"
 SKIP_INSTALL=0
@@ -18,10 +18,10 @@ usage() {
   cat <<USAGE
 Usage: $(basename "$0") [--app <signed.app>] [--target <device>] [--skip-install] [--no-launch] [--smoke]
 
-Install the SDK Open HarmonyOS application containing the tray entry HAP and
-the sdkopen service feature HAP. By default the script opens the tray controller;
-the user starts/stops the service from that controller. With --smoke, it verifies
-a service that has already been started from the tray.
+Install the SDK Open HarmonyOS tray application. The single sdkopen_tray entry
+HAP owns the native runtime and USB Host lifecycle. By default the script opens
+the tray launcher. Launching the tray does not start the runtime: click Start
+Service in the tray menu or popup before using --smoke.
 The default build output is unsigned; pass a signed .app for normal devices.
 
 Environment:
@@ -118,8 +118,7 @@ if [[ "${SKIP_INSTALL}" == "0" ]]; then
     hdc_cmd "${HDC_ARGS[@]}" shell "rm -rf ${DEVICE_PACKAGE_DIR}" >/dev/null 2>&1 || true
   }
   trap cleanup_install EXIT
-  # bm accepts a directory of HAPs, not the outer .app archive. Install the
-  # entry and feature together; separate hdc installs cannot migrate modules.
+  # bm accepts a directory of HAPs, not the outer .app archive.
   unzip -q -j "${APP_PATH}" '*.hap' -d "${PACKAGE_DIR}" || fail "cannot extract application HAPs"
   HAP_FILES=("${PACKAGE_DIR}"/*.hap)
   [[ -f "${HAP_FILES[0]}" ]] || fail "no HAP found in ${APP_PATH}"
@@ -138,7 +137,7 @@ if [[ "${SKIP_INSTALL}" == "0" ]]; then
   # error (for example, insufficient space on the device). Do not report a
   # package as installed unless the daemon response is successful.
   if [[ "${INSTALL_OUTPUT}" != *'install bundle successfully.'* ]]; then
-    fail "HAP installation was rejected: ${INSTALL_OUTPUT}. For legacy entry-to-feature migration, see src/sdk_open/platform/harmony/README.md; this script does not uninstall application data."
+    fail "HAP installation was rejected: ${INSTALL_OUTPUT}. The script does not uninstall applications or delete sandbox data; com.czur.sdkopen and com.czur.opensdk are separate bundles."
   fi
   PACKAGE_INFO="$(hdc_cmd "${HDC_ARGS[@]}" shell "bm dump -n ${BUNDLE}" 2>&1 || true)"
   if ! printf '%s\n' "${PACKAGE_INFO}" | grep -q "\"bundleName\": \"${BUNDLE}\""; then
@@ -151,24 +150,24 @@ fi
 if [[ "${LAUNCH_TRAY}" == "1" ]]; then
   START_OUTPUT="$(hdc_cmd "${HDC_ARGS[@]}" shell \
     "aa start -b ${BUNDLE} -m ${MODULE} -a ${ABILITY}" 2>&1)" || \
-    fail "tray controller start failed: ${START_OUTPUT}"
+    fail "tray launcher start failed: ${START_OUTPUT}"
   printf '%s\n' "${START_OUTPUT}"
-  [[ "${START_OUTPUT}" == *'start ability successfully.'* ]] || fail "controller start rejected: ${START_OUTPUT}"
+  [[ "${START_OUTPUT}" == *'start ability successfully.'* ]] || fail "tray launcher start rejected: ${START_OUTPUT}"
 fi
 
 if [[ "${RUN_SMOKE}" == "0" ]]; then
-  printf '[sdk-open-harmony] tray controller ready: %s/%s/%s\n' "${BUNDLE}" "${MODULE}" "${ABILITY}"
-  printf '[sdk-open-harmony] use the tray controller to start or stop the sdkopen service\n'
+  printf '[sdk-open-harmony] tray launcher ready: %s/%s/%s\n' "${BUNDLE}" "${MODULE}" "${ABILITY}"
+  printf '[sdk-open-harmony] click Start Service in the tray menu or popup to start the runtime\n'
   exit 0
 fi
 
-PID="$(hdc_cmd "${HDC_ARGS[@]}" shell "pidof ${BUNDLE}:appService" 2>/dev/null | tr -d '\r' || true)"
+PID="$(hdc_cmd "${HDC_ARGS[@]}" shell "pidof ${BUNDLE}" 2>/dev/null | tr -d '\r' || true)"
 if [[ -z "${PID}" ]]; then
-  fail "service process is not running; start the service from the controller before --smoke"
+  fail "tray process is not running; launch ${ABILITY}, then click Start Service before --smoke"
 fi
 
-printf '[sdk-open-harmony] service running pid=%s admin=http://127.0.0.1:17080/\n' "${PID}"
-printf '[sdk-open-harmony] logs: %s -t %s shell hilog -x | rg -i '\''SdkOpenService|sdk_open'\''\n' "${HDC}" "${TARGET}"
+printf '[sdk-open-harmony] tray runtime running pid=%s admin=http://127.0.0.1:17080/\n' "${PID}"
+printf '[sdk-open-harmony] logs: %s -t %s shell hilog -x | rg -i '\''SdkOpenRuntime|sdk_open'\''\n' "${HDC}" "${TARGET}"
 
 if [[ "${RUN_SMOKE}" == "1" ]]; then
   ADMIN_FORWARD="${SDK_OPEN_HARMONY_ADMIN_FORWARD:-27080}"
@@ -193,7 +192,8 @@ if [[ "${RUN_SMOKE}" == "1" ]]; then
     fi
     sleep 1
   done
-  [[ "${HEALTH_JSON}" == *'"ok":true'* ]] || fail "admin healthz check failed"
+  [[ "${HEALTH_JSON}" == *'"ok":true'* ]] || \
+    fail "admin healthz check failed; click Start Service in the tray menu or popup before --smoke"
 
   STATUS_JSON=""
   for _ in 1 2 3 4 5 6 7 8 9 10; do
@@ -214,16 +214,16 @@ if [[ "${RUN_SMOKE}" == "1" ]]; then
     "http://127.0.0.1:${ASSET_FORWARD}/healthz")"
   [[ "${ASSET_HEALTH}" == *'"ok":true'* ]] || fail "asset healthz check failed"
 
-  SERVICE_LOGS=""
+  RUNTIME_LOGS=""
   for _ in 1 2 3 4 5 6 7 8 9 10; do
-    SERVICE_LOGS="$(hdc_cmd "${HDC_ARGS[@]}" shell \
-      "hilog -x | grep -E 'SdkOpenService.*service runtime started'" 2>/dev/null || true)"
-    if [[ "${SERVICE_LOGS}" == *'SDK Open service runtime started'* ]]; then
+    RUNTIME_LOGS="$(hdc_cmd "${HDC_ARGS[@]}" shell \
+      "hilog -x | grep -E 'SdkOpenRuntime.*SDK Open tray runtime started'" 2>/dev/null || true)"
+    if [[ "${RUNTIME_LOGS}" == *'SDK Open tray runtime started'* ]]; then
       break
     fi
     sleep 1
   done
-  [[ "${SERVICE_LOGS}" == *'SDK Open service runtime started'* ]] || fail "service-started log not found"
+  [[ "${RUNTIME_LOGS}" == *'SDK Open tray runtime started'* ]] || fail "tray-runtime-started log not found"
 
-  printf '[sdk-open-harmony] PASS smoke service/health/status/demo/asset\n'
+  printf '[sdk-open-harmony] PASS smoke tray-runtime/health/status/demo/asset\n'
 fi

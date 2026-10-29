@@ -20,13 +20,6 @@
   },
   "modules": [
     {
-      "name": "sdkopen",
-      "srcPath": "./sdkopen",
-      "targets": [
-        { "name": "default", "applyToProducts": ["default"] }
-      ]
-    },
-    {
       "name": "sdkopen_tray",
       "srcPath": "./sdkopen_tray",
       "targets": [
