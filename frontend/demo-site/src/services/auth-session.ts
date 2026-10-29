@@ -41,6 +41,10 @@ interface RuntimeProcessInfo {
   executablePath?: string;
 }
 
+interface RuntimeSoftwareInfo {
+  platform?: string;
+}
+
 interface AuthSessionState {
   token: string;
   sessionToken: string;
@@ -52,6 +56,7 @@ interface AuthSessionState {
   videoEndpoint: string;
   authContext: AuthContextPayload | null;
   authDiagnostics: RuntimeAuthDiagnostics | null;
+  runtimePlatform: string;
   runtimeProcess: RuntimeProcessInfo | null;
   lastConnectedAt: string;
   commandCheckedAt: string;
@@ -75,6 +80,7 @@ const state = reactive<AuthSessionState>({
   videoEndpoint: buildVideoEndpointLabel(),
   authContext: null,
   authDiagnostics: null,
+  runtimePlatform: '',
   runtimeProcess: null,
   lastConnectedAt: '',
   commandCheckedAt: '',
@@ -296,6 +302,7 @@ export async function checkCommandConnectivity(activeClient: CommandWsClient | n
 export async function loadRuntimeInfo(activeClient: CommandWsClient | null = client): Promise<void> {
   if (!activeClient) {
     state.authDiagnostics = null;
+    state.runtimePlatform = '';
     state.runtimeProcess = null;
     return;
   }
@@ -303,10 +310,12 @@ export async function loadRuntimeInfo(activeClient: CommandWsClient | null = cli
   const response = await sendTrackedCommand(activeClient, 'system.info');
   if (!isOkResponse(response)) {
     state.authDiagnostics = null;
+    state.runtimePlatform = '';
     state.runtimeProcess = null;
     return;
   }
   state.authDiagnostics = asRuntimeAuthDiagnostics(response.data.authDiagnostics);
+  state.runtimePlatform = asRuntimeSoftwareInfo(response.data.software)?.platform ?? '';
   state.runtimeProcess = asRuntimeProcessInfo(response.data.process);
 }
 
@@ -364,6 +373,7 @@ export function onCommandEvent(listener: (event: CommandEvent<Record<string, unk
 function clearRuntimeState(): void {
   clearSession();
   state.authDiagnostics = null;
+  state.runtimePlatform = '';
   state.runtimeProcess = null;
   state.commandState = 'idle';
   state.refreshState = 'idle';
@@ -531,6 +541,13 @@ function asRuntimeProcessInfo(value: unknown): RuntimeProcessInfo | null {
     return null;
   }
   return value as RuntimeProcessInfo;
+}
+
+function asRuntimeSoftwareInfo(value: unknown): RuntimeSoftwareInfo | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  return value as RuntimeSoftwareInfo;
 }
 
 function asNumber(value: unknown): number {

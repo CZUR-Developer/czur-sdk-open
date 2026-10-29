@@ -363,6 +363,8 @@ wss://127.0.0.1:18090
 
 目标格式支持 `jpg`、`jpeg`、`png`、`tiff`、`pdf`、`ofd`。JPG/PNG 目标是逐页/逐图输出；PDF/OFD/TIFF 目标既可以多页合一，也可以逐页/逐图输出。`export_type: "single-page"` 会把输出写到 `target.dir`，响应返回 `output_paths`。
 
+`system.info` 的 `software.platform` 返回服务运行平台（`harmony`、`windows`、`macos` 或 `linux`）。文件转换 Demo 在鸿蒙服务上默认将输出路径和目录留空，由 SDK 写入应用沙箱任务资产目录；桌面服务沿用原有默认路径。平台判断依据服务响应，与访问 Demo 的浏览器系统无关。手动指定的路径仍按请求使用，必须是服务进程可写的路径。
+
 `file.convert` 会把输入统一视为有序页集合。图片输入是一图一页；PDF/OFD/TIFF 输入可以通过 `source.pages` 选择页码，页码从 1 开始，支持 `"all"` 或 `"1,3-5"`。
 
 | 输入 | 目标 | `export_type` | 行为 |

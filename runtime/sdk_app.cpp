@@ -45,6 +45,18 @@ bool IsEnvConfigured(const char* name) {
     return value != nullptr && value[0] != '\0';
 }
 
+const char* RuntimePlatform() {
+#if defined(__OHOS__) || defined(OS_HARMONYOS) || defined(SDK_OPEN_HARMONY)
+    return "harmony";
+#elif defined(_WIN32)
+    return "windows";
+#elif defined(__APPLE__)
+    return "macos";
+#else
+    return "linux";
+#endif
+}
+
 int CurrentProcessId() {
 #if defined(_WIN32)
     return static_cast<int>(GetCurrentProcessId());
@@ -675,6 +687,7 @@ Json SdkApp::BuildStatusJson() const {
         {"bindHost", config_.bind_host},
         {"software",
          Json{{"version", SDK_OPEN_VERSION_STRING},
+              {"platform", RuntimePlatform()},
               {"build", SDK_OPEN_BUILD_NUMBER},
               {"protocolVersion", "2.0.0"}}},
         {"process",
@@ -771,6 +784,7 @@ Json SdkApp::BuildSystemJson() const {
     return Json{
         {"software",
          Json{{"name", "sdk_open"},
+              {"platform", RuntimePlatform()},
               {"version", SDK_OPEN_VERSION_STRING},
               {"build", SDK_OPEN_BUILD_NUMBER},
               {"stage", SDK_OPEN_STAGE},

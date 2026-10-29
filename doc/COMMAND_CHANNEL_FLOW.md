@@ -365,6 +365,8 @@ The recommended structured shape accepts one or more uploaded images, or one upl
 
 Supported targets are `jpg`, `jpeg`, `png`, `tiff`, `pdf`, and `ofd`. JPG/PNG targets are per-page/per-image outputs. PDF/OFD/TIFF targets can be either one multi-page file or one file per page/image. `export_type: "single-page"` writes outputs to `target.dir` and returns `output_paths`.
 
+`system.info` reports the service platform in `software.platform` (`harmony`, `windows`, `macos`, or `linux`). For Harmony services, the file conversion Demo leaves the output path and directory empty by default so SDK writes into its application sandbox task asset directory. Desktop services retain their existing defaults. Platform selection uses the service response, independently of the browser OS. Explicit paths are still honored and must be writable by the service process.
+
 `file.convert` treats every source as an ordered page set. Image inputs contribute one page per image. PDF/OFD/TIFF inputs can be split or converted by page with `source.pages`, using a 1-based expression such as `"all"` or `"1,3-5"`.
 
 | Source | Target | `export_type` | Behavior |

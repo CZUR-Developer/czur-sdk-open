@@ -109,8 +109,18 @@
 
           <label class="field-label">
             {{ exportType === 'single-page' ? t('pages.fileConversion.outputDir') : t('pages.fileConversion.outputPath') }}
-            <input v-if="exportType === 'single-page'" v-model="outputDir" class="field-input" />
-            <input v-else v-model="outputPath" class="field-input" />
+            <input
+              v-if="exportType === 'single-page'"
+              v-model="outputDir"
+              class="field-input"
+              :placeholder="isHarmonyRuntime ? t('pages.fileConversion.managedOutputDir') : undefined"
+            />
+            <input
+              v-else
+              v-model="outputPath"
+              class="field-input"
+              :placeholder="isHarmonyRuntime ? t('pages.fileConversion.managedOutputPath') : undefined"
+            />
           </label>
 
           <div class="grid gap-3 sm:grid-cols-3">
@@ -222,6 +232,8 @@ const quality = ref(90);
 const tiffColor = ref('color');
 const tiffCompression = ref('lzw');
 
+const isHarmonyRuntime = computed(() => authSessionState.runtimePlatform.toLowerCase() === 'harmony');
+
 const activePreviewUrl = computed(() => selectedImages.value[activeImageIndex.value]?.previewUrl ?? '');
 const uploadIds = computed(() => selectedImages.value.map((image) => image.uploadId).filter(Boolean));
 const uploadedCount = computed(() => uploadIds.value.length);
@@ -321,6 +333,18 @@ watch(targetType, (next) => {
   outputPath.value = defaultOutputPath(next);
   if (next === 'png' || next === 'jpg') {
     exportType.value = 'single-page';
+  }
+});
+
+watch(isHarmonyRuntime, (harmony) => {
+  if (!harmony) {
+    return;
+  }
+  if (outputPath.value.startsWith('/tmp/czur-sdk-file-convert-')) {
+    outputPath.value = '';
+  }
+  if (outputDir.value.startsWith('/tmp/czur-sdk-file-convert-')) {
+    outputDir.value = '';
   }
 });
 
@@ -544,10 +568,16 @@ function asString(value: unknown): string {
 }
 
 function defaultOutputPath(format: string): string {
+  if (authSessionState.runtimePlatform.toLowerCase() === 'harmony') {
+    return '';
+  }
   return `/tmp/czur-sdk-file-convert-${Date.now().toString(36)}.${format === 'jpg' ? 'jpg' : format}`;
 }
 
 function defaultOutputDir(): string {
+  if (authSessionState.runtimePlatform.toLowerCase() === 'harmony') {
+    return '';
+  }
   return `/tmp/czur-sdk-file-convert-${Date.now().toString(36)}`;
 }
 
