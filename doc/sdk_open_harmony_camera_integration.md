@@ -105,7 +105,7 @@ python3 -m unittest src/sdk_open/test/harmony_lifecycle_contract_test.py -v
 
 ## 单 HAP 托盘生命周期回归
 
-当前 `SdkOpenRuntime`、隐藏主体 Ability 和弹窗命令路由的本地回归 19/19 通过。测试实际
+当前 `SdkOpenRuntime`、隐藏主体 Ability 和弹窗命令路由的本地回归 21/21 通过。测试实际
 转译并执行 ArkTS 生命周期源码，使用 Harmony API stub 验证串行启停、退出时拒绝排队启动、
 资源准备中取消、文件部分写入和异常关闭，以及 native/USB 清理失败后的重试；同时检查
 弹窗不持有 native、冷启动命令不会遗漏、同进程 Ability 重建后仍能启动。
@@ -123,15 +123,42 @@ python3 -m unittest -v src/sdk_open/test/harmony_lifecycle_contract_test.py
 - Demo `ocr-language.test.mjs` 中，Demo 语言表比主仓 enabled 集合少 `vi`（越南语），
   前端测试结果为 2/3。
 
-## 真机待验收项
+## 真机集成验收
 
-当前 `192.168.1.116:8007` 在线，但正式 `com.czur.opensdk` 签名/profile 尚未准备，API KEY
-尚未提供。因此本记录没有正式 SDK 真机或 Demo 采集通过结论。
+2026-10-29 已使用匹配 `com.czur.opensdk` 的 debug profile 在 `192.168.1.116:8007`
+的 HarmonyOS 6.0.0.130 2in1 真机安装运行。2026-10-30 用户完成 HTTPS Demo 授权，
+真实 ET 预览和厂商拍照已通过；正式长测与恢复测试见
+[sdk_open_harmony_acceptance_2026-10-30.md](sdk_open_harmony_acceptance_2026-10-30.md)。
+安装包的模块 HAP 和 APP 内嵌 HAP 均验签通过；打包脚本已修复 Hvigor
+外层 signed APP 仍包含 unsigned HAP 的问题。
+
+点击启动后的 native crash 已定位到 `httplib::Request::~Request()`：Harmony providers
+与 runtime 的 `CPPHTTPLIB_OPENSSL_SUPPORT` 定义不一致，造成 Request 布局和弱 inline
+析构实现不一致。修复后真机 HTTP/Demo 可访问，托盘关闭服务后端口释放，再启动恢复。
+Faultlogger 复查未见新增 `com.czur.opensdk` crash（保留旧 20:47 的记录）。
+
+当前真机协议结果：
+
+| 验证 | 结果与边界 |
+| --- | --- |
+| HTTP health/status/asset、真机浏览器 HTTP Demo | 通过 |
+| HTTP+HTTPS health 200 次、8 并发 | 200/200，最大143 ms，均值61.54 ms，含 hdc 转发 |
+| command WS 17090 / WSS 18090 | 均101，`system.info` 均 code=0 |
+| video WS 17091 / WSS 18091，无session | 均401，符合鉴权要求；授权后18091持续传输真实ET预览 |
+| HTTPS Demo 18081、asset 18082 | 真机用户CA安装后正常加载，无证书警告；拍照缩略图可显示 |
+| 服务证书 SAN | localhost、sdk-runtime.localhost、127.0.0.1 |
+| 本地 C++ targeted regressions | TLS证书与两项视频WS测试3/3 |
+| ArkTS生命周期及签名打包回归 | 25/25 |
+
+最初的 TLS 脚本探测跳过客户端 CA 校验，仅用于确认握手和 RPC；随后已完成真机浏览器
+信任验收。系统证书安装从无窗口的隐藏 Ability 发起会报 `uiContent is null`，修复为独立
+可见 UIAbility；用户确认安装当前用户根 CA 后，HTTPS Demo 无警告加载，WSS 鉴权和
+真实采集成功。私钥只留应用沙箱。
 
 当前单 HAP 托盘形态不申请 `SUPPORT_APP_SERVICE_EXTENSION`，也不依赖
 `START_INVISIBLE_ABILITY`；仍须生成与新包名匹配的普通签名/profile。旧包名 profile 和沙箱
 不能迁移。若旧 `com.czur.sdkopen` runtime 仍运行，须先从旧托盘关闭它以释放相同的本机
-端口；不需要卸载旧包或删除旧数据。签名就绪后用现有安装入口安装整包，启动托盘并点击
+端口；不需要卸载旧包或删除旧数据。使用现有安装入口安装签名整包，启动托盘并点击
 “启动服务”，再打开 Demo、输入 API KEY，然后执行：
 
 1. ET `04FC:6333` 枚举、1536×1152 预览、厂商拍照及结果显示；FPS 读取实际协商值。

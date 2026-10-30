@@ -379,7 +379,7 @@ X509* CreateLeafCertificate(EVP_PKEY* leaf_key, X509* root, EVP_PKEY* root_key, 
     if (!SetCertificateTimes(certificate, days) || !SetExtension(certificate, 0, "basicConstraints", "critical,CA:FALSE") ||
         !SetExtension(certificate, 1, "keyUsage", "critical,digitalSignature,keyEncipherment") ||
         !SetExtension(certificate, 0, "extendedKeyUsage", "serverAuth") ||
-        !SetExtension(certificate, 0, "subjectAltName", "DNS:sdk-runtime.localhost") ||
+        !SetExtension(certificate, 0, "subjectAltName", "DNS:sdk-runtime.localhost,DNS:localhost,IP:127.0.0.1") ||
         X509_sign(certificate, root_key, EVP_sha256()) <= 0) {
         X509_free(certificate);
         return NULL;

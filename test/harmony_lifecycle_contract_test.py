@@ -76,7 +76,11 @@ const success = '{"success":true}';
 async function runtimeScenario(name) {
   const events = [];
   const instances = [];
-  const controls = { starts: [], stops: [], shutdowns: [], writes: [], reads: [] };
+  const controls = {
+    starts: [], stops: [], shutdowns: [], writes: [], reads: [],
+    existingPaths: new Set(), openedPaths: [], readAttempts: new Map(),
+    readFailures: new Map()
+  };
   class FakeUsbHostTransport {
     constructor() { instances.push(this); }
     attach() { events.push('usb.attach'); return true; }
@@ -102,7 +106,12 @@ async function runtimeScenario(name) {
   const fileIo = {
     OpenMode: { READ_WRITE: 1, CREATE: 2, TRUNC: 4 },
     async mkdir() {},
-    async open() { events.push('file.open'); return { fd: nextFd++ }; },
+    async open(path) {
+      events.push('file.open');
+      controls.openedPaths.push(path);
+      controls.existingPaths.add(path);
+      return { fd: nextFd++ };
+    },
     async write(fd, buffer, options) {
       events.push(`file.write:${options.offset}:${buffer.byteLength}`);
       const action = controls.writes.shift();
@@ -110,12 +119,21 @@ async function runtimeScenario(name) {
     },
     async close() { events.push('file.close'); },
     async unlink() {},
-    async stat() { throw new Error('missing'); }
+    async stat(path) {
+      if (controls.existingPaths.has(path)) return {};
+      throw new Error('missing');
+    }
   };
   const resourceManager = {
     async getRawFileList() { throw new Error('leaf'); },
     async getRawFileContent(path) {
       events.push(`resource.read:${path}`);
+      controls.readAttempts.set(path, (controls.readAttempts.get(path) || 0) + 1);
+      const failures = controls.readFailures.get(path) || 0;
+      if (failures > 0) {
+        controls.readFailures.set(path, failures - 1);
+        throw new Error(`resource read failed: ${path}`);
+      }
       const action = controls.reads.shift();
       return action ? await action(path) : new Uint8Array([1, 2, 3]);
     }
@@ -259,6 +277,28 @@ async function runtimeScenario(name) {
     ]);
     return;
   }
+  if (name === 'czcv-model-v1-upgrade') {
+    const modelDir = '/tmp/sdkopen-test/sdk-open/runtime/czcv_model';
+    controls.existingPaths.add(`${modelDir}/.sdkopen-czcv-model-v1`);
+    await runtime.start();
+    assert.strictEqual(controls.readAttempts.get('sdkopen_czcv_model'), 1);
+    assert(controls.openedPaths.includes(`${modelDir}/.sdkopen-czcv-model-v2`));
+    await runtime.stop();
+    return;
+  }
+  if (name === 'czcv-model-copy-retry') {
+    const stampPath =
+      '/tmp/sdkopen-test/sdk-open/runtime/czcv_model/.sdkopen-czcv-model-v2';
+    controls.readFailures.set('sdkopen_czcv_model', 1);
+    await assert.rejects(runtime.start(), /resource read failed: sdkopen_czcv_model/);
+    assert.strictEqual(controls.readAttempts.get('sdkopen_czcv_model'), 1);
+    assert(!controls.openedPaths.includes(stampPath));
+    await runtime.start();
+    assert.strictEqual(controls.readAttempts.get('sdkopen_czcv_model'), 2);
+    assert(controls.openedPaths.includes(stampPath));
+    await runtime.stop();
+    return;
+  }
   if (name === 'exit-during-staging') {
     const writeGate = deferred();
     controls.reads.push(async () => new Uint8Array(2 * 1024 * 1024 + 1));
@@ -298,6 +338,28 @@ function controllerStubs(status) {
         destroy() {}
       }; }
     } },
+    '@kit.CoreFileKit': { fileIo: {
+      OpenMode: { READ_ONLY: 1 },
+      async stat(path) {
+        status.certificatePath = path;
+        return { size: 3, isFile() { return true; } };
+      },
+      async open() { return { fd: 1 }; },
+      async read(fd, buffer) {
+        new Uint8Array(buffer).set([1, 2, 3]);
+        return 3;
+      },
+      async close() { status.certificateClosed = true; }
+    } },
+    '@kit.DeviceCertificateKit': { certificateManagerDialog: {
+      CertificateType: { CA_CERT: 1 },
+      CertificateScope: { CURRENT_USER: 1 },
+      CertificateDialogErrorCode: { ERROR_OPERATION_CANCELED: 29700002 },
+      async openInstallCertificateDialog(context, type, scope, certificate) {
+        status.certificateDialog = { context, type, scope, certificate };
+        return 'certificate://current-user/root';
+      }
+    } },
     '@kit.PerformanceAnalysisKit': { hilog: { info() {}, warn() {}, error() {} } }
   };
 }
@@ -310,33 +372,52 @@ async function controllerScenario() {
     async stop() { ownerEvents.push('stop'); status.running = false; },
     async stopForExit() { ownerEvents.push('exit'); status.running = false; }
   };
-  const owner = load(input.controller, controllerStubs(status)).trayServiceControl;
-  owner.initialize({ owner: true }, runtime);
+  const controllerExports = load(input.controller, controllerStubs(status));
+  const owner = controllerExports.trayServiceControl;
+  const ownerContext = { owner: true, filesDir: '/tmp/sdkopen-owner' };
+  owner.initialize(ownerContext, runtime);
   await owner.execute('start');
+  const certificateAbilityContext = { filesDir: '/tmp/sdkopen-certificate-ui' };
+  await controllerExports.installHttpsRootCertificate(certificateAbilityContext);
+  assert.strictEqual(status.certificatePath,
+    '/tmp/sdkopen-certificate-ui/sdk-open/runtime/tls/local-runtime-root-ca.crt');
+  assert.strictEqual(status.certificateDialog.context, certificateAbilityContext);
+  assert.strictEqual(status.certificateDialog.type, 1);
+  assert.strictEqual(status.certificateDialog.scope, 1);
+  assert.deepStrictEqual(Array.from(status.certificateDialog.certificate), [1, 2, 3]);
+  assert.strictEqual(status.certificateClosed, true);
   await owner.execute('stop');
   await owner.stopForExit();
   assert.deepStrictEqual(ownerEvents, ['start', 'stop', 'exit']);
 
   const popupEvents = [];
   const popup = load(input.controller, controllerStubs(status)).trayServiceControl;
-  popup.initializePopup({ async startAbility(want, options) {
+  const popupContext = { filesDir: '/tmp/sdkopen-test', async startAbility(want, options) {
     popupEvents.push({ want, options });
     const command = want.parameters && want.parameters.serviceCommand;
     if (command) status.running = command === 'start';
-  } });
+  } };
+  popup.initializePopup(popupContext);
   await popup.execute('start');
+  await popup.installHttpsCertificate();
+  await popup.openHttpsDemo();
   await popup.execute('stop');
   await popup.openDemo();
-  assert.strictEqual(popupEvents.length, 3);
+  assert.strictEqual(popupEvents.length, 5);
   assert.strictEqual(popupEvents[0].want.bundleName, 'com.czur.opensdk');
   assert.strictEqual(popupEvents[0].want.parameters.serviceCommand, 'start');
   assert.strictEqual(popupEvents[0].options.processMode, 'attach');
   assert.strictEqual(popupEvents[0].options.startupVisibility, 'hide');
-  assert.strictEqual(popupEvents[1].want.parameters.serviceCommand, 'stop');
-  assert.strictEqual(popupEvents[1].options.processMode, 'attach');
-  assert.strictEqual(popupEvents[1].options.startupVisibility, 'hide');
-  assert.strictEqual(popupEvents[2].want.uri, 'http://127.0.0.1:17081/');
+  assert.strictEqual(popupEvents[1].want.abilityName, 'HttpsCertificateInstallAbility');
+  assert.strictEqual(popupEvents[1].want.parameters, undefined);
+  assert.strictEqual(popupEvents[1].options, undefined);
+  assert.strictEqual(popupEvents[2].want.uri, 'https://127.0.0.1:18081/');
   assert.strictEqual(popupEvents[2].options, undefined);
+  assert.strictEqual(popupEvents[3].want.parameters.serviceCommand, 'stop');
+  assert.strictEqual(popupEvents[3].options.processMode, 'attach');
+  assert.strictEqual(popupEvents[3].options.startupVisibility, 'hide');
+  assert.strictEqual(popupEvents[4].want.uri, 'http://127.0.0.1:17081/');
+  assert.strictEqual(popupEvents[4].options, undefined);
 }
 
 async function abilityScenario() {
@@ -412,10 +493,29 @@ async function abilityScenario() {
   ]);
 }
 
+function certificateAbilityScenario() {
+  const events = [];
+  class UIAbility {}
+  const exports = load(input.certificateAbility, {
+    '@kit.AbilityKit': { UIAbility },
+    '@kit.ArkUI': { window: {} },
+    '@kit.PerformanceAnalysisKit': { hilog: { info() {}, error() {} } }
+  });
+  const ability = new exports.default();
+  ability.onWindowStageCreate({
+    loadContent(page, callback) {
+      events.push(page);
+      callback({ code: 0 });
+    }
+  });
+  assert.deepStrictEqual(events, ['pages/HttpsCertificateInstall']);
+}
+
 (async () => {
   if (input.kind === 'runtime') await runtimeScenario(input.scenario);
   else if (input.kind === 'controller') await controllerScenario();
   else if (input.kind === 'ability') await abilityScenario();
+  else if (input.kind === 'certificate-ability') certificateAbilityScenario();
   else throw new Error(`Unknown driver kind: ${input.kind}`);
 })().catch((error) => {
   console.error(error && error.stack ? error.stack : error);
@@ -435,6 +535,9 @@ class HarmonyLifecycleContractTest(unittest.TestCase):
             "runtime": str(HARMONY / "sdkopen_tray/src/main/ets/services/SdkOpenRuntime.ets"),
             "controller": str(HARMONY / "sdkopen_tray/src/main/ets/common/TrayServiceControl.ets"),
             "ability": str(HARMONY / "sdkopen_tray/src/main/ets/entryability/SdkOpenTrayAbility.ets"),
+            "certificateAbility": str(
+                HARMONY / "sdkopen_tray/src/main/ets/entryability/HttpsCertificateInstallAbility.ets"
+            ),
         }
         result = subprocess.run(
             ["node", "-e", NODE_DRIVER],
@@ -504,6 +607,28 @@ class HarmonyLifecycleContractTest(unittest.TestCase):
     def test_resource_write_failure_closes_file_without_starting_native(self) -> None:
         self.run_node("runtime", "write-failure")
 
+    def test_czcv_model_v1_stamp_is_upgraded_to_complete_model_set(self) -> None:
+        self.run_node("runtime", "czcv-model-v1-upgrade")
+
+    def test_czcv_model_copy_failure_retries_without_completion_stamp(self) -> None:
+        self.run_node("runtime", "czcv-model-copy-retry")
+
+    def test_czcv_packaging_uses_complete_architecture_independent_models(self) -> None:
+        hvigor = read("sdkopen_tray/hvigorfile.ts")
+        runtime = read("sdkopen_tray/src/main/ets/services/SdkOpenRuntime.ets")
+        self.assertIn(
+            "const modelSourceRoot = path.join(thirdPartyRoot, 'czcv/models/x86-64');",
+            hvigor,
+        )
+        self.assertNotIn("czcv/models/arm64", hvigor)
+        self.assertIn(".sdkopen-czcv-model-v2", runtime)
+        model_root = SDK_ROOT.parents[1] / "third_party_repo" / "czcv" / "models" / "x86-64"
+        expected = {
+            "czcv0005_01.bin", "czcv0005_02.bin", "czcv0005_03.bin", "czcv0005_04.bin",
+            "czcv0008_01.bin", "czcv0008_02.bin", "czcv0019_01.bin", "czcv0019_02.bin",
+        }
+        self.assertEqual({path.name for path in model_root.iterdir()} & expected, expected)
+
     def test_exit_during_resource_staging_cancels_before_usb_attach(self) -> None:
         self.run_node("runtime", "exit-during-staging")
 
@@ -515,6 +640,16 @@ class HarmonyLifecycleContractTest(unittest.TestCase):
 
     def test_cold_popup_command_and_same_process_ability_rebuild(self) -> None:
         self.run_node("ability")
+
+    def test_certificate_installer_uses_a_visible_dedicated_ability(self) -> None:
+        self.run_node("certificate-ability")
+        module = json.loads(read("sdkopen_tray/src/main/module.json5"))["module"]
+        ability = next(
+            item for item in module["abilities"]
+            if item["name"] == "HttpsCertificateInstallAbility"
+        )
+        self.assertFalse(ability["exported"])
+        self.assertNotIn("excludeFromMissions", ability)
 
     def test_single_tray_hap_manifest_has_no_appservice_acl(self) -> None:
         build_profile = json.loads(read("build-profile.json5"))
@@ -532,6 +667,7 @@ class HarmonyLifecycleContractTest(unittest.TestCase):
         self.assertEqual(
             {item["name"] for item in module["requestPermissions"]},
             {
+                "ohos.permission.ACCESS_CERT_MANAGER",
                 "ohos.permission.INTERNET",
                 "ohos.permission.PREPARE_APP_TERMINATE",
             },
@@ -540,6 +676,25 @@ class HarmonyLifecycleContractTest(unittest.TestCase):
         self.assertNotIn("AppService", manifest_text)
         self.assertNotIn("SUPPORT_APP_SERVICE_EXTENSION", manifest_text)
         self.assertNotIn("START_INVISIBLE_ABILITY", manifest_text)
+
+    def test_https_certificate_install_is_user_initiated_and_root_only(self) -> None:
+        controller = read("sdkopen_tray/src/main/ets/common/TrayServiceControl.ets")
+        tray_page = read("sdkopen_tray/src/main/ets/pages/Index.ets")
+        install_page = read("sdkopen_tray/src/main/ets/pages/HttpsCertificateInstall.ets")
+        install_ability = read(
+            "sdkopen_tray/src/main/ets/entryability/HttpsCertificateInstallAbility.ets"
+        )
+        self.assertIn("openInstallCertificateDialog", controller)
+        self.assertIn("CertificateType.CA_CERT", controller)
+        self.assertIn("CertificateScope.CURRENT_USER", controller)
+        self.assertIn("sdk-open/runtime/tls/local-runtime-root-ca.crt", controller)
+        self.assertNotIn("local-runtime-root-ca.key.pem", controller)
+        self.assertIn("https://127.0.0.1:18081/", controller)
+        self.assertIn("installHttpsCertificate()", tray_page)
+        self.assertIn("getContext(this) as common.UIAbilityContext", install_page)
+        self.assertIn("installHttpsRootCertificate(context)", install_page)
+        self.assertNotIn("libsdkopen_harmony.so", install_page)
+        self.assertNotIn("libsdkopen_harmony.so", install_ability)
 
     def test_native_runtime_stays_in_owner_hap_not_popup_controller(self) -> None:
         required = [

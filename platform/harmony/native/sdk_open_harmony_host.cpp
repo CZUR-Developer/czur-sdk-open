@@ -15,6 +15,7 @@
 #include "sdk_json_utils.h"
 #include "sdk_logger.h"
 #include "sdk_runtime_paths.h"
+#include "sdk_tls_certificate_manager.h"
 
 namespace editor {
 namespace sdk {
@@ -65,7 +66,19 @@ bool Start(const std::string& work_dir, const std::string& web_root) {
     config.video_ws_port = 17091;
     config.web_root = web_root;
     config.auth_token.clear();
-    config.tls.enabled = false;
+#if SDK_OPEN_ENABLE_TLS
+    config.tls.enabled = true;
+    config.tls.bind_host = config.bind_host;
+    config.tls.demo_https_port = 18081;
+    config.tls.certificate_chain_file = JoinPath(work_dir, "tls/sdk-runtime.localhost.fullchain.pem");
+    config.tls.private_key_file = JoinPath(work_dir, "tls/sdk-runtime.localhost.key.pem");
+    std::string tls_error;
+    if (!SdkTlsCertificateManager::Provision(SdkTlsCertificateManager::PathsFromConfig(config.tls),
+                                            SdkTlsRotationPolicy(), false, &tls_error)) {
+        SDK_OPEN_LOG_ERROR("[sdk_open_harmony] TLS provisioning failed: {}", tls_error);
+        return false;
+    }
+#endif
 
     ProviderBundle providers = mock::CreateProviderBundle();
     const ProviderBundle real_providers = private_impl::CreateProviderBundle(false);

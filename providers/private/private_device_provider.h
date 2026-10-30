@@ -3,6 +3,7 @@
 #pragma once
 
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -17,6 +18,44 @@
 namespace editor {
 namespace sdk {
 namespace private_impl {
+
+inline bool IsFullFrameRect(const SdkRect4P& rect, int width, int height, float tolerance = 3.0f) {
+    if (width <= 1 || height <= 1) {
+        return false;
+    }
+    const float right = static_cast<float>(width - 1);
+    const float bottom = static_cast<float>(height - 1);
+    const auto near_value = [tolerance](float value, float expected) {
+        return std::fabs(value - expected) <= tolerance;
+    };
+    return near_value(rect.left_top.x, 0.0f) &&
+           near_value(rect.left_top.y, 0.0f) &&
+           near_value(rect.right_top.x, right) &&
+           near_value(rect.right_top.y, 0.0f) &&
+           near_value(rect.right_down.x, right) &&
+           near_value(rect.right_down.y, bottom) &&
+           near_value(rect.left_down.x, 0.0f) &&
+           near_value(rect.left_down.y, bottom);
+}
+
+enum class RealtimeRectCacheMutation {
+    Ignore,
+    Clear,
+    Replace,
+};
+
+inline RealtimeRectCacheMutation SelectRealtimeRectCacheMutation(
+    const std::shared_ptr<std::atomic<uint64_t> >& active_stream,
+    bool realtime_detection_enabled,
+    const std::shared_ptr<std::atomic<uint64_t> >& expected_stream,
+    bool has_detected_rects) {
+    if (!active_stream || !expected_stream || active_stream != expected_stream ||
+        !realtime_detection_enabled) {
+        return RealtimeRectCacheMutation::Ignore;
+    }
+    return has_detected_rects ? RealtimeRectCacheMutation::Replace
+                              : RealtimeRectCacheMutation::Clear;
+}
 
 class PrivateDeviceProvider : public ISdkDeviceProvider {
 public:
@@ -94,7 +133,15 @@ private:
     std::vector<SdkRect4P> DetectSinglePageRects(const std::string& device_id,
                                                  editor::devices::GenericFrame* frame,
                                                  int scan_device_type,
-                                                 bool multi_target_paging);
+                                                 bool multi_target_paging,
+                                                 const std::shared_ptr<std::atomic<uint64_t> >& expected_stream);
+    void UpdateDetectedRectCache(
+        const std::string& device_id,
+        const std::shared_ptr<std::atomic<uint64_t> >& expected_stream,
+        const std::vector<SdkRect4P>& rects,
+        int source_width,
+        int source_height,
+        int scan_device_type);
     DetectedRectCache GetDetectedRectCache(const std::string& device_id) const;
     bool RealtimeDetectRectsEnabled(const std::string& device_id) const;
     bool MultiTargetPagingEnabled(const std::string& device_id) const;

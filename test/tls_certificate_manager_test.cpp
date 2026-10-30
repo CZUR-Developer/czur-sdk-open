@@ -6,6 +6,8 @@
 
 #include <fstream>
 #include <iostream>
+#include <openssl/pem.h>
+#include <openssl/x509v3.h>
 
 namespace {
 
@@ -48,6 +50,22 @@ int main(int argc, char* argv[]) {
     if (!editor::sdk::SdkTlsCertificateManager::RotateIfNeeded(
             paths, policy, &rotated, &error) || !rotated) {
         std::cerr << "TLS rotation threshold did not rotate the managed leaf: " << error << std::endl;
+        return 1;
+    }
+
+    // Both desktop's DNS endpoint and Harmony's loopback URL must pass real
+    // hostname verification; trusting the CA alone must not hide a SAN error.
+    BIO* input = BIO_new_file(paths.certificate_chain.c_str(), "r");
+    X509* leaf = input ? PEM_read_bio_X509(input, NULL, NULL, NULL) : NULL;
+    BIO_free(input);
+    const bool names_valid = leaf &&
+        X509_check_host(leaf, "sdk-runtime.localhost", 0, 0, NULL) == 1 &&
+        X509_check_host(leaf, "localhost", 0, 0, NULL) == 1 &&
+        X509_check_ip_asc(leaf, "127.0.0.1", 0) == 1 &&
+        X509_check_ip_asc(leaf, "192.168.1.116", 0) == 0;
+    X509_free(leaf);
+    if (!names_valid) {
+        std::cerr << "TLS leaf SAN does not match the local runtime endpoints" << std::endl;
         return 1;
     }
 

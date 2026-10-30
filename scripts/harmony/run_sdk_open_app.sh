@@ -124,7 +124,8 @@ if [[ "${SKIP_INSTALL}" == "0" ]]; then
   [[ -f "${HAP_FILES[0]}" ]] || fail "no HAP found in ${APP_PATH}"
   hdc_cmd "${HDC_ARGS[@]}" shell "mkdir -p ${DEVICE_PACKAGE_DIR}" >/dev/null
   for HAP_FILE in "${HAP_FILES[@]}"; do
-    TRANSFER_OUTPUT="$(hdc_cmd "${HDC_ARGS[@]}" file send "${HAP_FILE}" \
+    TRANSFER_OUTPUT="$(SDK_OPEN_HARMONY_HDC_TIMEOUT="${SDK_OPEN_HARMONY_HDC_TIMEOUT:-300}" \
+      hdc_cmd "${HDC_ARGS[@]}" file send "${HAP_FILE}" \
       "${DEVICE_PACKAGE_DIR}/$(basename "${HAP_FILE}")" 2>&1)" || fail "HAP transfer failed: ${TRANSFER_OUTPUT}"
     [[ "${TRANSFER_OUTPUT}" == *'FileTransfer finish'* ]] || fail "HAP transfer failed: ${TRANSFER_OUTPUT}"
   done

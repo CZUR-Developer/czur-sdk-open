@@ -718,6 +718,8 @@ void CaptureTaskService::CompleteProcessingTask(const std::string& task_id,
         }
         task = it->second;
     }
+    SDK_OPEN_LOG_INFO("[capture_task] processing complete task_id={} status={} code={} assets={}",
+                      task_id, task.processing_status, task.code, task.assets.size());
     PublishEvent(request.connection_id, succeeded ? "capture.completed" : "capture.failed", task);
     PublishSessionUpdate(request.connection_id, request.device_id, task_id,
                          succeeded ? "processing_completed" : "processing_failed");

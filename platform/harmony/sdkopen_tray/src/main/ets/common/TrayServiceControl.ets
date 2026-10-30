@@ -1,6 +1,48 @@
 import { common, contextConstant } from '@kit.AbilityKit';
+import { fileIo } from '@kit.CoreFileKit';
+import { certificateManagerDialog } from '@kit.DeviceCertificateKit';
 import { http } from '@kit.NetworkKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+
+const HTTPS_DEMO_URL = 'https://127.0.0.1:18081/';
+const ROOT_CA_RELATIVE_PATH = 'sdk-open/runtime/tls/local-runtime-root-ca.crt';
+const MAX_ROOT_CA_BYTES = 1024 * 1024;
+
+async function readRootCertificate(path: string): Promise<Uint8Array> {
+  const stat = await fileIo.stat(path);
+  if (!stat.isFile() || stat.size <= 0 || stat.size > MAX_ROOT_CA_BYTES) {
+    throw new Error(`HTTPS 根证书文件无效或超出 ${MAX_ROOT_CA_BYTES} 字节上限`);
+  }
+
+  const file = await fileIo.open(path, fileIo.OpenMode.READ_ONLY);
+  try {
+    const certificate = new Uint8Array(stat.size);
+    let offset = 0;
+    while (offset < certificate.length) {
+      const chunk = new ArrayBuffer(Math.min(64 * 1024, certificate.length - offset));
+      const bytesRead = await fileIo.read(file.fd, chunk);
+      if (bytesRead <= 0 || bytesRead > chunk.byteLength) {
+        throw new Error('HTTPS 根证书文件读取不完整');
+      }
+      certificate.set(new Uint8Array(chunk, 0, bytesRead), offset);
+      offset += bytesRead;
+    }
+    return certificate;
+  } finally {
+    await fileIo.close(file);
+  }
+}
+
+export async function installHttpsRootCertificate(context: common.UIAbilityContext): Promise<string> {
+  const certificatePath = `${context.filesDir}/${ROOT_CA_RELATIVE_PATH}`;
+  const certificate = await readRootCertificate(certificatePath);
+  return certificateManagerDialog.openInstallCertificateDialog(
+    context,
+    certificateManagerDialog.CertificateType.CA_CERT,
+    certificateManagerDialog.CertificateScope.CURRENT_USER,
+    certificate
+  );
+}
 
 export interface TrayRuntimeControl {
   start(): Promise<void>;
@@ -46,6 +88,52 @@ class TrayServiceControl {
       hilog.info(0, 'SdkOpenTray', 'SDK Open demo page opened');
     } catch (error) {
       hilog.error(0, 'SdkOpenTray', 'SDK Open demo page failed to open: %{public}s', String(error));
+    }
+  }
+
+  async openHttpsDemo(): Promise<void> {
+    const context = this.popupContext;
+    if (!context) {
+      hilog.error(0, 'SdkOpenTray', 'Cannot open SDK Open HTTPS demo before popup initialization');
+      return;
+    }
+    try {
+      await context.startAbility({
+        action: 'ohos.want.action.viewData',
+        uri: HTTPS_DEMO_URL,
+        entities: ['entity.system.browsable']
+      });
+      hilog.info(0, 'SdkOpenTray', 'SDK Open HTTPS demo page opened');
+    } catch (error) {
+      hilog.error(0, 'SdkOpenTray', 'SDK Open HTTPS demo page failed to open: %{public}s', String(error));
+    }
+  }
+
+  async installHttpsCertificate(): Promise<void> {
+    const context = this.popupContext;
+    if (this.state.busy || this.exiting) { return; }
+    if (!context) {
+      hilog.error(0, 'SdkOpenTray', 'Cannot install SDK Open HTTPS certificate before initialization');
+      return;
+    }
+    this.state.busy = true;
+    this.state.message = '正在打开证书安装窗口…';
+    this.notify();
+    try {
+      await context.startAbility({
+        bundleName: 'com.czur.opensdk',
+        moduleName: 'sdkopen_tray',
+        abilityName: 'HttpsCertificateInstallAbility'
+      });
+      this.state.message = '已打开 HTTPS 证书安装窗口';
+      hilog.info(0, 'SdkOpenTray', 'SDK Open HTTPS certificate install window opened');
+    } catch (error) {
+      this.state.message = `证书安装入口打开失败：${String(error)}`;
+      hilog.error(0, 'SdkOpenTray', 'SDK Open HTTPS certificate install command failed: %{public}s',
+        String(error));
+    } finally {
+      this.state.busy = false;
+      this.notify();
     }
   }
 

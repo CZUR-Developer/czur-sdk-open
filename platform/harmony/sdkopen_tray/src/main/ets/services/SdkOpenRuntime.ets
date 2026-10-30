@@ -10,7 +10,7 @@ const TAG = 'SdkOpenRuntime';
 const RAW_WEB_ROOT = 'sdkopen_web';
 const RAW_DEVICE_CONFIG = 'sdkopen_device_config.conf';
 const RAW_CZCV_MODEL_ROOT = 'sdkopen_czcv_model';
-const CZCV_MODEL_STAMP = '.sdkopen-czcv-model-v1';
+const CZCV_MODEL_STAMP = '.sdkopen-czcv-model-v2';
 const RAW_CZOCR_MODEL_ROOT = 'sdkopen_czocr_model';
 const CZOCR_MODEL_STAMP = '.sdkopen-czocr-model-20261029B';
 

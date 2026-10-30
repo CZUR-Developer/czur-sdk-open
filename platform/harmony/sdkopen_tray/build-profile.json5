@@ -7,7 +7,7 @@
         "-DOHOS_PLATFORM=OHOS",
         "-DOHOS_COMPATIBLE_SDK_VERSION=22",
         "-DOHOS_STL=c++_shared",
-        "-DSDK_OPEN_ENABLE_TLS=OFF",
+        "-DSDK_OPEN_ENABLE_TLS=ON",
         "-DSDK_OPEN_USE_PRIVATE_PROVIDER=OFF",
         "-DBUILD_SDK_PRIVATE=OFF"
       ],

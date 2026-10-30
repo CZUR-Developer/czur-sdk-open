@@ -756,6 +756,8 @@ if(BUILD_SDK_OPEN_TESTS)
     )
     target_include_directories(sdk_harmony_device_provider_contract_test PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${SDK_OPEN_SOURCE_ROOT}"
+        "${SDK_OPEN_SOURCE_ROOT}/interfaces"
         "${SDK_OPEN_HOST_SOURCE_ROOT}/src/module/devices"
         "${SDK_OPEN_THIRD_PARTY_ROOT}/opencv/include"
         "${SDK_OPEN_THIRD_PARTY_ROOT}/opencv/include/${THIRD_PARTY_SYSTEM}"

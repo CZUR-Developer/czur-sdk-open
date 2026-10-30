@@ -1,6 +1,10 @@
 import usbManager from '@ohos.usbManager';
 import { BusinessError } from '@kit.BasicServicesKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import sdkOpen from 'libsdkopen_harmony.so';
+
+const MAX_CONTROL_READ_BYTES: number = 1024;
+const MAX_CONTROL_WRITE_BYTES: number = 4096;
 
 function isIsoEndpoint(endpoint: usbManager.USBEndpoint): boolean {
   return endpoint.type === usbManager.UsbEndpointTransferType.TRANSFER_TYPE_ISOCHRONOUS;
@@ -130,6 +134,11 @@ export class UsbHostTransport {
       ++this.lifecycleGeneration;
     }
     this.serializeLifecycle((): Promise<void> => this.handleRequest(request)).catch((error: Error) => {
+      if (request.operation === 'controlRead' || request.operation === 'controlWrite') {
+        hilog.warn(0, 'SdkOpenUsbHost',
+          'USB control failed operation=%{public}s value=%{public}d index=%{public}d length=%{public}d error=%{public}s',
+          request.operation, request.value, request.index, request.length, this.errorText(error));
+      }
       this.complete(request, false, this.errorText(error));
     });
   }
@@ -311,7 +320,8 @@ export class UsbHostTransport {
 
   private async controlTransfer(request: UsbHostRequest, read: boolean): Promise<void> {
     const pipe = this.requirePipe();
-    if (request.length < 0 || request.length > 1024) {
+    const maxLength = read ? MAX_CONTROL_READ_BYTES : MAX_CONTROL_WRITE_BYTES;
+    if (request.length < 0 || request.length > maxLength) {
       throw new Error(`Invalid USB control length: ${request.length}`);
     }
     const payload = new Uint8Array(request.length);

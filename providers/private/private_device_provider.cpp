@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -1224,11 +1225,21 @@ SdkVideoStartResult PrivateDeviceProvider::StartVideo(const SdkVideoStartRequest
             const bool has_valid_bgr =
                 frame->width > 0 && frame->height > 0 && frame->data.size() >= expected_size;
             std::vector<SdkRect4P> detected_rects;
-            if (has_valid_bgr && RealtimeDetectRectsEnabled(request.device_id)) {
-                detected_rects = DetectSinglePageRects(request.device_id,
-                                                       frame,
-                                                       scan_device_type,
-                                                       MultiTargetPagingEnabled(request.device_id));
+            if (realtime_detect_rects) {
+                if (has_valid_bgr) {
+                    detected_rects = DetectSinglePageRects(request.device_id,
+                                                           frame,
+                                                           scan_device_type,
+                                                           MultiTargetPagingEnabled(request.device_id),
+                                                           frame_seq);
+                } else {
+                    UpdateDetectedRectCache(request.device_id,
+                                            frame_seq,
+                                            detected_rects,
+                                            frame->width,
+                                            frame->height,
+                                            scan_device_type);
+                }
             }
             TryCompleteFrameCapture(request.device_id, frame);
             TryCompleteHardGrabFrameCapture(request.device_id, frame);
@@ -1849,13 +1860,17 @@ void PrivateDeviceProvider::HandleStillImageReceived(const std::string& device_i
 std::vector<SdkRect4P> PrivateDeviceProvider::DetectSinglePageRects(const std::string& device_id,
                                                                     editor::devices::GenericFrame* frame,
                                                                     int scan_device_type,
-                                                                    bool multi_target_paging) {
+                                                                    bool multi_target_paging,
+                                                                    const std::shared_ptr<std::atomic<uint64_t> >& expected_stream) {
     std::vector<SdkRect4P> rects;
     if (frame == NULL || frame->width <= 0 || frame->height <= 0) {
+        UpdateDetectedRectCache(device_id, expected_stream, rects, 0, 0, scan_device_type);
         return rects;
     }
     const size_t expected_size = static_cast<size_t>(frame->width) * static_cast<size_t>(frame->height) * 3;
     if (frame->data.size() < expected_size) {
+        UpdateDetectedRectCache(
+            device_id, expected_stream, rects, frame->width, frame->height, scan_device_type);
         return rects;
     }
 
@@ -1866,6 +1881,8 @@ std::vector<SdkRect4P> PrivateDeviceProvider::DetectSinglePageRects(const std::s
                              SafeDeviceId(device_id),
                              ToCode(init_code),
                              init_message);
+        UpdateDetectedRectCache(
+            device_id, expected_stream, rects, frame->width, frame->height, scan_device_type);
         return rects;
     }
 
@@ -1873,9 +1890,39 @@ std::vector<SdkRect4P> PrivateDeviceProvider::DetectSinglePageRects(const std::s
         cv::Mat source(frame->height, frame->width, CV_8UC3, const_cast<uint8_t*>(&frame->data[0]));
         cv::Mat output;
         std::vector<cv::Point2f> points;
+        bool single_page_detection_succeeded = false;
+        bool single_page_full_frame = false;
         {
             std::lock_guard<std::mutex> algorithm_lock(graphic::GraphicAlgorithmRuntime::Instance().AlgorithmMutex());
-            if (multi_target_paging) {
+            if (!multi_target_paging) {
+                try {
+                    czcv::single_page_detect_cut(source, output, points);
+                    graphic::DetachCzcvOutputMat(output);
+                    graphic::RehomeCzcvStdVector(points);
+                    if (points.size() == 4) {
+                        single_page_full_frame = IsFullFrameRect(
+                            ToSdkRect(points), frame->width, frame->height);
+                        single_page_detection_succeeded = !single_page_full_frame;
+                    }
+                } catch (const std::exception& e) {
+                    SDK_PRIVATE_LOG_WARN(
+                        "device.video_detect single_page_detect_cut_failed device={} error={}",
+                        SafeDeviceId(device_id),
+                        e.what());
+                } catch (...) {
+                    SDK_PRIVATE_LOG_WARN(
+                        "device.video_detect single_page_detect_cut_failed device={} error=unknown",
+                        SafeDeviceId(device_id));
+                }
+            }
+
+            if (multi_target_paging || !single_page_detection_succeeded || points.size() != 4) {
+                if (!multi_target_paging && !points.empty() && points.size() != 4) {
+                    SDK_PRIVATE_LOG_WARN(
+                        "device.video_detect single_page_detect_cut_invalid_points device={} count={}",
+                        SafeDeviceId(device_id),
+                        static_cast<uint64_t>(points.size()));
+                }
                 czcv::CutParams params;
                 params.srcW = frame->width;
                 params.srcH = frame->height;
@@ -1883,7 +1930,7 @@ std::vector<SdkRect4P> PrivateDeviceProvider::DetectSinglePageRects(const std::s
                 params.dstH = frame->height;
                 params.outChannels = 3;
                 params.deviceType = static_cast<czcv::ScanDeviceType>(scan_device_type);
-                params.isMultiplePage = true;
+                params.isMultiplePage = multi_target_paging;
                 czcv::page_keypoints_detect(source, params);
                 RehomeCzcvDetectedRects(params);
                 for (std::vector<czcv::CZCV_Rect4P>::const_iterator it = params.detectedRects.begin();
@@ -1900,30 +1947,71 @@ std::vector<SdkRect4P> PrivateDeviceProvider::DetectSinglePageRects(const std::s
                     rect.left_down.y = it->leftDownP.y;
                     rects.push_back(rect);
                 }
-            } else {
-                czcv::single_page_detect_cut(source, output, points);
-                graphic::DetachCzcvOutputMat(output);
-                graphic::RehomeCzcvStdVector(points);
             }
         }
-        if (!multi_target_paging && points.size() == 4) {
+        if (!multi_target_paging && single_page_detection_succeeded && points.size() == 4) {
             rects.push_back(ToSdkRect(points));
         }
-        if (!rects.empty()) {
-            DetectedRectCache cache;
-            cache.rects = rects;
-            cache.source_width = frame->width;
-            cache.source_height = frame->height;
-            cache.scan_device_type = scan_device_type;
-            std::lock_guard<std::mutex> lock(state_mu_);
-            detected_rect_caches_[device_id] = cache;
+        if (!multi_target_paging) {
+            rects.erase(
+                std::remove_if(rects.begin(), rects.end(), [frame](const SdkRect4P& rect) {
+                    return IsFullFrameRect(rect, frame->width, frame->height);
+                }),
+                rects.end());
+        }
+        const uint64_t sequence = expected_stream ? expected_stream->load() : 0;
+        if (sequence == 1 || sequence % 300 == 0) {
+            SDK_PRIVATE_LOG_INFO(
+                "device.video_detect result device={} dimensions={}x{} points={} full_frame={} keypoints_fallback={} rects={}",
+                SafeDeviceId(device_id), frame->width, frame->height,
+                static_cast<uint64_t>(points.size()), single_page_full_frame,
+                multi_target_paging || !single_page_detection_succeeded,
+                static_cast<uint64_t>(rects.size()));
         }
     } catch (const std::exception& e) {
         SDK_PRIVATE_LOG_WARN("device.video_detect failed device={} error={}", SafeDeviceId(device_id), e.what());
     } catch (...) {
         SDK_PRIVATE_LOG_WARN("device.video_detect failed device={} error=unknown", SafeDeviceId(device_id));
     }
+    UpdateDetectedRectCache(
+        device_id, expected_stream, rects, frame->width, frame->height, scan_device_type);
     return rects;
+}
+
+void PrivateDeviceProvider::UpdateDetectedRectCache(
+    const std::string& device_id,
+    const std::shared_ptr<std::atomic<uint64_t> >& expected_stream,
+    const std::vector<SdkRect4P>& rects,
+    int source_width,
+    int source_height,
+    int scan_device_type) {
+    std::lock_guard<std::mutex> lock(state_mu_);
+    const std::map<std::string, std::shared_ptr<std::atomic<uint64_t> > >::const_iterator stream_it =
+        active_stream_sequences_.find(device_id);
+    const std::map<std::string, bool>::const_iterator detection_it =
+        realtime_detect_rects_.find(device_id);
+    const std::shared_ptr<std::atomic<uint64_t> > active_stream =
+        stream_it == active_stream_sequences_.end()
+            ? std::shared_ptr<std::atomic<uint64_t> >()
+            : stream_it->second;
+    const bool realtime_detection_enabled =
+        detection_it != realtime_detect_rects_.end() && detection_it->second;
+    const RealtimeRectCacheMutation mutation = SelectRealtimeRectCacheMutation(
+        active_stream, realtime_detection_enabled, expected_stream, !rects.empty());
+    if (mutation == RealtimeRectCacheMutation::Ignore) {
+        return;
+    }
+    if (mutation == RealtimeRectCacheMutation::Clear) {
+        detected_rect_caches_.erase(device_id);
+        return;
+    }
+
+    DetectedRectCache cache;
+    cache.rects = rects;
+    cache.source_width = source_width;
+    cache.source_height = source_height;
+    cache.scan_device_type = scan_device_type;
+    detected_rect_caches_[device_id] = cache;
 }
 
 PrivateDeviceProvider::DetectedRectCache PrivateDeviceProvider::GetDetectedRectCache(const std::string& device_id) const {

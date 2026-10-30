@@ -19,7 +19,7 @@ set(CZUR_TARGET_OUTPUT_DIR "${CMAKE_BINARY_DIR}/runtime" CACHE PATH "sdk_open ru
 set(BUILD_SDK_OPEN_TESTS OFF CACHE BOOL "Disable desktop sdk_open tests in the Harmony app build" FORCE)
 set(BUILD_SDK_WEB OFF CACHE BOOL "Web assets are staged by the Harmony project" FORCE)
 set(SDK_OPEN_USE_PREBUILT_WEB OFF CACHE BOOL "Web assets are staged by the Harmony project" FORCE)
-set(SDK_OPEN_ENABLE_TLS OFF CACHE BOOL "TLS is enabled after OHOS crypto packaging is available" FORCE)
+option(SDK_OPEN_ENABLE_TLS "Enable local HTTPS/WSS listeners" ON)
 set(SDK_OPEN_ENABLE_HTTP_SERVER ON CACHE BOOL "Enable sdk_open HTTP/WS listeners" FORCE)
 set(BUILD_SDK_PRIVATE OFF CACHE BOOL "Do not build the desktop private SDK variants" FORCE)
 set(SDK_OPEN_USE_PRIVATE_PROVIDER OFF CACHE BOOL "Harmony host selects its real providers explicitly" FORCE)

@@ -1,4 +1,5 @@
 #include "private_device_frame_codec.h"
+#include "private_device_provider.h"
 
 #include <cstdint>
 #include <iostream>
@@ -86,8 +87,64 @@ bool CheckRuntimeConfigPath() {
     return true;
 }
 
+bool CheckRealtimeRectCacheSelection() {
+    using editor::sdk::private_impl::RealtimeRectCacheMutation;
+    using editor::sdk::private_impl::SelectRealtimeRectCacheMutation;
+
+    const std::shared_ptr<std::atomic<uint64_t> > current(new std::atomic<uint64_t>(1));
+    const std::shared_ptr<std::atomic<uint64_t> > replacement(new std::atomic<uint64_t>(1));
+    if (SelectRealtimeRectCacheMutation(current, true, current, true) !=
+            RealtimeRectCacheMutation::Replace ||
+        SelectRealtimeRectCacheMutation(current, true, current, false) !=
+            RealtimeRectCacheMutation::Clear ||
+        SelectRealtimeRectCacheMutation(current, false, current, true) !=
+            RealtimeRectCacheMutation::Ignore ||
+        SelectRealtimeRectCacheMutation(replacement, true, current, true) !=
+            RealtimeRectCacheMutation::Ignore ||
+        SelectRealtimeRectCacheMutation(
+            std::shared_ptr<std::atomic<uint64_t> >(), true, current, false) !=
+            RealtimeRectCacheMutation::Ignore) {
+        std::cerr << "realtime rect cache selection mismatch" << std::endl;
+        return false;
+    }
+    return true;
+}
+
+bool CheckFullFrameDetection() {
+    using editor::sdk::SdkRect4P;
+    using editor::sdk::private_impl::IsFullFrameRect;
+    SdkRect4P rect;
+    rect.right_top.x = 1535;
+    rect.right_down.x = 1535;
+    rect.right_down.y = 1151;
+    rect.left_down.y = 1151;
+    if (!IsFullFrameRect(rect, 1536, 1152)) {
+        std::cerr << "full-frame fallback was accepted as a paper boundary" << std::endl;
+        return false;
+    }
+    // CZCV may return width/height rather than the last pixel coordinates.
+    rect.right_top.x = rect.right_down.x = 1536;
+    rect.right_down.y = rect.left_down.y = 1152;
+    if (!IsFullFrameRect(rect, 1536, 1152)) {
+        std::cerr << "full-frame tolerance mismatch" << std::endl;
+        return false;
+    }
+    rect.left_top.x = rect.left_down.x = 300;
+    rect.right_top.x = rect.right_down.x = 1100;
+    rect.left_top.y = rect.right_top.y = 150;
+    rect.left_down.y = rect.right_down.y = 1000;
+    if (IsFullFrameRect(rect, 1536, 1152) || IsFullFrameRect(rect, 0, 0)) {
+        std::cerr << "valid paper boundary was rejected" << std::endl;
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 int main() {
-    return CheckStreamPolicy() && CheckRealJpegDecode() && CheckRuntimeConfigPath() ? 0 : 1;
+    return CheckStreamPolicy() && CheckRealJpegDecode() && CheckRuntimeConfigPath() &&
+                   CheckRealtimeRectCacheSelection() && CheckFullFrameDetection()
+               ? 0
+               : 1;
 }
