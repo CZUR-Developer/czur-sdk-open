@@ -28,6 +28,25 @@ def main():
         packaged = {Path(m).name for m in members}
         if "libsdkopen_harmony.so" not in packaged:
             errors.append("libsdkopen_harmony.so is missing")
+        if "libz.so" not in packaged:
+            errors.append("libz.so is missing; CZOCR runtime loads this SONAME directly")
+        if "libs/arm64-v8a/libczcv_ocr.so" not in members:
+            errors.append("libczcv_ocr.so is missing from the HAP native library directory")
+        if any(m.startswith("libs/arm64-v8a/models/") for m in hap.namelist()):
+            errors.append("OCR model data must be packaged only as rawfile, not duplicated in libs/")
+        for name in ("license.lic", "1.dat", "3_1_1.model", "3_1_2.model",
+                     "3_1_3.model", "3_2_1.model", "3_2_6.model", "6.dat", "3_3_1.model", "3_4_1.model",
+                     "3_5_1.model", "4_2_2.model"):
+            member = "resources/rawfile/sdkopen_czocr_model/" + name
+            if member not in hap.namelist() or hap.getinfo(member).file_size == 0:
+                errors.append(f"CZOCR model resource is missing or empty: {name}")
+        if "resources/rawfile/sdkopen_ocr_fonts/SourceHanSansCN-Normal.otf" not in hap.namelist():
+            errors.append("OCR PDF text-layer font is missing")
+        version_member = "resources/rawfile/sdkopen_czocr_model_version.txt"
+        if version_member not in hap.namelist():
+            errors.append("CZOCR model resource version is missing")
+        elif not re.fullmatch(rb"[a-f0-9]{64}", hap.read(version_member)):
+            errors.append("CZOCR model resource version is invalid")
         for member in members:
             path = Path(temp) / Path(member).name
             path.write_bytes(hap.read(member))

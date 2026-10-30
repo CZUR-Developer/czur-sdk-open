@@ -41,6 +41,7 @@ while [[ $# -gt 0 ]]; do
         "${PROJECT_DIR}/sdkopen/src/main/resources/rawfile/sdkopen_web" \
         "${PROJECT_DIR}/sdkopen/src/main/resources/rawfile/sdkopen_czcv_model" \
         "${PROJECT_DIR}/sdkopen/src/main/resources/rawfile/sdkopen_czocr_model" \
+        "${PROJECT_DIR}/sdkopen/src/main/resources/rawfile/sdkopen_ocr_fonts" \
         "${PROJECT_DIR}/build" \
         "${PROJECT_DIR}/outputs"
       shift

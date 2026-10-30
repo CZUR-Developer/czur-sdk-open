@@ -142,9 +142,30 @@ exist`）。可先执行 `hdc -t <target> shell bm uninstall -n com.czur.sdkopen
 `resources/rawfile/sdkopen_czcv_model` 写入 `runtime/czcv_model`、把
 `resources/rawfile/sdkopen_czocr_model` 写入 `runtime/models`，然后启动内嵌 runtime。
 Harmony 服务实际启用 `auth`、`imageEnhance`、`ocr`、`ofd` provider；OCR 的通用模型文件
-来自 `third_party_repo/czocr/models/x86-64`，其中 `libczcv_ocr.so` 替换为
-`third_party_repo/czocr/lib/ohos/libczcv_ocr.so`，不打包 `libczcv_ocr_naive.so`。
-CMake 原生输出与 HAP rawfile 使用相同布局；模型版本更新后，服务会重新写入沙箱模型并删除旧 naive 库。
+优先来自 `third_party_repo/czocr/models/x86-64` 下全部 `.model`、`.dat` 和
+`ppocr_keys_v1.txt`（如果存在），缺少的文件由 `models/windows64` 的完整集补齐；
+授权文件沿用 `models/loongarch64/license.lic`。2026-10-30 最近一次验证覆盖 x86-64 目录的
+40 个模型、13 个字典，安装包和设备沙箱的 53 个文件均逐一校验 SHA-256 一致。
+`3_1_1.model` 同样明确使用用户提供的 x86-64 文件。
+这些是模型数据，运行库仍然只使用 `lib/ohos`。旧 loongarch64 模型集的英文字典和
+模型版本较旧，不能直接替代完整模型集。
+`resources/ocr/fonts/SourceHanSansCN-Normal.otf` 单独作为 rawfile
+释放到 `runtime/ocr_fonts`，通过 `SDK_OCR_FONT_DIR` 供 PDF 文字层使用。
+`third_party_repo/czocr/lib/ohos/libczcv_ocr.so` 与 `libz.so` 放在 HAP 标准 native
+目录，不向应用数据目录复制可执行库。鸿蒙宿主通过链接包装
+`czocr_init_in_dev_stage`，用 CZOCR 自身的 `czocr_load_library` 从 native 目录建立
+API 分发表，再以原参数调用同一算法的 `czcv_ocr_init_doc`。后续识别仍使用原 API，
+鉴权校验保持原有流程。这一适配仅作用于 SDK Open 鸿蒙宿主，依赖当前 OHOS 库导出的
+上述符号；更新库时需回归文字提取和 OCR 导出。构建时按排序后的模型文件名与内容
+生成 SHA-256 版本资源 `sdkopen_czocr_model_version.txt`；服务检测到版本变化后会重新
+释放模型，无需手工修改缓存标记。
+构建检查覆盖模型、字体及原生依赖，缺失资源时拒绝生成通过结果。
+2026-10-30 16:11 更新 OHOS 算法库后，显式 `language=en` 的英文文字提取和 PDF
+导出已在模拟器实测通过，PDF 文字层核验正确，原有 `ncnn::Gemm::forward` 崩溃未复现。
+通过版本的算法库 Build ID 为 `fdcb847a5d2f1d0ef08d8640a46d34ee14e39958`。
+旧库曾在此路径崩溃，单线程、关闭 OpenMP 亲和性和保留未 strip 库的尝试均未作为修复保留。
+自动/中文模式与显式英文路径需要分别验证，详情见
+`../../doc/ocr/sdk_open_harmony_ocr_x86_repack_20261030.md`。
 图像增强使用 arm64 CZCV 库。Harmony 不提供桌面 SANE/TWAIN 后端，
 对应请求会返回 `ProviderUnavailable`，不会伪装成扫描成功。
 服务自身不会打开页面；demo 静态资源只通过以下 HTTP 地址提供，可由独立客户端或

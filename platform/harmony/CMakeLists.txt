@@ -89,11 +89,14 @@ add_subdirectory("${SDK_OPEN_SOURCE_ROOT}/providers/private" sdk_harmony_provide
 add_library(sdkopen_harmony SHARED
     native/sdk_open_harmony_host.cpp
     native/sdk_open_harmony_napi.cpp
+    native/sdk_open_harmony_ocr.cpp
     "${SDK_OPEN_HOST_SOURCE_ROOT}/src/module/authorized/auth_manager.cpp"
     "${SDK_OPEN_HOST_SOURCE_ROOT}/src/module/authorized/auth_data_process.cpp"
     "${SDK_OPEN_HOST_SOURCE_ROOT}/src/module/authorized/auth_util.cpp"
     "${SDK_OPEN_HOST_SOURCE_ROOT}/src/module/authorized/auth_logger.cpp"
 )
+# Adapt the shared OCR module's initializer only in this Harmony SDK host.
+target_link_options(sdkopen_harmony PRIVATE "-Wl,--wrap=czocr_init_in_dev_stage")
 target_include_directories(sdkopen_harmony PRIVATE
     "${SDK_OPEN_SOURCE_DIR}/runtime"
     "${SDK_OPEN_SOURCE_DIR}/interfaces"
@@ -270,6 +273,9 @@ target_link_options(sdkopen_harmony PRIVATE -Wl,--gc-sections)
 add_custom_command(TARGET sdkopen_harmony POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
         "${SDK_OPEN_HARMONY_ZLIB}"
+        "$<TARGET_FILE_DIR:sdkopen_harmony>/libz.so"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        "${SDK_OPEN_HARMONY_ZLIB}"
         "$<TARGET_FILE_DIR:sdkopen_harmony>/libz.so.1"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
         "${SDK_OPEN_HARMONY_JPEG_LIB}"
@@ -320,22 +326,29 @@ add_custom_command(TARGET sdkopen_harmony POST_BUILD
         "${SDK_OPEN_HARMONY_HARFBUZZ_LIB}"
         "$<TARGET_FILE_DIR:sdkopen_harmony>/libharfbuzz.so"
     COMMAND "${CMAKE_COMMAND}"
-        "-DMODEL_SOURCE_DIR=${SDK_OPEN_HARMONY_THIRD_PARTY_DIR}/czocr/models/x86-64"
+        "-DMODEL_SOURCE_DIR=${SDK_OPEN_HARMONY_THIRD_PARTY_DIR}/czocr/models/windows64"
         "-DOCR_RUNTIME_LIB=${SDK_OPEN_HARMONY_THIRD_PARTY_DIR}/czocr/lib/ohos/libczcv_ocr.so"
-        "-DMODEL_OUTPUT_DIR=$<TARGET_FILE_DIR:sdkopen_harmony>/models"
+        "-DOCR_ZLIB_LIB=${SDK_OPEN_HARMONY_ZLIB}"
+        "-DMODEL_OUTPUT_DIR=$<TARGET_FILE_DIR:sdkopen_harmony>"
+        "-DNATIVE_ONLY=ON"
         -P "${SDK_OPEN_REPO_ROOT}/src/sdk_open/cmake/CopyHarmonyOcrModels.cmake"
+    COMMAND "${CMAKE_COMMAND}" -E remove_directory "$<TARGET_FILE_DIR:sdkopen_harmony>/models"
     COMMENT "Copy SDK Open Harmony provider runtime libraries"
 )
 
 add_custom_target(sdk_open_harmony_core DEPENDS sdkopen_harmony)
 
-# Refresh model resources even when the native target does not need relinking.
+# Model data is staged from rawfile; only libraries belong in HAP libs/.
+# Refresh native libraries even when the target does not need relinking.
 add_custom_target(copy_sdk_open_harmony_ocr_models ALL
     COMMAND "${CMAKE_COMMAND}"
-        "-DMODEL_SOURCE_DIR=${SDK_OPEN_HARMONY_THIRD_PARTY_DIR}/czocr/models/x86-64"
+        "-DMODEL_SOURCE_DIR=${SDK_OPEN_HARMONY_THIRD_PARTY_DIR}/czocr/models/windows64"
         "-DOCR_RUNTIME_LIB=${SDK_OPEN_HARMONY_THIRD_PARTY_DIR}/czocr/lib/ohos/libczcv_ocr.so"
-        "-DMODEL_OUTPUT_DIR=$<TARGET_FILE_DIR:sdkopen_harmony>/models"
+        "-DOCR_ZLIB_LIB=${SDK_OPEN_HARMONY_ZLIB}"
+        "-DMODEL_OUTPUT_DIR=$<TARGET_FILE_DIR:sdkopen_harmony>"
+        "-DNATIVE_ONLY=ON"
         -P "${SDK_OPEN_REPO_ROOT}/src/sdk_open/cmake/CopyHarmonyOcrModels.cmake"
+    COMMAND "${CMAKE_COMMAND}" -E remove_directory "$<TARGET_FILE_DIR:sdkopen_harmony>/models"
     VERBATIM
 )
 add_dependencies(copy_sdk_open_harmony_ocr_models sdkopen_harmony)

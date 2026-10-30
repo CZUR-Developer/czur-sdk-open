@@ -39,7 +39,9 @@ bool Start(const std::string& work_dir, const std::string& web_root) {
     SetEnvironment("SDK_OPEN_LOG_DIR", JoinPath(work_dir, "logs"));
     SetEnvironment("SDK_GRAPHIC_MODEL_DIR", JoinPath(work_dir, "czcv_model"));
     // CZOCR appends license.lic directly to its model directory argument.
-    SetEnvironment("SDK_OCR_MODEL_DIR", JoinPath(work_dir, "models") + "/");
+    const std::string ocr_model_dir = JoinPath(work_dir, "models");
+    SetEnvironment("SDK_OCR_MODEL_DIR", ocr_model_dir + "/");
+    SetEnvironment("SDK_OCR_FONT_DIR", JoinPath(work_dir, "ocr_fonts"));
     SetEnvironment("SDK_GRAPHIC_LOG_PATH", JoinPath(JoinPath(work_dir, "logs"), "czcv_sdk.log"));
     InitializeSdkOpenLogger();
 

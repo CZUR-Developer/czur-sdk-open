@@ -13,7 +13,7 @@ const RAW_WEB_ROOT = 'sdkopen_web';
 const RAW_CZCV_MODEL_ROOT = 'sdkopen_czcv_model';
 const CZCV_MODEL_STAMP = '.sdkopen-czcv-model-v1';
 const RAW_CZOCR_MODEL_ROOT = 'sdkopen_czocr_model';
-const CZOCR_MODEL_STAMP = '.sdkopen-czocr-model-20261029B';
+const RAW_CZOCR_MODEL_VERSION = 'sdkopen_czocr_model_version.txt';
 
 function ensureDirectory(path: string): void {
   try {
@@ -76,7 +76,15 @@ function stageCzcvModels(manager: resourceManager.ResourceManager, workDir: stri
 
 function stageCzocrModels(manager: resourceManager.ResourceManager, workDir: string): void {
   const modelDir = `${workDir}/models`;
-  const stampPath = `${modelDir}/${CZOCR_MODEL_STAMP}`;
+  const versionBytes = manager.getRawFileContentSync(RAW_CZOCR_MODEL_VERSION);
+  let version = '';
+  for (let index = 0; index < versionBytes.length; index++) {
+    version += String.fromCharCode(versionBytes[index]);
+  }
+  if (!/^[a-f0-9]{64}$/.test(version)) {
+    throw new Error('Invalid CZOCR model resource version');
+  }
+  const stampPath = `${modelDir}/.sdkopen-czocr-model-${version}`;
   if (fileExists(stampPath)) {
     return;
   }
@@ -114,6 +122,9 @@ export default class SdkOpenServiceExtension extends AppServiceExtensionAbility 
       ensureDirectory(workDir);
       stageCzcvModels(this.context.resourceManager, workDir);
       stageCzocrModels(this.context.resourceManager, workDir);
+      if (!fileExists(`${workDir}/ocr_fonts/SourceHanSansCN-Normal.otf`)) {
+        copyRawTree(this.context.resourceManager, 'sdkopen_ocr_fonts', `${workDir}/ocr_fonts`);
+      }
       const result = String(sdkOpen.start(workDir, webRoot));
       if (!result.includes('"success":true')) {
         throw new Error(`sdk_open start failed: ${result}`);
