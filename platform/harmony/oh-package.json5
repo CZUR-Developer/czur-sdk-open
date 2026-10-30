@@ -1,6 +1,6 @@
 {
-  "modelVersion": "26.0.0",
-  "description": "CZUR SDK Open HarmonyOS service project.",
+  "modelVersion": "6.1.1",
+  "description": "CZUR Open SDK HarmonyOS service project.",
   "dependencies": {},
   "devDependencies": {
     "@ohos/hypium": "1.0.25",

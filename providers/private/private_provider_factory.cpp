@@ -2337,10 +2337,11 @@ ProviderBundle CreateProviderBundle(bool enable_sdk_open_storage_provider) {
     ProviderBundle bundle;
 #if defined(SDK_OPEN_HARMONY_REAL_PROVIDERS)
     // Harmony has no desktop scanner backends.  Keep the bundle limited to
-    // providers whose OHOS libraries are packaged by sdk_open_harmony; the
-    // host supplies the mock device provider for protocol compatibility and
-    // explicitly clears SANE/TWAIN below.
+    // providers whose OHOS libraries are packaged by sdk_open_harmony.
+    // USB/UVC devices are backed by the native OHOS DeviceManager; SANE/TWAIN
+    // remain unavailable and are explicitly cleared by the host.
     bundle.auth_provider = std::make_shared<PrivateAuthProvider>();
+    bundle.device_provider = std::make_shared<PrivateDeviceProvider>();
     bundle.image_enhance_provider = std::make_shared<PrivateImageEnhanceProvider>();
     bundle.ocr_provider = std::make_shared<PrivateOcrProvider>();
     bundle.ofd_provider = std::make_shared<PrivateOfdProvider>();

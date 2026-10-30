@@ -11,6 +11,7 @@
 
 #include <asio/ip/address.hpp>
 
+#include <chrono>
 #include <map>
 #include <mutex>
 #include <set>
@@ -21,6 +22,7 @@
 #include "sdk_json_utils.h"
 #include "sdk_logger.h"
 #include "sdk_tls_utils.h"
+#include "sdk_ws_video_backpressure.h"
 
 namespace editor {
 namespace sdk {
@@ -88,6 +90,8 @@ public:
     struct ActiveConnection {
         std::string stream_id;
         ListenerKind listener = ListenerKind::Plain;
+        detail::SdkWsVideoBackpressure backpressure;
+        std::shared_ptr<websocketpp::lib::asio::steady_timer> drain_timer;
     };
 
     websocketpp::lib::asio::io_service io_service;
@@ -106,6 +110,20 @@ public:
     std::atomic<uint64_t> auth_failed{0};
     std::atomic<uint64_t> binary_frames{0};
     std::atomic<uint64_t> binary_bytes{0};
+    std::atomic<uint64_t> preview_frames_dropped{0};
+    std::atomic<uint64_t> send_failures{0};
+
+    void CancelConnectionLocked(ActiveConnection* connection) {
+        if (!connection) {
+            return;
+        }
+        connection->backpressure.Disconnect();
+        if (connection->drain_timer) {
+            ErrorCode ec;
+            connection->drain_timer->cancel(ec);
+            connection->drain_timer.reset();
+        }
+    }
 
     template <typename ServerType>
     void ConfigureHandlers(ServerType* server, SdkWsVideoServer* owner, ListenerKind listener) {
@@ -162,6 +180,7 @@ public:
             const std::map<ConnectionHdl, ActiveConnection, std::owner_less<ConnectionHdl> >::iterator active_it =
                 active.find(hdl);
             if (active_it != active.end()) {
+                CancelConnectionLocked(&active_it->second);
                 const std::map<std::string, std::set<ConnectionHdl, std::owner_less<ConnectionHdl> > >::iterator stream_it =
                     stream_connections.find(active_it->second.stream_id);
                 if (stream_it != stream_connections.end()) {
@@ -258,6 +277,100 @@ public:
         const std::map<ConnectionHdl, ActiveConnection, std::owner_less<ConnectionHdl> >::const_iterator active_it = active.find(hdl);
         return active_it == active.end() ? ListenerKind::Plain : active_it->second.listener;
     }
+
+    size_t BufferedAmount(ListenerKind listener, ConnectionHdl hdl, ErrorCode* ec) {
+        if (listener == ListenerKind::Plain) {
+            const PlainWsServer::connection_ptr connection = plain_server.get_con_from_hdl(hdl, *ec);
+            return *ec || !connection ? 0u : connection->get_buffered_amount();
+        }
+#if SDK_OPEN_ENABLE_TLS
+        const TlsWsServer::connection_ptr connection = tls_server.get_con_from_hdl(hdl, *ec);
+        return *ec || !connection ? 0u : connection->get_buffered_amount();
+#else
+        *ec = ErrorCode();
+        return 0u;
+#endif
+    }
+
+    void CloseAfterSendFailure(ListenerKind listener, ConnectionHdl hdl, const std::string& reason) {
+        send_failures.fetch_add(1);
+        ErrorCode close_ec;
+        Close(listener, hdl, websocketpp::close::status::internal_endpoint_error, reason, &close_ec);
+    }
+
+    void ScheduleDrainPoll(ConnectionHdl hdl, ListenerKind listener) {
+        std::shared_ptr<websocketpp::lib::asio::steady_timer> timer;
+        {
+            std::lock_guard<std::mutex> lock(connections_mu);
+            const std::map<ConnectionHdl, ActiveConnection, std::owner_less<ConnectionHdl> >::iterator it = active.find(hdl);
+            if (it == active.end() || !it->second.backpressure.IsConnected()) {
+                return;
+            }
+            if (!it->second.drain_timer) {
+                it->second.drain_timer.reset(new websocketpp::lib::asio::steady_timer(io_service));
+            }
+            timer = it->second.drain_timer;
+        }
+        timer->expires_from_now(std::chrono::milliseconds(2));
+        timer->async_wait([this, hdl, listener, timer](const ErrorCode& timer_ec) {
+            if (timer_ec == websocketpp::lib::asio::error::operation_aborted) {
+                return;
+            }
+            ErrorCode ec;
+            const size_t buffered_amount = BufferedAmount(listener, hdl, &ec);
+            if (ec) {
+                CloseAfterSendFailure(listener, hdl, "video send state unavailable");
+                return;
+            }
+            if (buffered_amount != 0u) {
+                ScheduleDrainPoll(hdl, listener);
+                return;
+            }
+            bool send_next = false;
+            {
+                std::lock_guard<std::mutex> lock(connections_mu);
+                const std::map<ConnectionHdl, ActiveConnection, std::owner_less<ConnectionHdl> >::iterator it = active.find(hdl);
+                if (it == active.end()) {
+                    return;
+                }
+                send_next = it->second.backpressure.CompleteSend();
+            }
+            if (send_next) {
+                DriveConnection(hdl);
+            }
+        });
+    }
+
+    void DriveConnection(ConnectionHdl hdl) {
+        detail::SdkWsVideoBackpressure::FramePairPtr frame;
+        ListenerKind listener = ListenerKind::Plain;
+        {
+            std::lock_guard<std::mutex> lock(connections_mu);
+            const std::map<ConnectionHdl, ActiveConnection, std::owner_less<ConnectionHdl> >::iterator it = active.find(hdl);
+            if (it == active.end()) {
+                return;
+            }
+            listener = it->second.listener;
+            frame = it->second.backpressure.BeginSend();
+        }
+        if (!frame) {
+            return;
+        }
+        ErrorCode ec;
+        Send(listener, hdl, frame->metadata, websocketpp::frame::opcode::text, &ec);
+        if (ec) {
+            CloseAfterSendFailure(listener, hdl, "video metadata send failed");
+            return;
+        }
+        Send(listener, hdl, frame->binary, websocketpp::frame::opcode::binary, &ec);
+        if (ec) {
+            CloseAfterSendFailure(listener, hdl, "video binary send failed");
+            return;
+        }
+        binary_frames.fetch_add(1);
+        binary_bytes.fetch_add(static_cast<uint64_t>(frame->binary.size()));
+        ScheduleDrainPoll(hdl, listener);
+    }
 };
 
 SdkWsVideoServer::SdkWsVideoServer(const std::string& host, int port, const SdkTlsConfig& tls_config)
@@ -271,42 +384,42 @@ SdkWsVideoServer::~SdkWsVideoServer() { Stop(); }
 void SdkWsVideoServer::SetConnectionAuthHandler(ConnectionAuthHandler handler) { connection_auth_handler_ = handler; }
 
 bool SdkWsVideoServer::Start() {
+    std::lock_guard<std::mutex> impl_lock(impl_mu_);
     if (running_.load()) {
         return true;
     }
-    impl_.reset(new Impl());
-    if (!impl_->StartListener(&impl_->plain_server, this, host_, port_, ListenerKind::Plain)) {
-        impl_.reset();
+    std::shared_ptr<Impl> impl(new Impl());
+    if (!impl->StartListener(&impl->plain_server, this, host_, port_, ListenerKind::Plain)) {
         return false;
     }
     if (tls_config_.enabled) {
 #if SDK_OPEN_ENABLE_TLS
         std::string tls_error;
-        impl_->tls_context = CreateTlsContext(tls_config_, &tls_error);
-        if (!impl_->tls_context) {
+        impl->tls_context = CreateTlsContext(tls_config_, &tls_error);
+        if (!impl->tls_context) {
             SDK_OPEN_LOG_ERROR("[sdk_ws_video_server] TLS context initialization failed: {}", tls_error);
-            impl_.reset();
             return false;
         }
-        impl_->tls_server.set_tls_init_handler([this](ConnectionHdl) { return impl_->tls_context; });
+        Impl* const impl_ptr = impl.get();
+        impl->tls_server.set_tls_init_handler([impl_ptr](ConnectionHdl) { return impl_ptr->tls_context; });
         const std::string tls_host = tls_config_.bind_host.empty() ? host_ : tls_config_.bind_host;
-        if (!impl_->StartListener(&impl_->tls_server,
+        if (!impl->StartListener(&impl->tls_server,
                                   this,
                                   tls_host,
                                   tls_config_.video_wss_port,
                                   ListenerKind::Tls)) {
-            impl_.reset();
             return false;
         }
 #else
         SDK_OPEN_LOG_ERROR("[sdk_ws_video_server] TLS requested but this build has TLS disabled");
-        impl_.reset();
         return false;
 #endif
     }
+    impl_ = impl;
     running_.store(true);
-    impl_->io_thread = std::thread([this]() {
-        impl_->io_service.run();
+    Impl* const impl_ptr = impl.get();
+    impl->io_thread = std::thread([this, impl_ptr]() {
+        impl_ptr->io_service.run();
         running_.store(false);
     });
     SDK_OPEN_LOG_INFO("[sdk_ws_video_server] listening on ws://{}:{}", host_, port_);
@@ -319,34 +432,42 @@ bool SdkWsVideoServer::Start() {
 }
 
 void SdkWsVideoServer::Stop() {
-    if (!impl_) {
+    std::shared_ptr<Impl> impl;
+    {
+        std::lock_guard<std::mutex> impl_lock(impl_mu_);
+        impl.swap(impl_);
+    }
+    if (!impl) {
         return;
     }
     running_.store(false);
     ErrorCode ec;
-    impl_->plain_server.stop_listening(ec);
+    impl->plain_server.stop_listening(ec);
 #if SDK_OPEN_ENABLE_TLS
     if (tls_config_.enabled) {
-        impl_->tls_server.stop_listening(ec);
+        impl->tls_server.stop_listening(ec);
     }
 #endif
     {
-        std::lock_guard<std::mutex> lock(impl_->connections_mu);
-        for (std::set<ConnectionHdl, std::owner_less<ConnectionHdl> >::const_iterator it = impl_->connections.begin();
-             it != impl_->connections.end(); ++it) {
-            impl_->Close(impl_->ListenerFor(*it), *it, websocketpp::close::status::going_away, "server stopping", &ec);
+        std::lock_guard<std::mutex> lock(impl->connections_mu);
+        for (std::set<ConnectionHdl, std::owner_less<ConnectionHdl> >::const_iterator it = impl->connections.begin();
+             it != impl->connections.end(); ++it) {
+            const std::map<ConnectionHdl, Impl::ActiveConnection, std::owner_less<ConnectionHdl> >::iterator active_it = impl->active.find(*it);
+            if (active_it != impl->active.end()) {
+                impl->CancelConnectionLocked(&active_it->second);
+            }
+            impl->Close(impl->ListenerFor(*it), *it, websocketpp::close::status::going_away, "server stopping", &ec);
         }
-        impl_->connections.clear();
-        impl_->pending.clear();
-        impl_->active.clear();
-        impl_->stream_connections.clear();
-        impl_->active_connections.store(0);
+        impl->connections.clear();
+        impl->pending.clear();
+        impl->active.clear();
+        impl->stream_connections.clear();
+        impl->active_connections.store(0);
     }
-    impl_->io_service.stop();
-    if (impl_->io_thread.joinable()) {
-        impl_->io_thread.join();
+    impl->io_service.stop();
+    if (impl->io_thread.joinable()) {
+        impl->io_thread.join();
     }
-    impl_.reset();
     SDK_OPEN_LOG_INFO("[sdk_ws_video_server] stopped");
 }
 
@@ -362,21 +483,13 @@ bool SdkWsVideoServer::ReloadTls() {
 }
 
 void SdkWsVideoServer::PublishFrame(const SdkVideoFrame& frame) {
-    if (!impl_ || frame.stream_id.empty() || frame.payload.empty()) {
-        return;
-    }
-    std::vector<std::pair<ConnectionHdl, ListenerKind> > targets;
+    std::shared_ptr<Impl> impl;
     {
-        std::lock_guard<std::mutex> lock(impl_->connections_mu);
-        const std::map<std::string, std::set<ConnectionHdl, std::owner_less<ConnectionHdl> > >::const_iterator stream_it =
-            impl_->stream_connections.find(frame.stream_id);
-        if (stream_it == impl_->stream_connections.end()) {
-            return;
-        }
-        for (std::set<ConnectionHdl, std::owner_less<ConnectionHdl> >::const_iterator it = stream_it->second.begin();
-             it != stream_it->second.end(); ++it) {
-            targets.push_back(std::make_pair(*it, impl_->ListenerFor(*it)));
-        }
+        std::lock_guard<std::mutex> impl_lock(impl_mu_);
+        impl = impl_;
+    }
+    if (!impl || frame.stream_id.empty() || frame.payload.empty()) {
+        return;
     }
     Json meta = Json{{"device_id", frame.device_id},
                      {"stream_id", frame.stream_id},
@@ -394,58 +507,91 @@ void SdkWsVideoServer::PublishFrame(const SdkVideoFrame& frame) {
         meta["detected_rects_source"] = Json{{"width", frame.detected_rects_source_width},
                                              {"height", frame.detected_rects_source_height}};
     }
-    const std::string meta_payload = DumpJson(BuildWsEvent("stream.frame_meta", meta));
-    const std::string binary_payload(reinterpret_cast<const char*>(frame.payload.data()), frame.payload.size());
-    impl_->io_service.post([this, targets, meta_payload, binary_payload]() {
-        for (std::vector<std::pair<ConnectionHdl, ListenerKind> >::const_iterator it = targets.begin(); it != targets.end(); ++it) {
-            ErrorCode ec;
-            impl_->Send(it->second, it->first, meta_payload, websocketpp::frame::opcode::text, &ec);
-            if (ec) {
-                continue;
-            }
-            impl_->Send(it->second, it->first, binary_payload, websocketpp::frame::opcode::binary, &ec);
-            if (!ec) {
-                impl_->binary_frames.fetch_add(1);
-                impl_->binary_bytes.fetch_add(static_cast<uint64_t>(binary_payload.size()));
-            }
-        }
-    });
-}
-
-void SdkWsVideoServer::CloseStream(const std::string& stream_id) {
-    if (!impl_ || stream_id.empty()) {
-        return;
-    }
-    std::vector<std::pair<ConnectionHdl, ListenerKind> > targets;
+    std::shared_ptr<detail::SdkWsVideoFramePair> pair(new detail::SdkWsVideoFramePair());
+    pair->metadata = DumpJson(BuildWsEvent("stream.frame_meta", meta));
+    pair->binary.assign(reinterpret_cast<const char*>(frame.payload.data()), frame.payload.size());
+    pair->frame_seq = frame.frame_seq;
+    std::vector<ConnectionHdl> wakes;
     {
-        std::lock_guard<std::mutex> lock(impl_->connections_mu);
+        std::lock_guard<std::mutex> lock(impl->connections_mu);
         const std::map<std::string, std::set<ConnectionHdl, std::owner_less<ConnectionHdl> > >::const_iterator stream_it =
-            impl_->stream_connections.find(stream_id);
-        if (stream_it == impl_->stream_connections.end()) {
+            impl->stream_connections.find(frame.stream_id);
+        if (stream_it == impl->stream_connections.end()) {
             return;
         }
         for (std::set<ConnectionHdl, std::owner_less<ConnectionHdl> >::const_iterator it = stream_it->second.begin();
              it != stream_it->second.end(); ++it) {
-            targets.push_back(std::make_pair(*it, impl_->ListenerFor(*it)));
+            const std::map<ConnectionHdl, Impl::ActiveConnection, std::owner_less<ConnectionHdl> >::iterator active_it = impl->active.find(*it);
+            if (active_it == impl->active.end()) {
+                continue;
+            }
+            const detail::SdkWsVideoBackpressure::OfferResult result = active_it->second.backpressure.Offer(pair);
+            if (result.replaced_pending) {
+                impl->preview_frames_dropped.fetch_add(1);
+            }
+            if (result.schedule_wake) {
+                wakes.push_back(*it);
+            }
         }
     }
-    impl_->io_service.post([this, targets]() {
+    Impl* const impl_ptr = impl.get();
+    for (std::vector<ConnectionHdl>::const_iterator it = wakes.begin(); it != wakes.end(); ++it) {
+        const ConnectionHdl hdl = *it;
+        impl->io_service.post([impl_ptr, hdl]() { impl_ptr->DriveConnection(hdl); });
+    }
+}
+
+void SdkWsVideoServer::CloseStream(const std::string& stream_id) {
+    std::shared_ptr<Impl> impl;
+    {
+        std::lock_guard<std::mutex> impl_lock(impl_mu_);
+        impl = impl_;
+    }
+    if (!impl || stream_id.empty()) {
+        return;
+    }
+    std::vector<std::pair<ConnectionHdl, ListenerKind> > targets;
+    {
+        std::lock_guard<std::mutex> lock(impl->connections_mu);
+        const std::map<std::string, std::set<ConnectionHdl, std::owner_less<ConnectionHdl> > >::const_iterator stream_it =
+            impl->stream_connections.find(stream_id);
+        if (stream_it == impl->stream_connections.end()) {
+            return;
+        }
+        for (std::set<ConnectionHdl, std::owner_less<ConnectionHdl> >::const_iterator it = stream_it->second.begin();
+             it != stream_it->second.end(); ++it) {
+            const std::map<ConnectionHdl, Impl::ActiveConnection, std::owner_less<ConnectionHdl> >::iterator active_it = impl->active.find(*it);
+            if (active_it != impl->active.end()) {
+                impl->CancelConnectionLocked(&active_it->second);
+            }
+            targets.push_back(std::make_pair(*it, impl->ListenerFor(*it)));
+        }
+    }
+    Impl* const impl_ptr = impl.get();
+    impl->io_service.post([impl_ptr, targets]() {
         for (std::vector<std::pair<ConnectionHdl, ListenerKind> >::const_iterator it = targets.begin(); it != targets.end(); ++it) {
             ErrorCode ec;
-            impl_->Close(it->second, it->first, websocketpp::close::status::normal, "stream stopped", &ec);
+            impl_ptr->Close(it->second, it->first, websocketpp::close::status::normal, "stream stopped", &ec);
         }
     });
 }
 
 SdkWsVideoServer::Stats SdkWsVideoServer::GetStats() const {
     Stats stats;
-    if (!impl_) {
+    std::shared_ptr<Impl> impl;
+    {
+        std::lock_guard<std::mutex> impl_lock(impl_mu_);
+        impl = impl_;
+    }
+    if (!impl) {
         return stats;
     }
-    stats.active_connections = impl_->active_connections.load();
-    stats.auth_failed = impl_->auth_failed.load();
-    stats.binary_frames = impl_->binary_frames.load();
-    stats.binary_bytes = impl_->binary_bytes.load();
+    stats.active_connections = impl->active_connections.load();
+    stats.auth_failed = impl->auth_failed.load();
+    stats.binary_frames = impl->binary_frames.load();
+    stats.binary_bytes = impl->binary_bytes.load();
+    stats.preview_frames_dropped = impl->preview_frames_dropped.load();
+    stats.send_failures = impl->send_failures.load();
     return stats;
 }
 

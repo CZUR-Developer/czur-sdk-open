@@ -5,6 +5,7 @@ import { image } from '@kit.ImageKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { trayServiceControl } from '../common/TrayServiceControl';
+import { sdkOpenRuntime } from '../services/SdkOpenRuntime';
 
 export default class SdkOpenTrayAbility extends UIAbility {
   private registered: boolean = false;
@@ -19,8 +20,10 @@ export default class SdkOpenTrayAbility extends UIAbility {
   onCreate(want: Want): void {
     this.resident = want.abilityName === 'SdkOpenTrayAbility';
     if (this.resident) {
-      trayServiceControl.initialize(this.context);
+      sdkOpenRuntime.initialize(this.context);
+      trayServiceControl.initialize(this.context, sdkOpenRuntime);
       statusBarManager.on('rightMenuClick', this.rightMenuListener);
+      this.handleCommand(want);
     }
   }
 
@@ -44,7 +47,7 @@ export default class SdkOpenTrayAbility extends UIAbility {
       statusBarManager.addToStatusBar(this.context, {
         icons: { white, black },
         quickOperation: {
-          title: 'CZUR SDK Open', height: 220,
+          title: 'CZUR Open SDK', height: 420,
           moduleName: 'sdkopen_tray', abilityName: 'SdkOpenStatusBarAbility'
         },
         // Keep the system tray context menu limited to the same service lifecycle
@@ -73,7 +76,7 @@ export default class SdkOpenTrayAbility extends UIAbility {
         await this.registerTray();
         try {
           await this.context.startAbility({
-            bundleName: 'com.czur.sdkopen', moduleName: 'sdkopen_tray', abilityName: 'SdkOpenTrayAbility'
+            bundleName: 'com.czur.opensdk', moduleName: 'sdkopen_tray', abilityName: 'SdkOpenTrayAbility'
           }, {
             processMode: contextConstant.ProcessMode.ATTACH_TO_STATUS_BAR_ITEM,
             startupVisibility: contextConstant.StartupVisibility.STARTUP_HIDE
@@ -96,6 +99,10 @@ export default class SdkOpenTrayAbility extends UIAbility {
 
   onNewWant(want: Want): void {
     this.enterTray();
+    this.handleCommand(want);
+  }
+
+  private handleCommand(want: Want): void {
     const command = want.parameters?.['serviceCommand'] as string;
     if (this.resident && (command === 'start' || command === 'stop')) {
       trayServiceControl.execute(command);
@@ -103,7 +110,14 @@ export default class SdkOpenTrayAbility extends UIAbility {
   }
 
   onDestroy(): void {
-    if (this.resident) { statusBarManager.off('rightMenuClick', this.rightMenuListener); }
+    if (this.resident) {
+      statusBarManager.off('rightMenuClick', this.rightMenuListener);
+      // Normal exit awaits cleanup in AbilityStage. System teardown may skip
+      // that path; native async cleanup remains the final ownership fallback.
+      sdkOpenRuntime.stop().catch((error: Object): void => {
+        hilog.warn(0, 'SdkOpenTray', 'Tray runtime teardown failed: %{public}s', String(error));
+      });
+    }
     this.whiteIcon?.release();
     this.blackIcon?.release();
   }

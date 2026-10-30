@@ -8,7 +8,7 @@ endif()
 include("${SDK_OPEN_SOURCE_ROOT}/cmake/PrivateProviderSources.cmake")
 if(SDK_OPEN_HARMONY_HOST_BUILD)
     set(_sdk_harmony_provider_sources ${SDK_PRIVATE_PROVIDER_SRCS} ${SDK_PRIVATE_AUTH_CORE_SRCS})
-    list(FILTER _sdk_harmony_provider_sources EXCLUDE REGEX "/(private_device_provider|private_sane_provider|private_storage_cleanup|private_sdk_logger)\\.cpp$")
+    list(FILTER _sdk_harmony_provider_sources EXCLUDE REGEX "/(private_sane_provider|private_storage_cleanup|private_sdk_logger)\\.cpp$")
     add_library(sdk_private_providers STATIC ${_sdk_harmony_provider_sources})
     set_target_properties(sdk_private_providers PROPERTIES POSITION_INDEPENDENT_CODE ON)
     return()
@@ -748,6 +748,51 @@ target_link_libraries(sdk_private_provider_bundle_smoke_test PRIVATE
 if(BUILD_SDK_OPEN_TESTS)
     add_test(NAME sdk_private.provider_bundle
              COMMAND sdk_private_provider_bundle_smoke_test)
+endif()
+
+if(BUILD_SDK_OPEN_TESTS)
+    add_executable(sdk_harmony_device_provider_contract_test
+        "${SDK_OPEN_SOURCE_ROOT}/test/private/sdk_harmony_device_provider_contract_test.cpp"
+    )
+    target_include_directories(sdk_harmony_device_provider_contract_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${SDK_OPEN_SOURCE_ROOT}"
+        "${SDK_OPEN_SOURCE_ROOT}/interfaces"
+        "${SDK_OPEN_HOST_SOURCE_ROOT}/src/module/devices"
+        "${SDK_OPEN_THIRD_PARTY_ROOT}/opencv/include"
+        "${SDK_OPEN_THIRD_PARTY_ROOT}/opencv/include/${THIRD_PARTY_SYSTEM}"
+    )
+    target_link_libraries(sdk_harmony_device_provider_contract_test PRIVATE
+        devices_lib
+        sdk_open_third_party
+    )
+    if(WIN32)
+        czur_win_third_party_lib(
+            "opencv" "opencv_world450.lib" "opencv_world450d.lib"
+            SDK_HARMONY_DEVICE_PROVIDER_TEST_OPENCV_LIB)
+        target_link_libraries(sdk_harmony_device_provider_contract_test PRIVATE
+            ${SDK_HARMONY_DEVICE_PROVIDER_TEST_OPENCV_LIB}
+        )
+    elseif(APPLE)
+        target_link_libraries(sdk_harmony_device_provider_contract_test PRIVATE
+            "${SDK_OPEN_THIRD_PARTY_ROOT}/opencv/lib/${LIB_ARCH}/libopencv_world.4.5.0.dylib"
+        )
+        set_target_properties(sdk_harmony_device_provider_contract_test PROPERTIES
+            BUILD_RPATH "@loader_path;${SDK_OPEN_THIRD_PARTY_ROOT}/opencv/lib/${LIB_ARCH};${SDK_OPEN_THIRD_PARTY_ROOT}/libjpeg-turbo/lib/${LIB_ARCH}"
+        )
+        add_custom_command(TARGET sdk_harmony_device_provider_contract_test POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${SDK_OPEN_THIRD_PARTY_ROOT}/libjpeg-turbo/lib/${LIB_ARCH}/libturbojpeg.0.4.0.dylib"
+                "$<TARGET_FILE_DIR:sdk_harmony_device_provider_contract_test>/libturbojpeg.0.dylib"
+            VERBATIM
+        )
+    elseif(UNIX)
+        target_link_libraries(sdk_harmony_device_provider_contract_test PRIVATE
+            "${SDK_PRIVATE_OPENCV_RUNTIME_LIB}"
+        )
+    endif()
+    add_test(NAME sdk_private.harmony_device_provider_contract
+             COMMAND sdk_harmony_device_provider_contract_test)
 endif()
 
 add_executable(sdk_private_capture_timeout_smoke_test

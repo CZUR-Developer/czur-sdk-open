@@ -11,8 +11,8 @@
     "pages": "$profile:main_pages",
     "requestPermissions": [
       { "name": "ohos.permission.INTERNET" },
-      { "name": "ohos.permission.PREPARE_APP_TERMINATE" },
-      { "name": "ohos.permission.START_INVISIBLE_ABILITY" }
+      { "name": "ohos.permission.ACCESS_CERT_MANAGER" },
+      { "name": "ohos.permission.PREPARE_APP_TERMINATE" }
     ],
     "extensionAbilities": [
       {
@@ -51,6 +51,17 @@
             "actions": ["ohos.want.action.home"]
           }
         ]
+      },
+      {
+        "name": "HttpsCertificateInstallAbility",
+        "launchType": "singleton",
+        "srcEntry": "./ets/entryability/HttpsCertificateInstallAbility.ets",
+        "description": "$string:ability_desc",
+        "icon": "$media:app_icon",
+        "label": "$string:ability_label",
+        "startWindowIcon": "$media:app_icon",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": false
       }
     ]
   }

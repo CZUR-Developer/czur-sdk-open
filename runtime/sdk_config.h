@@ -15,6 +15,8 @@ struct SdkTlsConfig {
     std::string private_key_file;
     std::string private_key_password;
     int asset_https_port = 18082;
+    // Opt-in for embedded hosts; desktop Demo HTTP behavior stays unchanged.
+    int demo_https_port = 0;
     int command_wss_port = 18090;
     int video_wss_port = 18091;
 };

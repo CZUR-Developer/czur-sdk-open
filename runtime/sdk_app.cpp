@@ -34,6 +34,13 @@ namespace editor {
 namespace sdk {
 
 namespace {
+SdkTlsConfig DemoTlsConfig(const SdkTlsConfig& config) {
+    SdkTlsConfig demo = config;
+    demo.enabled = config.enabled && config.demo_https_port > 0;
+    demo.asset_https_port = config.demo_https_port;
+    return demo;
+}
+
 #if SDK_OPEN_ENABLE_HTTP_SERVER
 constexpr bool kSdkOpenHttpServerEnabled = true;
 #else
@@ -326,7 +333,8 @@ SdkApp::SdkApp(const SdkConfig& config, ProviderBundle providers)
       admin_http_server_(
           "admin-site", config_.bind_host, config_.admin_http_port, config_.web_root + "/admin", config_.auth_token),
       demo_http_server_(
-          "demo-site", config_.bind_host, config_.demo_http_port, config_.web_root + "/demo", config_.auth_token),
+          "demo-site", config_.bind_host, config_.demo_http_port, config_.web_root + "/demo", config_.auth_token,
+          true, DemoTlsConfig(config_.tls)),
       asset_http_server_(
           "asset-api", config_.bind_host, config_.asset_http_port, "", config_.auth_token, false, config_.tls),
       command_ws_server_(config_.bind_host, config_.command_ws_port, config_.tls),
@@ -612,14 +620,15 @@ bool SdkApp::ReloadTlsListeners() {
     for (int attempt = 1; attempt <= 2; ++attempt) {
         SDK_OPEN_LOG_INFO("[tls.rotation.reload] restarting TLS listeners, attempt={}", attempt);
         const bool asset_ok = asset_http_server_.ReloadTls();
+        const bool demo_ok = !kSdkOpenHttpServerEnabled || demo_http_server_.ReloadTls();
         const bool command_ok = command_ws_server_.ReloadTls();
         const bool video_ok = video_ws_server_.ReloadTls();
-        if (asset_ok && command_ok && video_ok) {
+        if (asset_ok && demo_ok && command_ok && video_ok) {
             SDK_OPEN_LOG_INFO("[tls.rotation.reload_succeeded] TLS listeners restarted");
             return true;
         }
-        SDK_OPEN_LOG_WARN("[tls.rotation.reload_failed] attempt={} asset={} command={} video={}",
-                          attempt, asset_ok, command_ok, video_ok);
+        SDK_OPEN_LOG_WARN("[tls.rotation.reload_failed] attempt={} asset={} demo={} command={} video={}",
+                          attempt, asset_ok, demo_ok, command_ok, video_ok);
     }
     SDK_OPEN_LOG_ERROR("[tls.rotation.reload_failed] one or more TLS listeners remain unavailable");
     return false;
@@ -744,6 +753,8 @@ Json SdkApp::BuildStatusJson() const {
                   {"authFailed", video_stats.auth_failed},
                   {"binaryFrames", video_stats.binary_frames},
                   {"binaryBytes", video_stats.binary_bytes},
+                  {"previewFramesDropped", video_stats.preview_frames_dropped},
+                  {"sendFailures", video_stats.send_failures},
               }},
          }},
         {"application",

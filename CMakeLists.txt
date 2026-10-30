@@ -128,7 +128,11 @@ set(SDK_OPEN_OPENSSL3_DIR "${SDK_OPEN_THIRD_PARTY_ROOT}/openssl3")
 
 add_library(sdk_open_tls_deps INTERFACE)
 if(SDK_OPEN_ENABLE_TLS)
-    if(APPLE)
+    if(OHOS_PLATFORM STREQUAL "OHOS" OR OS_OHOS)
+        set(SDK_OPEN_OPENSSL3_INCLUDE_DIR "${SDK_OPEN_OPENSSL3_DIR}/include/ohos")
+        set(SDK_OPEN_OPENSSL3_SSL_LIB "${SDK_OPEN_OPENSSL3_DIR}/lib/ohos/libssl.so.3")
+        set(SDK_OPEN_OPENSSL3_CRYPTO_LIB "${SDK_OPEN_OPENSSL3_DIR}/lib/ohos/libcrypto.so.3")
+    elseif(APPLE)
         set(SDK_OPEN_OPENSSL3_INCLUDE_DIR "${SDK_OPEN_OPENSSL3_DIR}/include/mac")
         set(SDK_OPEN_OPENSSL3_SSL_LIB "${SDK_OPEN_OPENSSL3_DIR}/lib/${LIB_ARCH}/libssl.3.dylib")
         set(SDK_OPEN_OPENSSL3_CRYPTO_LIB "${SDK_OPEN_OPENSSL3_DIR}/lib/${LIB_ARCH}/libcrypto.3.dylib")
@@ -162,7 +166,23 @@ if(SDK_OPEN_ENABLE_TLS)
         CPPHTTPLIB_OPENSSL_SUPPORT
     )
 else()
+    # cpp-httplib's public Request/Response layout changes when
+    # CPPHTTPLIB_OPENSSL_SUPPORT is defined (Request gains the SSL member).
+    # Harmony still links the real providers, which use this definition even
+    # when the listener TLS feature is disabled. Keep the definition consistent
+    # across every target that includes httplib; otherwise weak inline symbols
+    # such as Request::~Request can be selected from a different layout and
+    # crash while destroying the first HTTP request.
     target_compile_definitions(sdk_open_tls_deps INTERFACE SDK_OPEN_ENABLE_TLS=0)
+    if(OHOS_PLATFORM STREQUAL "OHOS" OR OS_OHOS)
+        target_compile_definitions(sdk_open_tls_deps INTERFACE CPPHTTPLIB_OPENSSL_SUPPORT)
+        # The Harmony provider targets keep the httplib OpenSSL ABI even when
+        # their listener is HTTP-only.  The header still needs the matching
+        # OpenSSL declarations while compiling that shared layout.
+        target_include_directories(sdk_open_tls_deps BEFORE INTERFACE
+            "${SDK_OPEN_THIRD_PARTY_ROOT}/openssl3/include/ohos"
+        )
+    endif()
 endif()
 
 if(NOT EXISTS "${SDK_OPEN_CPP_HTTPLIB_DIR}/httplib.h")
@@ -389,6 +409,24 @@ if(BUILD_SDK_OPEN_TESTS)
     )
     add_test(NAME sdk_open.status_software
              COMMAND sdk_open_status_software_test)
+
+    add_executable(sdk_open_ws_video_backpressure_test
+        test/sdk_ws_video_backpressure_test.cpp
+    )
+    target_include_directories(sdk_open_ws_video_backpressure_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/transport"
+    )
+    add_test(NAME sdk_open.ws_video_backpressure
+             COMMAND sdk_open_ws_video_backpressure_test)
+
+    add_executable(sdk_open_ws_video_server_integration_test
+        test/sdk_ws_video_server_integration_test.cpp
+    )
+    target_link_libraries(sdk_open_ws_video_server_integration_test PRIVATE
+        sdk_open_runtime
+    )
+    add_test(NAME sdk_open.ws_video_server_integration
+             COMMAND sdk_open_ws_video_server_integration_test)
 
     add_executable(sdk_open_ocr_language_contract_test
         test/ocr_language_contract_test.cpp

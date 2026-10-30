@@ -19,10 +19,10 @@ set(CZUR_TARGET_OUTPUT_DIR "${CMAKE_BINARY_DIR}/runtime" CACHE PATH "sdk_open ru
 set(BUILD_SDK_OPEN_TESTS OFF CACHE BOOL "Disable desktop sdk_open tests in the Harmony app build" FORCE)
 set(BUILD_SDK_WEB OFF CACHE BOOL "Web assets are staged by the Harmony project" FORCE)
 set(SDK_OPEN_USE_PREBUILT_WEB OFF CACHE BOOL "Web assets are staged by the Harmony project" FORCE)
-set(SDK_OPEN_ENABLE_TLS OFF CACHE BOOL "TLS is enabled after OHOS crypto packaging is available" FORCE)
+option(SDK_OPEN_ENABLE_TLS "Enable local HTTPS/WSS listeners" ON)
 set(SDK_OPEN_ENABLE_HTTP_SERVER ON CACHE BOOL "Enable sdk_open HTTP/WS listeners" FORCE)
-set(BUILD_SDK_PRIVATE OFF CACHE BOOL "Private desktop provider is not part of the Harmony demo" FORCE)
-set(SDK_OPEN_USE_PRIVATE_PROVIDER OFF CACHE BOOL "Use mock providers for the Harmony demo" FORCE)
+set(BUILD_SDK_PRIVATE OFF CACHE BOOL "Do not build the desktop private SDK variants" FORCE)
+set(SDK_OPEN_USE_PRIVATE_PROVIDER OFF CACHE BOOL "Harmony host selects its real providers explicitly" FORCE)
 
 include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/Dependencies.cmake")
 if(NOT EXISTS "${SDK_OPEN_HOST_SOURCE_ROOT}/src/module/CMakeLists.txt")
@@ -33,6 +33,7 @@ set(SDK_OPEN_HARMONY_HOST_BUILD ON)
 add_subdirectory("${SDK_OPEN_SOURCE_ROOT}" sdk_open_runtime)
 
 set(OS_HARMONYOS ON)
+set(OS_OHOS ON)
 set(BUILD_SDK_OPEN ON)
 set(PROJECT_ARCH "arm64")
 # Reused module sources use the same symbol to select Harmony-safe headers and
@@ -51,8 +52,9 @@ macro(GROUP_TARGET_SOURCES target root)
     # DevEco CMake invocation; keep the module CMakeLists reusable.
 endmacro()
 
-# Only non-device modules are brought into the Harmony service.  SANE/TWAIN
-# and their desktop helpers are intentionally not part of this target.
+# The USB UVC backend shares the native service with the real providers.
+# SANE/TWAIN and their desktop helpers remain outside this target.
+add_subdirectory("${SDK_OPEN_REPO_ROOT}/src/module/devices" sdk_harmony_devices)
 add_subdirectory("${SDK_OPEN_REPO_ROOT}/src/module/utils" sdk_harmony_utils)
 add_subdirectory("${SDK_OPEN_REPO_ROOT}/src/module/imgengine" sdk_harmony_imgengine)
 add_subdirectory("${SDK_OPEN_REPO_ROOT}/src/module/pdf" sdk_harmony_pdf)
@@ -139,8 +141,8 @@ target_compile_definitions(sdk_private_providers PRIVATE ${_sdk_provider_definit
 target_compile_options(sdk_private_providers PRIVATE -ffunction-sections -fdata-sections)
 target_link_libraries(sdk_private_providers PRIVATE
     sdk_open_interfaces sdk_open_logging
-    utils_lib imgengine pdf_lib ofd_lib docx ocr_lib auth_lib)
-target_link_libraries(sdkopen_harmony PRIVATE sdk_private_providers)
+    utils_lib imgengine pdf_lib ofd_lib docx ocr_lib auth_lib devices_lib)
+target_link_libraries(sdkopen_harmony PRIVATE sdk_private_providers devices_usb_host_napi)
 
 # MuPDF's archives contain a private JPEG implementation and memory manager.
 # Keep them local so OpenCV uses the packaged libjpeg ABI instead. docx also

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 
 #include "sdk_config.h"
@@ -22,6 +23,8 @@ public:
         uint64_t auth_failed = 0;
         uint64_t binary_frames = 0;
         uint64_t binary_bytes = 0;
+        uint64_t preview_frames_dropped = 0;
+        uint64_t send_failures = 0;
     };
 
     struct ConnectionAuthResult {
@@ -53,7 +56,8 @@ private:
     SdkTlsConfig tls_config_;
     std::atomic<bool> running_;
     ConnectionAuthHandler connection_auth_handler_;
-    std::unique_ptr<Impl> impl_;
+    mutable std::mutex impl_mu_;
+    std::shared_ptr<Impl> impl_;
 };
 
 } // namespace sdk

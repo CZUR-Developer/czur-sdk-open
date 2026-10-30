@@ -1,6 +1,6 @@
 {
   "app": {
-    "bundleName": "com.czur.sdkopen",
+    "bundleName": "com.czur.opensdk",
     "vendor": "czur",
     "versionCode": 1000000,
     "versionName": "1.0.0",
