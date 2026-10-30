@@ -40,7 +40,7 @@ struct HttpsCertificateInstall {
 
   build() {
     Column({ space: 20 }) {
-      Text('CZUR SDK Open HTTPS 证书').fontSize(22).fontWeight(FontWeight.Medium)
+      Text('CZUR Open SDK HTTPS 证书').fontSize(22).fontWeight(FontWeight.Medium)
       Text(this.message).fontSize(16).fontColor('#555555').textAlign(TextAlign.Center)
       Button('安装证书').width('100%').enabled(!this.busy)
         .onClick(() => { this.install(); })

@@ -2,5 +2,5 @@
   "name": "libsdkopen_harmony.so",
   "types": "./Index.d.ts",
   "version": "1.0.0",
-  "description": "CZUR SDK Open HarmonyOS native runtime."
+  "description": "CZUR Open SDK HarmonyOS native runtime."
 }

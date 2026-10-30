@@ -47,7 +47,7 @@ export default class SdkOpenTrayAbility extends UIAbility {
       statusBarManager.addToStatusBar(this.context, {
         icons: { white, black },
         quickOperation: {
-          title: 'CZUR SDK Open', height: 360,
+          title: 'CZUR Open SDK', height: 420,
           moduleName: 'sdkopen_tray', abilityName: 'SdkOpenStatusBarAbility'
         },
         // Keep the system tray context menu limited to the same service lifecycle

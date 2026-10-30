@@ -195,6 +195,12 @@
                 </div>
               </div>
               <div class="space-y-2 p-3">
+                <p v-if="captureViewer.loadingCardId === card.id" role="status" class="text-xs text-cyan-700">
+                  {{ t('pages.captureAcquisition.fullImageLoading') }}
+                </p>
+                <p v-if="captureViewer.errorCardId === card.id" role="alert" class="text-xs text-rose-600">
+                  {{ captureViewer.error }}
+                </p>
                 <div class="flex items-start justify-between gap-3">
                   <p class="min-w-0 truncate text-sm font-semibold text-slate-900">{{ card.filename }}</p>
                   <StatusPill :label="card.status" :tone="captureStatusTone(card.status)" />
@@ -498,9 +504,10 @@ import {
   stopVideo,
 } from '../services/device-video';
 import type { EnhancePipeline, EnhanceWorkflow } from '../services/image-enhance-workflows';
-import { openImageViewer } from '../services/image-viewer';
+import { closeImageViewer, imageViewerState, openImageViewer } from '../services/image-viewer';
 import { buildAssetApiUrl, type CommandEvent } from '../services/protocol';
 import { recordInternalRuntimeEvent, recordRuntimeEvent, runtimeRecordState } from '../services/runtime-records';
+import { isBrowserRenderableImage, selectCaptureViewerAsset } from '../utils/capture-preview.js';
 
 import type { TableColumn, TableRow, TimelineItem, Tone } from '../types/demo';
 
@@ -567,6 +574,8 @@ interface CaptureResult {
 
 interface CapturePreviewCard {
   id: string;
+  resultId: string;
+  assetId: string;
   filename: string;
   status: string;
   resolution: string;
@@ -723,6 +732,9 @@ const captureSessionSummary = ref<CaptureSessionSummary>({
 });
 const activeCaptureTasks = new Set<string>();
 const thumbnailRequests = new Map<string, number>();
+const captureViewer = reactive({ loadingCardId: '', errorCardId: '', error: '' });
+let captureViewerRequest: AbortController | null = null;
+let captureViewerObjectUrl = '';
 let commandEventUnsubscribe: (() => void) | null = null;
 const suppressAutoOpen = ref(false);
 const captureVideoCanvas = ref<HTMLCanvasElement | null>(null);
@@ -982,6 +994,8 @@ const capturePreviewCards = computed<CapturePreviewCard[]>(() =>
       return [
         {
           id: result.id,
+          resultId: result.id,
+          assetId: result.thumbnailAssetId,
           filename: result.filename,
           status: result.status,
           resolution: result.resolution,
@@ -995,6 +1009,8 @@ const capturePreviewCards = computed<CapturePreviewCard[]>(() =>
     }
     return result.previews.map((preview, index) => ({
       id: preview.id,
+      resultId: result.id,
+      assetId: preview.assetId,
       filename: result.previews.length === 1 ? result.filename : `${result.filename} #${index + 1}`,
       status: result.status,
       resolution: result.resolution,
@@ -1022,8 +1038,19 @@ const eventItems = computed<TimelineItem[]>(() =>
 );
 
 watch(
+  () => [imageViewerState.open, imageViewerState.src] as const,
+  ([open, src]) => {
+    if (captureViewerObjectUrl && (!open || src !== captureViewerObjectUrl)) {
+      URL.revokeObjectURL(captureViewerObjectUrl);
+      captureViewerObjectUrl = '';
+    }
+  },
+);
+
+watch(
   () => [authSessionState.commandState, authSessionState.sessionToken] as const,
   ([state, sessionToken]) => {
+    resetCaptureViewer();
     commandEventUnsubscribe?.();
     commandEventUnsubscribe = null;
     if (state === 'success' && sessionToken) {
@@ -1125,6 +1152,7 @@ watch(
 onBeforeUnmount(() => {
   commandEventUnsubscribe?.();
   commandEventUnsubscribe = null;
+  resetCaptureViewer();
   revokeAllThumbnailObjectUrls();
   void closeSelectedDevice();
   resetDeviceVideo();
@@ -1715,6 +1743,7 @@ function updateCapturePreview(resultId: string, previewId: string, patch: Partia
 }
 
 function clearCaptureResults(): void {
+  resetCaptureViewer();
   revokeAllThumbnailObjectUrls();
   captureResults.value = [];
   activeCaptureTasks.clear();
@@ -1726,15 +1755,79 @@ function clearCaptureResults(): void {
   });
 }
 
-function openCapturePreviewViewer(card: CapturePreviewCard): void {
-  if (!card.thumbnailObjectUrl) {
+async function openCapturePreviewViewer(card: CapturePreviewCard): Promise<void> {
+  resetCaptureViewer();
+  const result = captureResults.value.find((item) => item.id === card.resultId);
+  const asset = selectCaptureViewerAsset(result?.assets ?? [], card.assetId);
+  if (!asset) {
+    captureViewer.errorCardId = card.id;
+    captureViewer.error = t('pages.captureAcquisition.fullImageUnavailable');
     return;
   }
-  openImageViewer({
-    src: card.thumbnailObjectUrl,
-    title: card.filename,
-    subtitle: [card.thumbnailAssetKind, card.resolution, card.status].filter(Boolean).join(' · '),
-  });
+  const sessionToken = authSessionState.sessionToken;
+  if (!sessionToken) {
+    captureViewer.errorCardId = card.id;
+    captureViewer.error = t('pages.captureAcquisition.thumbnailAuthMissing');
+    return;
+  }
+
+  const request = new AbortController();
+  captureViewerRequest = request;
+  captureViewer.loadingCardId = card.id;
+  try {
+    const response = await fetch(resolveAssetUrl(assetAccessPath(asset)), {
+      headers: { Authorization: `Bearer ${sessionToken}` },
+      signal: request.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`${response.status} ${response.statusText}`.trim());
+    }
+    const contentType = response.headers.get('content-type') || asset.contentType;
+    if (!contentType.toLowerCase().startsWith('image/')) {
+      throw new Error(`unexpected content-type: ${contentType || 'unknown'}`);
+    }
+    let blob = await response.blob();
+    if (!blob.type.toLowerCase().startsWith('image/')) {
+      blob = blob.slice(0, blob.size, contentType);
+    }
+    if (captureViewerRequest !== request) {
+      return;
+    }
+    captureViewerObjectUrl = URL.createObjectURL(blob);
+    openImageViewer({
+      src: captureViewerObjectUrl,
+      title: card.filename,
+      subtitle: [asset.kind, card.resolution, card.status].filter(Boolean).join(' · '),
+    });
+  } catch (error) {
+    if (captureViewerRequest !== request) {
+      return;
+    }
+    captureViewer.errorCardId = card.id;
+    captureViewer.error = t('pages.captureAcquisition.fullImageLoadFailed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    if (captureViewerRequest === request) {
+      captureViewerRequest = null;
+      captureViewer.loadingCardId = '';
+    }
+  }
+}
+
+function resetCaptureViewer(): void {
+  captureViewerRequest?.abort();
+  captureViewerRequest = null;
+  captureViewer.loadingCardId = '';
+  captureViewer.errorCardId = '';
+  captureViewer.error = '';
+  if (captureViewerObjectUrl) {
+    if (imageViewerState.src === captureViewerObjectUrl) {
+      closeImageViewer();
+    }
+    URL.revokeObjectURL(captureViewerObjectUrl);
+    captureViewerObjectUrl = '';
+  }
 }
 
 function selectDisplayAssets(assets: CaptureAssetPayload[]): CaptureAssetPayload[] {
@@ -1860,14 +1953,6 @@ function resolveAssetUrl(path: string): string {
 
 function assetAccessPath(asset: CaptureAssetPayload): string {
   return asset.url || asset.downloadUrl;
-}
-
-function isBrowserRenderableImage(asset: CaptureAssetPayload): boolean {
-  const contentType = asset.contentType.toLowerCase();
-  if (!contentType) {
-    return asset.kind.includes('thumbnail') || asset.kind === 'original' || asset.kind.startsWith('page_processed') || asset.kind.startsWith('color_processed');
-  }
-  return ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif', 'image/bmp'].includes(contentType);
 }
 
 function revokeAllThumbnailObjectUrls(): void {

@@ -91,6 +91,24 @@ class TrayServiceControl {
     }
   }
 
+  async openAdmin(): Promise<void> {
+    const context = this.popupContext;
+    if (!context) {
+      hilog.error(0, 'SdkOpenTray', 'Cannot open SDK Open admin before popup initialization');
+      return;
+    }
+    try {
+      await context.startAbility({
+        action: 'ohos.want.action.viewData',
+        uri: 'http://127.0.0.1:17080/',
+        entities: ['entity.system.browsable']
+      });
+      hilog.info(0, 'SdkOpenTray', 'SDK Open admin page opened');
+    } catch (error) {
+      hilog.error(0, 'SdkOpenTray', 'SDK Open admin page failed to open: %{public}s', String(error));
+    }
+  }
+
   async openHttpsDemo(): Promise<void> {
     const context = this.popupContext;
     if (!context) {

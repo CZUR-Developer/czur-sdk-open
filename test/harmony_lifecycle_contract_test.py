@@ -403,7 +403,8 @@ async function controllerScenario() {
   await popup.openHttpsDemo();
   await popup.execute('stop');
   await popup.openDemo();
-  assert.strictEqual(popupEvents.length, 5);
+  await popup.openAdmin();
+  assert.strictEqual(popupEvents.length, 6);
   assert.strictEqual(popupEvents[0].want.bundleName, 'com.czur.opensdk');
   assert.strictEqual(popupEvents[0].want.parameters.serviceCommand, 'start');
   assert.strictEqual(popupEvents[0].options.processMode, 'attach');
@@ -418,6 +419,10 @@ async function controllerScenario() {
   assert.strictEqual(popupEvents[3].options.startupVisibility, 'hide');
   assert.strictEqual(popupEvents[4].want.uri, 'http://127.0.0.1:17081/');
   assert.strictEqual(popupEvents[4].options, undefined);
+  assert.strictEqual(popupEvents[5].want.action, 'ohos.want.action.viewData');
+  assert.strictEqual(popupEvents[5].want.uri, 'http://127.0.0.1:17080/');
+  assert.deepStrictEqual(Array.from(popupEvents[5].want.entities), ['entity.system.browsable']);
+  assert.strictEqual(popupEvents[5].options, undefined);
 }
 
 async function abilityScenario() {

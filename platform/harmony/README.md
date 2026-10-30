@@ -6,7 +6,7 @@
 - `SdkOpenLauncherAbility` 是外部启动入口，负责注册桌面状态栏图标；
 - `SdkOpenTrayAbility` 以 `ATTACH_TO_STATUS_BAR_ITEM` 隐藏运行，持有 native runtime、
   USB Host 和设备生命周期；
-- `SdkOpenStatusBarAbility`（`statusBarView`）提供托盘弹窗，Demo 支持本机 HTTP/HTTPS 打开；
+- `SdkOpenStatusBarAbility`（`statusBarView`）提供托盘弹窗，支持打开本机管理站点和 HTTP/HTTPS Demo；
 - 退出托盘时先停止 runtime 和设备，再释放 USB Host；
 - 不再包含 `sdkopen` feature HAP 或 `AppServiceExtensionAbility`。
 
