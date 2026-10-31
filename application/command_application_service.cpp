@@ -2853,13 +2853,16 @@ CommandApplicationService::BuildHardGrabPayload(const std::string& connection_id
 void CommandApplicationService::DispatchDeviceEvent(const SdkDeviceEvent& event) {
     const bool is_added = event.type == "added";
     const bool is_removed = event.type == "removed";
-    if (!is_added && !is_removed) {
+    const bool is_stream_error = event.type == "stream_error";
+    if (!is_added && !is_removed && !is_stream_error) {
         SDK_OPEN_LOG_WARN("[sdk_device_event] drop event reason=unknown_type type={} device={}",
                           event.type,
                           event.device_id);
         return;
     }
-    const std::string event_name = is_added ? "device.added" : "device.removed";
+    const std::string event_name = is_added
+        ? "device.added"
+        : (is_stream_error ? "device.stream_error" : "device.removed");
     CommandEventSink sink;
     {
         std::lock_guard<std::mutex> lock(command_event_sink_mu_);
@@ -2880,7 +2883,9 @@ void CommandApplicationService::DispatchDeviceEvent(const SdkDeviceEvent& event)
         // 新增设备没有已打开会话可反查，必须广播给当前 command 连接，初次无设备页面才能收到并刷新 device.list。
         target_connections = ListCommandConnections();
     } else {
-        target_connections = ForgetOpenedDeviceFromAllConnections(event.device_id);
+        if (is_removed) {
+            target_connections = ForgetOpenedDeviceFromAllConnections(event.device_id);
+        }
         const std::vector<VideoSessionService::StreamBinding> removed_streams =
             video_session_service_.ClearDevice(event.device_id);
         for (std::vector<VideoSessionService::StreamBinding>::const_iterator it = removed_streams.begin();
@@ -2897,9 +2902,16 @@ void CommandApplicationService::DispatchDeviceEvent(const SdkDeviceEvent& event)
             ForgetCaptureProfile(*it, event.device_id);
         }
         if (target_connections.empty()) {
-            // 未打开设备没有精确会话归属，只广播 inventory 变化；payload 不携带 device_id，避免把未授权/未打开设备信息透给 demo。
-            target_connections = ListCommandConnections();
-            inventory_changed_payload = true;
+            if (is_removed) {
+                // 未打开设备没有精确会话归属，只广播 inventory 变化；payload 不携带 device_id，避免把未授权/未打开设备信息透给 demo。
+                target_connections = ListCommandConnections();
+                inventory_changed_payload = true;
+            } else {
+                // A stream error belongs only to connections that owned the
+                // failed stream. Do not broadcast a device id when the stream
+                // was already cleared by an explicit stop.
+                target_connections.clear();
+            }
         }
     }
 

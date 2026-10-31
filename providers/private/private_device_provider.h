@@ -336,6 +336,8 @@ private:
     void DetectPageTurn(const std::string& device_id, editor::devices::GenericFrame* frame, int scan_device_type);
     void DisarmStreamState(const std::string& device_id, bool erase_turn_detect);
     void StopAllRealtimeRectWorkers();
+    void HandleStreamError(const std::shared_ptr<editor::devices::Device>& device,
+                           const std::string& message);
     bool ShouldSuppressStillImageActionEvent(const std::string& device_id, int64_t now_ms);
     void SuppressStillImageActionEvent(const std::string& device_id, int64_t until_ms);
     void PublishDeviceActionEvent(const SdkDeviceActionEvent& event) const;

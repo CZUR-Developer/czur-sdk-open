@@ -2543,6 +2543,36 @@ void PrivateDeviceProvider::HandleHotplugEvent(const std::shared_ptr<editor::dev
     PublishDeviceEvent(event);
 }
 
+void PrivateDeviceProvider::HandleStreamError(
+    const std::shared_ptr<editor::devices::Device>& device,
+    const std::string& message) {
+    if (!device) {
+        return;
+    }
+    const std::string device_id = device->getDeviceId();
+    if (device_id.empty()) {
+        return;
+    }
+    SdkCaptureResult capture_result;
+    capture_result.code = ToCode(SdkStatusCode::StreamNotReady);
+    capture_result.message = message.empty()
+        ? "video stream stopped because the USB transport failed"
+        : message;
+    CompletePendingCapture(device_id, std::shared_ptr<PendingCapture>(), capture_result, "stream_error");
+    DisarmStreamState(device_id, false);
+
+    SdkDeviceEvent event;
+    event.device_id = device_id;
+    event.type = "stream_error";
+    event.reason = capture_result.message;
+    event.was_opened = device->isOpened();
+    event.was_streaming = true;
+    event.timestamp_ms = NowMs();
+    SDK_PRIVATE_LOG_ERROR("device.lifecycle stream_error device={} reason={}",
+                          SafeDeviceId(device_id), event.reason);
+    PublishDeviceEvent(event);
+}
+
 void PrivateDeviceProvider::PublishDeviceEvent(const SdkDeviceEvent& event) const {
     SdkDeviceEventCallback sink;
     {
@@ -2822,6 +2852,10 @@ bool PrivateDeviceProvider::EnsureDeviceManagerReady() const {
     PrivateDeviceProvider* self = const_cast<PrivateDeviceProvider*>(this);
     manager->setHotplugCallback([self](std::shared_ptr<editor::devices::Device> device, bool is_added) {
         self->HandleHotplugEvent(device, is_added);
+    });
+    manager->setStreamErrorCallback([self](std::shared_ptr<editor::devices::Device> device,
+                                           const std::string& message) {
+        self->HandleStreamError(device, message);
     });
 
     initialized_ = true;
