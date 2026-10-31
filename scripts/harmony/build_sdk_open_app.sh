@@ -35,9 +35,10 @@ Environment:
   OHPM             ohpm executable (default: ${OHPM})
   SDK_OPEN_HARMONY_BUILD_MODE  debug or release (default: ${BUILD_MODE})
 
-The main repository release entrypoint assembles the final APP with DevEco's
-app_packing_tool.jar. This child script only produces the unsigned APP and the
-signed HAP; do not upload its intermediate outputs directly.
+Hvigor assembles and signs the final APP in this child build. The main
+repository release entrypoint only verifies and archives that APP; it does not
+extract, replace, or repackage the embedded HAP. Do not upload an intermediate
+unsigned output directly.
 USAGE
 }
 
@@ -95,8 +96,8 @@ done
 [[ -d "${SDK_HOME}" ]] || { echo "DevEco SDK not found: ${SDK_HOME}" >&2; exit 1; }
 
 # A previous signed HAP/APP must never be mistaken for output from this
-# invocation. The main repository wrapper assembles the final APP after this
-# child exits, using DevEco's official app_packing_tool.jar.
+# invocation. Hvigor's assembleApp task produces the APP and its outer signing
+# block together with the signed HAP.
 rm -f "${SIGNED_HAP}" "${SIGNED_APP}"
 
 cd "${PROJECT_DIR}"

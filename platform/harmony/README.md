@@ -87,10 +87,11 @@ src/sdk_open/platform/harmony/sdkopen_tray/build/default/outputs/default/sdkopen
 
 默认产物未签名。真机安装前，需要在这个独立工程中为 `com.czur.opensdk` 配置
 `signingConfigs`。不要复用旧包名 `com.czur.sdkopen` 的 profile，也不要提交 `.p12`、
-密码或本机签名路径。配置签名后，子仓库脚本只生成 unsigned APP 和 signed HAP；
-主仓库 `tools/harmony/build_sdk_open_app.sh` 再调用 DevEco 官方
-`app_packing_tool.jar` 组装最终 APP 并提取验签。未配置签名时只保留 unsigned
-产物。不要使用 `zip`、Python `zipfile` 或 `repack_signed_app.py` 重新组装发布 APP。
+密码或本机签名路径。配置签名后，Hvigor 的 `assembleApp` 会直接生成带外层签名块的
+signed APP 和 signed HAP；主仓库 `tools/harmony/build_sdk_open_app.sh` 只负责验签、
+校验元数据并归档该原生 APP。未配置签名时只保留 unsigned 产物。不要使用 `zip`、
+Python `zipfile`、`app_packing_tool.jar` 或 `repack_signed_app.py` 拆包替换 HAP、
+重新组装发布 APP。
 
 ## 安装与运行
 
