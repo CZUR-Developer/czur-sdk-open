@@ -72,6 +72,11 @@ bool Start(const std::string& work_dir, const std::string& web_root) {
     config.tls.enabled = true;
     config.tls.bind_host = config.bind_host;
     config.tls.demo_https_port = 18081;
+    // Harmony's user-facing Demo entry is the same HTTP origin as the
+    // macOS/0.1.0 flow.  Publish capture assets on the matching HTTP listener
+    // so the frontend does not switch an HTTP page to a certificate-gated URL.
+    config.asset_base_url = "http://127.0.0.1:" +
+                            std::to_string(config.asset_http_port);
     config.tls.certificate_chain_file = JoinPath(work_dir, "tls/sdk-runtime.localhost.fullchain.pem");
     config.tls.private_key_file = JoinPath(work_dir, "tls/sdk-runtime.localhost.key.pem");
     std::string tls_error;

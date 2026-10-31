@@ -403,11 +403,10 @@ async function controllerScenario() {
   popup.initializePopup(popupContext);
   await popup.execute('start');
   await popup.installHttpsCertificate();
-  await popup.openHttpsDemo();
   await popup.execute('stop');
   await popup.openDemo();
   await popup.openAdmin();
-  assert.strictEqual(popupEvents.length, 6);
+  assert.strictEqual(popupEvents.length, 5);
   assert.strictEqual(popupEvents[0].want.bundleName, 'com.czur.opensdk');
   assert.strictEqual(popupEvents[0].want.parameters.serviceCommand, 'start');
   assert.strictEqual(popupEvents[0].options.processMode, 'attach');
@@ -415,17 +414,15 @@ async function controllerScenario() {
   assert.strictEqual(popupEvents[1].want.abilityName, 'HttpsCertificateInstallAbility');
   assert.strictEqual(popupEvents[1].want.parameters, undefined);
   assert.strictEqual(popupEvents[1].options, undefined);
-  assert.strictEqual(popupEvents[2].want.uri, 'https://127.0.0.1:18081/');
-  assert.strictEqual(popupEvents[2].options, undefined);
-  assert.strictEqual(popupEvents[3].want.parameters.serviceCommand, 'stop');
-  assert.strictEqual(popupEvents[3].options.processMode, 'attach');
-  assert.strictEqual(popupEvents[3].options.startupVisibility, 'hide');
-  assert.strictEqual(popupEvents[4].want.uri, 'http://127.0.0.1:17081/');
+  assert.strictEqual(popupEvents[2].want.parameters.serviceCommand, 'stop');
+  assert.strictEqual(popupEvents[2].options.processMode, 'attach');
+  assert.strictEqual(popupEvents[2].options.startupVisibility, 'hide');
+  assert.strictEqual(popupEvents[3].want.uri, 'http://127.0.0.1:17081/');
+  assert.strictEqual(popupEvents[3].options, undefined);
+  assert.strictEqual(popupEvents[4].want.action, 'ohos.want.action.viewData');
+  assert.strictEqual(popupEvents[4].want.uri, 'http://127.0.0.1:17080/');
+  assert.deepStrictEqual(Array.from(popupEvents[4].want.entities), ['entity.system.browsable']);
   assert.strictEqual(popupEvents[4].options, undefined);
-  assert.strictEqual(popupEvents[5].want.action, 'ohos.want.action.viewData');
-  assert.strictEqual(popupEvents[5].want.uri, 'http://127.0.0.1:17080/');
-  assert.deepStrictEqual(Array.from(popupEvents[5].want.entities), ['entity.system.browsable']);
-  assert.strictEqual(popupEvents[5].options, undefined);
 }
 
 async function abilityScenario() {
@@ -697,12 +694,20 @@ class HarmonyLifecycleContractTest(unittest.TestCase):
         self.assertIn("CertificateScope.CURRENT_USER", controller)
         self.assertIn("sdk-open/runtime/tls/local-runtime-root-ca.crt", controller)
         self.assertNotIn("local-runtime-root-ca.key.pem", controller)
-        self.assertIn("https://127.0.0.1:18081/", controller)
+        self.assertNotIn("openHttpsDemo", controller)
+        self.assertNotIn("https://sdk-runtime.localhost:18081/", controller)
+        self.assertNotIn("打开 HTTPS Demo", tray_page)
         self.assertIn("installHttpsCertificate()", tray_page)
         self.assertIn("getContext(this) as common.UIAbilityContext", install_page)
         self.assertIn("installHttpsRootCertificate(context)", install_page)
         self.assertNotIn("libsdkopen_harmony.so", install_page)
         self.assertNotIn("libsdkopen_harmony.so", install_ability)
+
+    def test_harmony_tls_publishes_certificate_hostname_for_assets(self) -> None:
+        host = read("native/sdk_open_harmony_host.cpp")
+        self.assertIn('config.asset_base_url = "http://127.0.0.1:"', host)
+        self.assertNotIn('config.asset_base_url = "https://sdk-runtime.localhost:"', host)
+        self.assertIn("config.tls.bind_host = config.bind_host", host)
 
     def test_native_runtime_stays_in_owner_hap_not_popup_controller(self) -> None:
         required = [

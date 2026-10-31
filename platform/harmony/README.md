@@ -6,7 +6,7 @@
 - `SdkOpenLauncherAbility` 是外部启动入口，负责注册桌面状态栏图标；
 - `SdkOpenTrayAbility` 以 `ATTACH_TO_STATUS_BAR_ITEM` 隐藏运行，持有 native runtime、
   USB Host 和设备生命周期；
-- `SdkOpenStatusBarAbility`（`statusBarView`）提供托盘弹窗，支持打开本机管理站点和 HTTP/HTTPS Demo；
+- `SdkOpenStatusBarAbility`（`statusBarView`）提供托盘弹窗，支持打开本机管理站点和 HTTP Demo；
 - 退出托盘时先停止 runtime 和设备，再释放 USB Host；
 - 不再包含 `sdkopen` feature HAP 或 `AppServiceExtensionAbility`。
 
@@ -141,17 +141,20 @@ src/sdk_open/scripts/harmony/run_sdk_open_app.sh \
 | asset HTTP | `http://127.0.0.1:17082/` |
 | command WebSocket | `ws://127.0.0.1:17090/` |
 | video WebSocket | `ws://127.0.0.1:17091/` |
-| demo HTTPS | `https://127.0.0.1:18081/` |
-| asset HTTPS | `https://127.0.0.1:18082/` |
-| command WSS | `wss://127.0.0.1:18090/` |
-| video WSS | `wss://127.0.0.1:18091/` |
+| asset HTTPS | `https://sdk-runtime.localhost:18082/` |
+| command WSS | `wss://sdk-runtime.localhost:18090/` |
+| video WSS | `wss://sdk-runtime.localhost:18091/` |
+
+HTTP Demo 返回的采集图片、缩略图和文档资源统一使用 `http://127.0.0.1:17082`，与
+`v0.1.0` 的前端访问方式一致；HTTPS Asset/WSS listener 仅作为可选的外部协议入口，不会被
+HTTP Demo 的资源响应自动切换使用。
 
 首次启动时 runtime 在应用沙箱生成本机根 CA 与服务证书，私钥留在沙箱。先点击托盘
-“安装本机 HTTPS 证书”，在系统窗口确认当前用户的 CA 安装，再点击“打开 HTTPS Demo”。
-证书安装由单独的可见 UIAbility 发起，popup 只启动该窗口；只需普通
+“安装本机 HTTPS 证书”，在系统窗口确认当前用户的 CA 安装。Demo 统一从“打开 HTTP Demo（调试）”进入，
+不再提供 HTTPS Demo 站点入口。证书安装由单独的可见 UIAbility 发起，popup 只启动该窗口；只需普通
 `ohos.permission.ACCESS_CERT_MANAGER`，不调用需要额外 ACL 的直接安装接口。服务证书 SAN
 包含 `sdk-runtime.localhost`、`localhost` 和 `127.0.0.1`，不覆盖局域网地址。
-HTTPS Demo 自动选择 WSS；HTTP Demo 使用 WS。卸载或清空应用数据会重新生成根 CA，需重新
+HTTP Demo 使用 WS。卸载或清空应用数据会重新生成根 CA，需重新
 安装新证书并在系统中清理旧证书。浏览器信任必须实测，`curl -k` 成功仅证明 TLS listener 可用。
 
 工作目录和日志位于应用 `filesDir` / `logFileDir` 对应的 SDK Open 沙箱目录。模型和

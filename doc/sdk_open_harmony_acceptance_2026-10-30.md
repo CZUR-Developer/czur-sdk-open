@@ -16,12 +16,12 @@
 
 ## HTTPS、WSS 和宿主
 
-用户已通过系统对话框安装当前应用生成的 `Local Runtime Root CA`。重新加载 HTTPS 页后，
-华为浏览器正常显示 Demo，无证书警告；连接页显示 `wss://127.0.0.1:18090`，
-`system.ping` 成功。用户在 HTTPS origin 输入 API KEY 后，`IS_VALID=是`，
-服务端 `boundSessions=1`；视频 WSS `18091` 随真实 stream 建立，持续发送 JPEG。
+用户从 `http://127.0.0.1:17081/capture-acquisition` 进入 HTTP Demo，华为浏览器正常显示 Demo；
+连接页在 HTTP Demo 下显示 `ws://127.0.0.1:17090`，
+`system.ping` 成功。用户在 HTTP origin 输入 API KEY 后，`IS_VALID=是`，
+服务端 `boundSessions=1`；视频 WS `17091` 随真实 stream 建立，持续发送 JPEG。
 
-HTTPS/HTTP 授权状态按浏览器 origin 隔离；HTTP 页的本地令牌不会自动迁移到 HTTPS 页。
+HTTP/HTTPS 授权状态按浏览器 origin 隔离；当前验收统一使用 HTTP Demo。
 不导出 API KEY、会话令牌或私钥。证书前台窗口关闭后，原托盘 PID `43483` 保持运行；
 开始设备验收前 uptime 约 10 小时，健康接口正常，未发现新增应用 crash。
 这段空闲驻留不替代下面的采集长测。
@@ -74,7 +74,7 @@ HTTPS/HTTP 授权状态按浏览器 origin 隔离；HTTP 页的本地令牌不�
 `expected=41508 received=41508 reads=41 request=1024`，runtime 确认
 `device.laser_config refreshed`。首次曲面任务 `cap-1793327103-1` 成功接收
 5696×4272 原图及独立激光图，记录 `graphic.curved_book success outputs=2 used_laser=true`
-和 `processing complete status=succeeded code=0 assets=13`；HTTPS Demo 显示左右两页。
+和 `processing complete status=succeeded code=0 assets=13`；HTTP Demo 显示左右两页。
 
 主仓 host 回归 7/7、N-API 4/4 通过；标定测试经真实
 DeviceCommand→DeviceManager→OHOS Host transport 调用链覆盖 2050 字节尾块、中途读取失败
@@ -99,7 +99,7 @@ DeviceCommand→DeviceManager→OHOS Host transport 调用链覆盖 2050 字节�
 在上述失败记录后，补齐模型资源并重新构建、签名和覆盖安装。最终 HAP SHA-256 为
 `68387ae0c2ffabb1a478d3f4d20e0bb0bc6166ee6fe6d0efcb0547ddb4bb1d36`，
 真机进程 PID 为 `56023`。用户已把样本换为黑色垫板上的平整文字纸，四边均在镜头内；
-验收在真机华为浏览器 `https://127.0.0.1:18081/capture-acquisition` 完成。
+验收在真机华为浏览器 `http://127.0.0.1:17081/capture-acquisition` 完成。
 
 修正内容：
 

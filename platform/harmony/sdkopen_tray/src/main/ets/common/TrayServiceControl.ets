@@ -4,7 +4,6 @@ import { certificateManagerDialog } from '@kit.DeviceCertificateKit';
 import { http } from '@kit.NetworkKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
-const HTTPS_DEMO_URL = 'https://127.0.0.1:18081/';
 const ROOT_CA_RELATIVE_PATH = 'sdk-open/runtime/tls/local-runtime-root-ca.crt';
 const MAX_ROOT_CA_BYTES = 1024 * 1024;
 
@@ -106,24 +105,6 @@ class TrayServiceControl {
       hilog.info(0, 'SdkOpenTray', 'SDK Open admin page opened');
     } catch (error) {
       hilog.error(0, 'SdkOpenTray', 'SDK Open admin page failed to open: %{public}s', String(error));
-    }
-  }
-
-  async openHttpsDemo(): Promise<void> {
-    const context = this.popupContext;
-    if (!context) {
-      hilog.error(0, 'SdkOpenTray', 'Cannot open SDK Open HTTPS demo before popup initialization');
-      return;
-    }
-    try {
-      await context.startAbility({
-        action: 'ohos.want.action.viewData',
-        uri: HTTPS_DEMO_URL,
-        entities: ['entity.system.browsable']
-      });
-      hilog.info(0, 'SdkOpenTray', 'SDK Open HTTPS demo page opened');
-    } catch (error) {
-      hilog.error(0, 'SdkOpenTray', 'SDK Open HTTPS demo page failed to open: %{public}s', String(error));
     }
   }
 

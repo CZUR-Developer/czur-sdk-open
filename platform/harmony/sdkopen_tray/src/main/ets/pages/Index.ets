@@ -40,8 +40,6 @@ struct Index {
           .onClick(() => { trayServiceControl.openDemo(); })
         Button('打开管理站点').width('100%').enabled(!this.busy && this.running)
           .onClick(() => { trayServiceControl.openAdmin(); })
-        Button('打开 HTTPS Demo').width('100%').enabled(!this.busy && this.running)
-          .onClick(() => { trayServiceControl.openHttpsDemo(); })
         Button('安装本机 HTTPS 证书').width('100%').enabled(!this.busy && this.running)
           .onClick(() => { trayServiceControl.installHttpsCertificate(); })
       }
