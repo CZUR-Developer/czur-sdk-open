@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Repack a freshly signed Harmony HAP into the outer APP archive."""
+"""Legacy APP repacker kept for old development tests.
+
+The main repository release path no longer calls this helper. It replaces an
+outer APP entry with Python's zipfile and must not be used to create an APP for
+AppGallery publication; use tools/harmony/build_sdk_open_app.sh so DevEco's
+official app_packing_tool.jar assembles the final package.
+"""
 
 import argparse
 import hashlib
@@ -164,6 +170,11 @@ def main():
 
 
 if __name__ == "__main__":
+    print(
+        "[sdk-open-harmony] WARNING: legacy Python APP repacker; do not use its "
+        "output for AppGallery. Use tools/harmony/build_sdk_open_app.sh.",
+        file=sys.stderr,
+    )
     try:
         sys.exit(main())
     except (OSError, RuntimeError, subprocess.CalledProcessError, zipfile.BadZipFile) as error:

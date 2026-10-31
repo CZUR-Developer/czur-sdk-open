@@ -16,9 +16,6 @@ UNSIGNED_APP="${APP_OUTPUT_DIR}/harmony-default-unsigned.app"
 SIGNED_APP="${APP_OUTPUT_DIR}/harmony-default-signed.app"
 UNSIGNED_HAP="${HAP_OUTPUT_DIR}/sdkopen_tray-default-unsigned.hap"
 SIGNED_HAP="${HAP_OUTPUT_DIR}/sdkopen_tray-default-signed.hap"
-APP_HAP_MEMBER="sdkopen_tray-default.hap"
-SIGN_TOOL="${HAP_SIGN_TOOL:-${SDK_HOME}/default/openharmony/toolchains/lib/hap-sign-tool.jar}"
-REPACK_TOOL="${SDK_OPEN_SOURCE_ROOT}/scripts/harmony/repack_signed_app.py"
 
 usage() {
   cat <<USAGE
@@ -37,7 +34,10 @@ Environment:
   HVIGOR           hvigorw executable (default: ${HVIGOR})
   OHPM             ohpm executable (default: ${OHPM})
   SDK_OPEN_HARMONY_BUILD_MODE  debug or release (default: ${BUILD_MODE})
-  HAP_SIGN_TOOL    hap-sign-tool.jar used to verify signed output
+
+The main repository release entrypoint assembles the final APP with DevEco's
+app_packing_tool.jar. This child script only produces the unsigned APP and the
+signed HAP; do not upload its intermediate outputs directly.
 USAGE
 }
 
@@ -94,13 +94,10 @@ done
 [[ -x "${OHPM}" ]] || { echo "ohpm not executable: ${OHPM}" >&2; exit 1; }
 [[ -d "${SDK_HOME}" ]] || { echo "DevEco SDK not found: ${SDK_HOME}" >&2; exit 1; }
 
-# A previous signed HAP must never be mistaken for output from this invocation.
-# Hvigor may also create a *-signed.app whose embedded HAP is still unsigned.
-python3 "${REPACK_TOOL}" --prepare \
-  --unsigned-app "${UNSIGNED_APP}" \
-  --signed-app "${SIGNED_APP}" \
-  --signed-hap "${SIGNED_HAP}" \
-  --member "${APP_HAP_MEMBER}"
+# A previous signed HAP/APP must never be mistaken for output from this
+# invocation. The main repository wrapper assembles the final APP after this
+# child exits, using DevEco's official app_packing_tool.jar.
+rm -f "${SIGNED_HAP}" "${SIGNED_APP}"
 
 cd "${PROJECT_DIR}"
 # Resolve local native type packages before ArkTS compilation. Without this,
@@ -113,10 +110,3 @@ JAVA_HOME="${JAVA_HOME}" \
   assembleApp --analyze=normal --parallel --incremental --no-daemon
 python3 "${SDK_OPEN_SOURCE_ROOT}/scripts/harmony/verify_sdk_open_native.py" \
   "${UNSIGNED_HAP}" --sdk "${SDK_HOME}"
-python3 "${REPACK_TOOL}" \
-  --unsigned-app "${UNSIGNED_APP}" \
-  --signed-app "${SIGNED_APP}" \
-  --signed-hap "${SIGNED_HAP}" \
-  --member "${APP_HAP_MEMBER}" \
-  --java "${JAVA_HOME}/bin/java" \
-  --sign-tool "${SIGN_TOOL}"
