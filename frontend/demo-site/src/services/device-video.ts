@@ -128,6 +128,8 @@ let videoSocket: WebSocket | null = null;
 let videoCanvas: HTMLCanvasElement | null = null;
 let videoContext: CanvasRenderingContext2D | null = null;
 let pendingFrame: PendingVideoFrame | null = null;
+// Pair metadata with binary arrival, independently of asynchronous decoding.
+let frameMetaQueue: FrameMeta[] = [];
 let decodingFrame = false;
 let streamGeneration = 0;
 let nextSyntheticFrameSeq = 1;
@@ -514,6 +516,7 @@ function connectVideoSocket(): void {
   socket.binaryType = 'arraybuffer';
   videoSocket = socket;
   socket.addEventListener('open', () => {
+    if (videoSocket !== socket) { return; }
     state.videoState = 'success';
     recordRuntimeEvent({
       title: 'video.connected',
@@ -522,6 +525,7 @@ function connectVideoSocket(): void {
     });
   });
   socket.addEventListener('message', (event) => {
+    if (videoSocket !== socket) { return; }
     if (typeof event.data === 'string') {
       handleVideoText(event.data);
       return;
@@ -534,6 +538,7 @@ function connectVideoSocket(): void {
     }
   });
   socket.addEventListener('error', () => {
+    if (videoSocket !== socket) { return; }
     state.videoState = 'error';
     recordAlert({
       name: 'VIDEO_WS_FAILED',
@@ -549,6 +554,7 @@ function handleVideoText(payload: string): void {
     const event = JSON.parse(payload) as { event?: string; payload?: FrameMeta };
     if (event.event === 'stream.frame_meta' && event.payload) {
       state.frameMeta = event.payload;
+      frameMetaQueue.push(event.payload);
       state.lastFrameAt = nowTimeLabel();
     }
   } catch {
@@ -557,14 +563,30 @@ function handleVideoText(payload: string): void {
 }
 
 function handleVideoBinary(data: Blob | ArrayBuffer): void {
+  // Drawing also updates state.frameMeta, so it cannot identify an incoming
+  // frame even on the synchronous ArrayBuffer path.
+  const meta = frameMetaQueue.shift() ?? null;
   if (data instanceof Blob) {
-    void data.arrayBuffer().then((buffer) => enqueueVideoFrame(buffer));
+    const generation = streamGeneration;
+    void data.arrayBuffer()
+      .then((buffer) => {
+        if (generation === streamGeneration) {
+          enqueueVideoFrame(buffer, meta);
+        }
+      })
+      .catch(() => {
+        if (generation === streamGeneration) {
+          state.receivedFrameCount += 1;
+          state.decodeFailedCount += 1;
+          state.droppedFrameCount += 1;
+        }
+      });
     return;
   }
-  enqueueVideoFrame(data);
+  enqueueVideoFrame(data, meta);
 }
 
-function enqueueVideoFrame(buffer: ArrayBuffer): void {
+function enqueueVideoFrame(buffer: ArrayBuffer, meta: FrameMeta | null): void {
   state.receivedFrameCount += 1;
   state.lastFrameBytes = buffer.byteLength;
 
@@ -573,7 +595,6 @@ function enqueueVideoFrame(buffer: ArrayBuffer): void {
     return;
   }
 
-  const meta = state.frameMeta;
   const frameStreamId = meta?.stream_id || state.streamId;
   if (frameStreamId !== state.streamId) {
     state.droppedFrameCount += 1;
@@ -583,7 +604,7 @@ function enqueueVideoFrame(buffer: ArrayBuffer): void {
   const frameSeq = typeof meta?.frame_seq === 'number' && Number.isFinite(meta.frame_seq)
     ? meta.frame_seq
     : nextSyntheticFrameSeq++;
-  if (frameSeq <= state.lastRenderedSeq) {
+  if (frameSeq <= state.lastRenderedSeq || (pendingFrame && frameSeq <= pendingFrame.frameSeq)) {
     state.droppedFrameCount += 1;
     return;
   }
@@ -620,7 +641,7 @@ function processPendingFrame(): void {
     return;
   }
 
-  const frame = pendingFrame;
+  let frame = pendingFrame;
   pendingFrame = null;
   decodingFrame = true;
   const generation = streamGeneration;
@@ -634,9 +655,10 @@ function processPendingFrame(): void {
     }
     if (pendingFrame && pendingFrame.frameSeq > frame.frameSeq) {
       state.droppedFrameCount += 1;
-      decodingFrame = false;
-      processPendingFrame();
-      return;
+      // Consume the newest frame in this callback. Scheduling another rAF
+      // here can starve rendering when producers outrun animation callbacks.
+      frame = pendingFrame;
+      pendingFrame = null;
     }
     void drawVideoFrame(frame, frame.meta)
       .then((rendered) => {
@@ -677,6 +699,7 @@ function resetPreview(): void {
   clearCanvas();
   streamGeneration += 1;
   pendingFrame = null;
+  frameMetaQueue = [];
   nextSyntheticFrameSeq = 1;
   state.streamId = '';
   state.streamSessionToken = '';

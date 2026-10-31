@@ -57,6 +57,10 @@
               </template>
             </PreviewStage>
 
+            <p v-if="deviceVideoState.errorMessage" role="alert" class="break-words text-sm font-medium text-rose-700">
+              {{ deviceVideoState.errorMessage }}
+            </p>
+
             <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
               <div class="rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm">
                 <div class="mb-3 flex items-center justify-between gap-3">

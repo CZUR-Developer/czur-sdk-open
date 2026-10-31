@@ -40,6 +40,9 @@
 #include "opencv2/opencv.hpp"
 #include "private_sdk_support.h"
 #include "private_device_frame_codec.h"
+#if defined(OS_OHOS)
+#include "usb_thread_qos_ohos.h"
+#endif
 #include "support/private_sdk_executable_path.h"
 #include "support/private_sdk_logger.h"
 #include "sdk_status_code.h"
@@ -51,6 +54,7 @@ namespace private_impl {
 namespace {
 
 const int kStillImageActionSuppressAfterCaptureMs = 3000;
+const int kCaptureRealtimeDetectionPauseTimeoutMs = 2000;
 
 char PathSeparator() {
 #if defined(_WIN32)
@@ -623,9 +627,14 @@ void SelectStillImagePayloads(const editor::devices::StillImagePair& image_pair,
 
 } // namespace
 
+PrivateDeviceProvider::~PrivateDeviceProvider() {
+    StopAllRealtimeRectWorkers();
+}
+
 struct PrivateDeviceProvider::PendingCapture {
     SdkCaptureRequest request;
     SdkCaptureCallback callback;
+    std::shared_ptr<RealtimeRectWorker> paused_realtime_rect_worker;
     bool image_transfer_protocol = false;
     uint64_t capture_token = 0;
     int timeout_ms = kDefaultCaptureTimeoutMs;
@@ -939,9 +948,61 @@ void PrivateDeviceProvider::CaptureStill(const SdkCaptureRequest& request, SdkCa
 
     const bool image_transfer = HasBoolFeature(device->getDeviceConfig(), "ImageTransferProtocol");
     const int timeout_ms = request.timeout_ms > 0 ? request.timeout_ms : kDefaultCaptureTimeoutMs;
+    std::shared_ptr<RealtimeRectWorker> paused_realtime_rect_worker;
+    if (image_transfer) {
+        {
+            std::lock_guard<std::mutex> lock(state_mu_);
+            const std::map<std::string, std::shared_ptr<RealtimeRectWorker> >::const_iterator it =
+                realtime_rect_workers_.find(request.device_id);
+            if (it != realtime_rect_workers_.end()) {
+                paused_realtime_rect_worker = it->second;
+            }
+        }
+        if (paused_realtime_rect_worker &&
+            !paused_realtime_rect_worker->PauseAndWaitForIdle(
+                kCaptureRealtimeDetectionPauseTimeoutMs)) {
+            paused_realtime_rect_worker->Resume();
+            result.code = ToCode(SdkStatusCode::DeviceBusy);
+            result.message = "realtime detection did not become idle before capture";
+            SDK_PRIVATE_LOG_WARN("device.capture failed device={} code={} message={}",
+                                 SafeDeviceId(request.device_id),
+                                 result.code,
+                                 result.message);
+            callback(result);
+            return;
+        }
+        if (paused_realtime_rect_worker) {
+            SDK_PRIVATE_LOG_INFO("device.capture realtime_detection_paused device={}",
+                                 SafeDeviceId(request.device_id));
+        }
+        bool stream_is_current = false;
+        {
+            std::lock_guard<std::mutex> lock(state_mu_);
+            const std::map<std::string, std::shared_ptr<RealtimeRectWorker> >::const_iterator it =
+                realtime_rect_workers_.find(request.device_id);
+            stream_is_current =
+                active_stream_sequences_.find(request.device_id) != active_stream_sequences_.end() &&
+                (!paused_realtime_rect_worker ||
+                 (it != realtime_rect_workers_.end() && it->second == paused_realtime_rect_worker));
+        }
+        if (!stream_is_current || !device->isStreaming()) {
+            if (paused_realtime_rect_worker) {
+                paused_realtime_rect_worker->Resume();
+            }
+            result.code = ToCode(SdkStatusCode::StreamNotReady);
+            result.message = "video stream stopped while preparing capture";
+            SDK_PRIVATE_LOG_WARN("device.capture failed device={} code={} message={}",
+                                 SafeDeviceId(request.device_id),
+                                 result.code,
+                                 result.message);
+            callback(result);
+            return;
+        }
+    }
     std::shared_ptr<PendingCapture> pending(new PendingCapture());
     pending->request = request;
     pending->callback = callback;
+    pending->paused_realtime_rect_worker = paused_realtime_rect_worker;
     pending->image_transfer_protocol = image_transfer;
     pending->capture_token = next_capture_token_.fetch_add(1);
     pending->timeout_ms = timeout_ms;
@@ -1154,6 +1215,80 @@ SdkVideoStartResult PrivateDeviceProvider::StartVideo(const SdkVideoStartRequest
     const editor::devices::DeviceStreamOptions stream_options =
         device_frame_codec::BuildStreamOptions(output_pixel_format, force_native_mjpeg);
 
+    std::shared_ptr<RealtimeRectWorker> realtime_rect_worker;
+#if defined(OS_OHOS)
+    if (output_pixel_format == "mjpeg") {
+        try {
+            realtime_rect_worker.reset(new RealtimeRectWorker(
+                [this, request, frame_seq, scan_device_type](RealtimeRectFrame work) {
+                    // Recognition may use an entire CPU for a slow frame. Keep
+                    // its worker below USB acquisition workers for its lifetime.
+                    thread_local editor::devices::UsbThreadQosScopeOhos recognition_qos(
+                        "czur-rect", editor::devices::UsbThreadQosScopeOhos::Utility);
+                    if (!RealtimeDetectRectsEnabled(request.device_id)) {
+                        return;
+                    }
+                    try {
+                        editor::devices::GenericFrame detection_frame;
+                        detection_frame.native_mjpeg.swap(work.native_mjpeg);
+                        detection_frame.width = work.width;
+                        detection_frame.height = work.height;
+                        detection_frame.format = work.format;
+                        if (!device_frame_codec::DecodeNativeMjpegFrame(&detection_frame)) {
+                            SDK_PRIVATE_LOG_WARN(
+                                "device.video_detect async_decode_failed device={} dimensions={}x{} mjpeg_size={}",
+                                SafeDeviceId(request.device_id),
+                                work.width,
+                                work.height,
+                                static_cast<uint64_t>(detection_frame.native_mjpeg.size()));
+                            UpdateDetectedRectCache(request.device_id,
+                                                    frame_seq,
+                                                    std::vector<SdkRect4P>(),
+                                                    work.width,
+                                                    work.height,
+                                                    scan_device_type);
+                            return;
+                        }
+                        DetectSinglePageRects(request.device_id,
+                                              &detection_frame,
+                                              scan_device_type,
+                                              MultiTargetPagingEnabled(request.device_id),
+                                              frame_seq);
+                    } catch (const std::exception& e) {
+                        SDK_PRIVATE_LOG_WARN("device.video_detect async_failed device={} error={}",
+                                             SafeDeviceId(request.device_id), e.what());
+                        UpdateDetectedRectCache(request.device_id,
+                                                frame_seq,
+                                                std::vector<SdkRect4P>(),
+                                                work.width,
+                                                work.height,
+                                                scan_device_type);
+                    } catch (...) {
+                        SDK_PRIVATE_LOG_WARN("device.video_detect async_failed device={} error=unknown",
+                                             SafeDeviceId(request.device_id));
+                        UpdateDetectedRectCache(request.device_id,
+                                                frame_seq,
+                                                std::vector<SdkRect4P>(),
+                                                work.width,
+                                                work.height,
+                                                scan_device_type);
+                    }
+                }));
+        } catch (const std::exception& e) {
+            DisarmStreamState(request.device_id, false);
+            result.code = ToCode(SdkStatusCode::ProviderNotReady);
+            result.message = "failed to start realtime detection worker";
+            SDK_PRIVATE_LOG_ERROR("device.video_start failed device={} code={} worker_error={}",
+                                  SafeDeviceId(request.device_id), result.code, e.what());
+            return result;
+        }
+        {
+            std::lock_guard<std::mutex> lock(state_mu_);
+            realtime_rect_workers_[request.device_id] = realtime_rect_worker;
+        }
+    }
+#endif
+
     // 底层 startStreaming 会根据导出目标映射 48M 固件拍照档位（含裁切方案）。
     device->setExportResolution(export_width, export_height);
     SDK_PRIVATE_LOG_INFO("device.video_start export device={} dimensions={}x{}",
@@ -1165,22 +1300,36 @@ SdkVideoStartResult PrivateDeviceProvider::StartVideo(const SdkVideoStartRequest
         selected.realHeight > 0 ? selected.realHeight : selected.height,
         selected.fps > 0 ? selected.fps : 15,
         selected.format,
-        [this, request, selected, callback, frame_seq, scan_device_type, output_pixel_format, device](editor::devices::GenericFrame* frame) {
+        [this, request, selected, callback, frame_seq, scan_device_type, output_pixel_format, device, realtime_rect_worker](editor::devices::GenericFrame* frame) {
             if (frame == NULL || (frame->data.empty() && frame->raw_mjpeg.empty() && frame->native_mjpeg.empty())) {
                 return;
             }
 
             const bool has_native_mjpeg = !frame->native_mjpeg.empty();
             const bool realtime_detect_rects = RealtimeDetectRectsEnabled(request.device_id);
+            PendingHardGrabCapture pending_hardgrab;
+            const bool hardgrab_capture_pending =
+                TakePendingHardGrabFrameCapture(request.device_id, &pending_hardgrab);
+            const bool current_frame_rect_detection =
+                realtime_detect_rects &&
+                NeedsCurrentFrameRectDetection(
+                    !frame->raw_mjpeg.empty(), hardgrab_capture_pending);
             bool turn_detect_enabled = false;
-            if (output_pixel_format != "bgr24" && !realtime_detect_rects) {
+            if (output_pixel_format != "bgr24") {
                 std::lock_guard<std::mutex> lock(state_mu_);
                 const std::map<std::string, TurnDetectState>::const_iterator it =
                     turn_detect_states_.find(request.device_id);
                 turn_detect_enabled = it != turn_detect_states_.end() && it->second.enabled;
             }
+#if defined(OS_OHOS)
+            const bool async_realtime_detect =
+                realtime_detect_rects && output_pixel_format == "mjpeg" &&
+                has_native_mjpeg && realtime_rect_worker && !current_frame_rect_detection;
+#else
+            const bool async_realtime_detect = false;
+#endif
             const bool needs_bgr_processing = device_frame_codec::NeedsBgrFrame(
-                output_pixel_format, realtime_detect_rects, turn_detect_enabled);
+                output_pixel_format, realtime_detect_rects && !async_realtime_detect, turn_detect_enabled);
             size_t expected_size =
                 static_cast<size_t>(frame->width) * static_cast<size_t>(frame->height) * 3;
             if (frame->data.size() < expected_size &&
@@ -1225,13 +1374,38 @@ SdkVideoStartResult PrivateDeviceProvider::StartVideo(const SdkVideoStartRequest
             const bool has_valid_bgr =
                 frame->width > 0 && frame->height > 0 && frame->data.size() >= expected_size;
             std::vector<SdkRect4P> detected_rects;
+            int detected_rects_source_width = frame->width;
+            int detected_rects_source_height = frame->height;
+            DetectedRectCache current_frame_rect_cache;
+            bool has_current_frame_rect_cache = false;
             if (realtime_detect_rects) {
-                if (has_valid_bgr) {
+                if (async_realtime_detect) {
+                    RealtimeRectFrame work;
+                    work.native_mjpeg = frame->native_mjpeg;
+                    work.width = frame->width;
+                    work.height = frame->height;
+                    work.format = frame->format;
+                    realtime_rect_worker->Submit(std::move(work));
+                    const DetectedRectCache cache = GetDetectedRectCache(
+                        request.device_id, frame_seq, frame->width, frame->height);
+                    detected_rects = cache.rects;
+                    if (cache.source_width > 0 && cache.source_height > 0) {
+                        detected_rects_source_width = cache.source_width;
+                        detected_rects_source_height = cache.source_height;
+                    }
+                } else if (has_valid_bgr) {
                     detected_rects = DetectSinglePageRects(request.device_id,
                                                            frame,
                                                            scan_device_type,
                                                            MultiTargetPagingEnabled(request.device_id),
                                                            frame_seq);
+                    if (current_frame_rect_detection) {
+                        current_frame_rect_cache.rects = detected_rects;
+                        current_frame_rect_cache.source_width = frame->width;
+                        current_frame_rect_cache.source_height = frame->height;
+                        current_frame_rect_cache.scan_device_type = scan_device_type;
+                        has_current_frame_rect_cache = true;
+                    }
                 } else {
                     UpdateDetectedRectCache(request.device_id,
                                             frame_seq,
@@ -1239,10 +1413,27 @@ SdkVideoStartResult PrivateDeviceProvider::StartVideo(const SdkVideoStartRequest
                                             frame->width,
                                             frame->height,
                                             scan_device_type);
+                    if (current_frame_rect_detection) {
+                        current_frame_rect_cache.source_width = frame->width;
+                        current_frame_rect_cache.source_height = frame->height;
+                        current_frame_rect_cache.scan_device_type = scan_device_type;
+                        has_current_frame_rect_cache = true;
+                    }
                 }
             }
-            TryCompleteFrameCapture(request.device_id, frame);
-            TryCompleteHardGrabFrameCapture(request.device_id, frame);
+            const DetectedRectCache* capture_rect_cache =
+                has_current_frame_rect_cache ? &current_frame_rect_cache : NULL;
+            // Ordinary preview has no raw capture to store. In particular,
+            // avoid taking the storage lifecycle lock while still capture is
+            // waiting for the recognition worker to become idle.
+            if (!frame->raw_mjpeg.empty()) {
+                TryCompleteFrameCapture(request.device_id, frame, capture_rect_cache);
+            }
+            TryCompleteHardGrabFrameCapture(
+                request.device_id,
+                frame,
+                hardgrab_capture_pending ? &pending_hardgrab : NULL,
+                capture_rect_cache);
             if (!callback) {
                 return;
             }
@@ -1282,19 +1473,14 @@ SdkVideoStartResult PrivateDeviceProvider::StartVideo(const SdkVideoStartRequest
                 return;
             }
             sdk_frame.detected_rects = detected_rects;
-            sdk_frame.detected_rects_source_width = frame->width;
-            sdk_frame.detected_rects_source_height = frame->height;
+            sdk_frame.detected_rects_source_width = detected_rects_source_width;
+            sdk_frame.detected_rects_source_height = detected_rects_source_height;
             callback(sdk_frame);
         },
         stream_options);
 
     if (!started) {
-        std::lock_guard<std::mutex> lock(state_mu_);
-        active_stream_sequences_.erase(request.device_id);
-        realtime_detect_rects_.erase(request.device_id);
-        multi_target_paging_.erase(request.device_id);
-        detected_rect_caches_.erase(request.device_id);
-        ResetTurnDetectSession(request.device_id);
+        DisarmStreamState(request.device_id, false);
         result.code = ToCode(SdkStatusCode::StreamNotReady);
         result.message = "failed to start video";
         SDK_PRIVATE_LOG_ERROR("device.video_start failed device={} code={} logical={}x{} native={}x{} fps={}",
@@ -1408,8 +1594,12 @@ bool PrivateDeviceProvider::CompletePendingCapture(const std::string& device_id,
                                                    const std::shared_ptr<PendingCapture>& expected_pending,
                                                    const SdkCaptureResult& result,
                                                    const char* completion_source) {
+    SdkCaptureResult completed_result = result;
     SdkCaptureCallback callback;
+    std::shared_ptr<RealtimeRectWorker> paused_realtime_rect_worker;
+    bool realtime_rect_worker_resumed = false;
     bool suppress_still_image_action = false;
+    bool read_timeout_device_error = false;
     uint64_t capture_token = 0;
     int timeout_ms = 0;
     int64_t armed_at_ms = 0;
@@ -1453,11 +1643,35 @@ bool PrivateDeviceProvider::CompletePendingCapture(const std::string& device_id,
             return false;
         }
         callback = current_pending->callback;
+        paused_realtime_rect_worker = current_pending->paused_realtime_rect_worker;
         suppress_still_image_action = current_pending->image_transfer_protocol && !result.captured;
+        read_timeout_device_error = std::strcmp(source, "timeout") == 0 &&
+            result.code == ToCode(SdkStatusCode::CaptureTimeout);
         capture_token = current_pending->capture_token;
         timeout_ms = current_pending->timeout_ms;
         armed_at_ms = current_pending->armed_at_ms;
+        if (paused_realtime_rect_worker) {
+            // Resume while the matching pending capture still owns the pause.
+            // A later capture cannot pause this worker until this pending entry
+            // is erased and state_mu_ is released.
+            realtime_rect_worker_resumed = paused_realtime_rect_worker->Resume();
+        }
         pending_captures_.erase(it);
+    }
+    if (paused_realtime_rect_worker) {
+        SDK_PRIVATE_LOG_INFO("device.capture realtime_detection_resumed device={} capture_token={} source={} resumed={}",
+                             SafeDeviceId(device_id), capture_token, source,
+                             realtime_rect_worker_resumed);
+    }
+    if (read_timeout_device_error) {
+        const std::shared_ptr<editor::devices::Device> device = LookupDevice(device_id);
+        if (device && !device->isStreaming()) {
+            editor::devices::DeviceManager* manager = editor::devices::DeviceManager::GetInstance();
+            if (manager != NULL) {
+                completed_result.message = BuildCaptureTimeoutMessage(
+                    true, false, manager->getLastOpenDeviceError());
+            }
+        }
     }
     if (suppress_still_image_action) {
         SuppressStillImageActionEvent(device_id, NowMs() + kStillImageActionSuppressAfterCaptureMs);
@@ -1470,19 +1684,22 @@ bool PrivateDeviceProvider::CompletePendingCapture(const std::string& device_id,
                              source,
                              timeout_ms,
                              elapsed_ms,
-                             result.code,
-                             result.captured,
-                             SafePathSummary(result.original_path),
-                             SafePathSummary(result.laser_path),
-                             result.size,
-                             result.width,
-                             result.height);
-        callback(result);
+                             completed_result.code,
+                             completed_result.captured,
+                             SafePathSummary(completed_result.original_path),
+                             SafePathSummary(completed_result.laser_path),
+                             completed_result.size,
+                             completed_result.width,
+                             completed_result.height);
+        callback(completed_result);
     }
     return true;
 }
 
-bool PrivateDeviceProvider::TryCompleteFrameCapture(const std::string& device_id, editor::devices::GenericFrame* frame) {
+bool PrivateDeviceProvider::TryCompleteFrameCapture(
+    const std::string& device_id,
+    editor::devices::GenericFrame* frame,
+    const DetectedRectCache* current_frame_rect_cache) {
     // Provider 将采集 JPEG 规范为设备默认导出尺寸后保存到任务 raw 目录；纸张、
     // 色彩和后置处理仍由 sdk_open 的设备级 FIFO 执行。
     std::unique_lock<std::mutex> storage_lifecycle_lock(capture_storage_lifecycle_mu_);
@@ -1543,7 +1760,8 @@ bool PrivateDeviceProvider::TryCompleteFrameCapture(const std::string& device_id
     result.height = final_height;
     result.dpi = actual_dpi;
     result.size = FileSize(output_path);
-    const DetectedRectCache rect_cache = GetDetectedRectCache(device_id);
+    const DetectedRectCache rect_cache = SelectFrameCaptureRectCache(
+        current_frame_rect_cache, GetDetectedRectCache(device_id));
     result.detected_rects = rect_cache.rects;
     result.detected_rects_source_width = rect_cache.source_width;
     result.detected_rects_source_height = rect_cache.source_height;
@@ -1563,7 +1781,8 @@ bool PrivateDeviceProvider::TryCompleteFrameCapture(const std::string& device_id
 // 构造硬拍自动采集结果。Provider 先保存原图，sdk_open 只通过路径接管后续任务。
 SdkCaptureResult PrivateDeviceProvider::BuildHardGrabJpegCapture(const std::string& device_id,
                                                                  const std::vector<uint8_t>& jpeg_payload,
-                                                                 const std::vector<uint8_t>* laser_payload) {
+                                                                 const std::vector<uint8_t>* laser_payload,
+                                                                 const DetectedRectCache* current_frame_rect_cache) {
     SdkCaptureResult result;
     result.content_type = "image/jpeg";
     if (jpeg_payload.empty()) {
@@ -1632,7 +1851,8 @@ SdkCaptureResult PrivateDeviceProvider::BuildHardGrabJpegCapture(const std::stri
     result.height = final_height;
     result.dpi = actual_dpi;
     result.size = FileSize(output_path);
-    const DetectedRectCache rect_cache = GetDetectedRectCache(device_id);
+    const DetectedRectCache rect_cache = SelectFrameCaptureRectCache(
+        current_frame_rect_cache, GetDetectedRectCache(device_id));
     result.detected_rects = rect_cache.rects;
     result.detected_rects_source_width = rect_cache.source_width;
     result.detected_rects_source_height = rect_cache.source_height;
@@ -1649,23 +1869,22 @@ SdkCaptureResult PrivateDeviceProvider::BuildHardGrabJpegCapture(const std::stri
 
 // 非 still-image 设备的硬拍回调只表示按键事件，真正图像来自随后到达的预览帧。
 // 取到一帧后立即清除 pending，保证单次硬拍动作只提交一次自动采集事件。
-bool PrivateDeviceProvider::TryCompleteHardGrabFrameCapture(const std::string& device_id, editor::devices::GenericFrame* frame) {
-    PendingHardGrabCapture pending;
-    {
-        std::lock_guard<std::mutex> lock(state_mu_);
-        const std::map<std::string, PendingHardGrabCapture>::iterator it = pending_hardgrab_captures_.find(device_id);
-        if (it == pending_hardgrab_captures_.end()) {
-            return false;
-        }
-        pending = it->second;
-        pending_hardgrab_captures_.erase(it);
+bool PrivateDeviceProvider::TryCompleteHardGrabFrameCapture(
+    const std::string& device_id,
+    editor::devices::GenericFrame* frame,
+    const PendingHardGrabCapture* pending_hardgrab,
+    const DetectedRectCache* current_frame_rect_cache) {
+    if (pending_hardgrab == NULL) {
+        return false;
     }
 
     SdkDeviceActionEvent event;
     event.device_id = device_id;
     event.type = SdkDeviceActionType::HardGrab;
     event.auto_capture = true;
-    event.timestamp_ms = pending.timestamp_ms > 0 ? pending.timestamp_ms : NowMs();
+    event.timestamp_ms = pending_hardgrab->timestamp_ms > 0
+                             ? pending_hardgrab->timestamp_ms
+                             : NowMs();
 
     if (frame == NULL) {
         event.capture.code = ToCode(SdkStatusCode::CaptureFailed);
@@ -1681,7 +1900,8 @@ bool PrivateDeviceProvider::TryCompleteHardGrabFrameCapture(const std::string& d
             event.capture.message = "failed to encode hard grab frame";
         }
         if (!jpeg_payload.empty()) {
-            event.capture = BuildHardGrabJpegCapture(device_id, jpeg_payload, NULL);
+            event.capture = BuildHardGrabJpegCapture(
+                device_id, jpeg_payload, NULL, current_frame_rect_cache);
         }
     }
 
@@ -2023,6 +2243,37 @@ PrivateDeviceProvider::DetectedRectCache PrivateDeviceProvider::GetDetectedRectC
     return it->second;
 }
 
+PrivateDeviceProvider::DetectedRectCache PrivateDeviceProvider::GetDetectedRectCache(
+    const std::string& device_id,
+    const std::shared_ptr<std::atomic<uint64_t> >& expected_stream,
+    int frame_width,
+    int frame_height) const {
+    std::lock_guard<std::mutex> lock(state_mu_);
+    const std::map<std::string, std::shared_ptr<std::atomic<uint64_t> > >::const_iterator stream_it =
+        active_stream_sequences_.find(device_id);
+    const std::map<std::string, bool>::const_iterator detection_it =
+        realtime_detect_rects_.find(device_id);
+    const std::shared_ptr<std::atomic<uint64_t> > active_stream =
+        stream_it == active_stream_sequences_.end()
+            ? std::shared_ptr<std::atomic<uint64_t> >()
+            : stream_it->second;
+    const bool realtime_detection_enabled =
+        detection_it != realtime_detect_rects_.end() && detection_it->second;
+    const std::map<std::string, DetectedRectCache>::const_iterator cache_it =
+        detected_rect_caches_.find(device_id);
+    if (cache_it == detected_rect_caches_.end() ||
+        !CanPublishRealtimeRectCache(active_stream,
+                                     realtime_detection_enabled,
+                                     expected_stream,
+                                     cache_it->second.source_width,
+                                     cache_it->second.source_height,
+                                     frame_width,
+                                     frame_height)) {
+        return DetectedRectCache();
+    }
+    return cache_it->second;
+}
+
 bool PrivateDeviceProvider::RealtimeDetectRectsEnabled(const std::string& device_id) const {
     std::lock_guard<std::mutex> lock(state_mu_);
     const std::map<std::string, bool>::const_iterator it = realtime_detect_rects_.find(device_id);
@@ -2035,27 +2286,70 @@ bool PrivateDeviceProvider::MultiTargetPagingEnabled(const std::string& device_i
     return it != multi_target_paging_.end() && it->second;
 }
 
-void PrivateDeviceProvider::ResetTurnDetectSession(const std::string& device_id) {
-    std::map<std::string, TurnDetectState>::iterator it = turn_detect_states_.find(device_id);
-    if (it != turn_detect_states_.end()) {
-        it->second.initialized = false;
+bool PrivateDeviceProvider::TakePendingHardGrabFrameCapture(
+    const std::string& device_id,
+    PendingHardGrabCapture* pending_hardgrab) {
+    if (pending_hardgrab == NULL) {
+        return false;
     }
+    std::lock_guard<std::mutex> lock(state_mu_);
+    const std::map<std::string, PendingHardGrabCapture>::iterator it =
+        pending_hardgrab_captures_.find(device_id);
+    if (it == pending_hardgrab_captures_.end()) {
+        return false;
+    }
+    *pending_hardgrab = it->second;
+    pending_hardgrab_captures_.erase(it);
+    return true;
 }
 
 void PrivateDeviceProvider::DisarmStreamState(const std::string& device_id, bool erase_turn_detect) {
-    std::lock_guard<std::mutex> lock(state_mu_);
-    active_stream_sequences_.erase(device_id);
-    realtime_detect_rects_.erase(device_id);
-    multi_target_paging_.erase(device_id);
-    detected_rect_caches_.erase(device_id);
-    pending_hardgrab_captures_.erase(device_id);
-    if (erase_turn_detect) {
-        turn_detect_states_.erase(device_id);
-        return;
+    std::shared_ptr<RealtimeRectWorker> worker;
+    {
+        std::lock_guard<std::mutex> lock(state_mu_);
+        active_stream_sequences_.erase(device_id);
+        realtime_detect_rects_.erase(device_id);
+        multi_target_paging_.erase(device_id);
+        detected_rect_caches_.erase(device_id);
+        pending_hardgrab_captures_.erase(device_id);
+        const std::map<std::string, std::shared_ptr<RealtimeRectWorker> >::iterator worker_it =
+            realtime_rect_workers_.find(device_id);
+        if (worker_it != realtime_rect_workers_.end()) {
+            worker = worker_it->second;
+            realtime_rect_workers_.erase(worker_it);
+        }
+        if (erase_turn_detect) {
+            turn_detect_states_.erase(device_id);
+        } else {
+            std::map<std::string, TurnDetectState>::iterator turn_it = turn_detect_states_.find(device_id);
+            if (turn_it != turn_detect_states_.end()) {
+                turn_it->second.initialized = false;
+            }
+        }
     }
-    std::map<std::string, TurnDetectState>::iterator it = turn_detect_states_.find(device_id);
-    if (it != turn_detect_states_.end()) {
-        it->second.initialized = false;
+    if (worker) {
+        worker->Stop();
+    }
+}
+
+void PrivateDeviceProvider::StopAllRealtimeRectWorkers() {
+    std::vector<std::shared_ptr<RealtimeRectWorker> > workers;
+    {
+        std::lock_guard<std::mutex> lock(state_mu_);
+        for (std::map<std::string, std::shared_ptr<RealtimeRectWorker> >::const_iterator it =
+                 realtime_rect_workers_.begin();
+             it != realtime_rect_workers_.end();
+             ++it) {
+            workers.push_back(it->second);
+        }
+        realtime_rect_workers_.clear();
+    }
+    for (std::vector<std::shared_ptr<RealtimeRectWorker> >::const_iterator it = workers.begin();
+         it != workers.end();
+         ++it) {
+        if (*it) {
+            (*it)->Stop();
+        }
     }
 }
 
