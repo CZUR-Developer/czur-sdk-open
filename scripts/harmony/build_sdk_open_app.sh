@@ -28,7 +28,7 @@ Build the SDK Open HarmonyOS tray application package. The sdkopen_tray entry
 HAP owns the native runtime and USB Host lifecycle; no feature HAP or
 AppServiceExtensionAbility is required. This project is not listed in the
 CapEditor root build-profile.json5 and does not change desktop build.sh or
-src/sdk_open/scripts/package-sdkopen.sh behavior.
+the main repository desktop SDK Open packaging flow.
 
 Environment:
   DEVECO_SDK_HOME  DevEco SDK root (default: ${SDK_HOME})

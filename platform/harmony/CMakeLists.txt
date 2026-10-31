@@ -28,6 +28,13 @@ include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/Dependencies.cmake")
 if(NOT EXISTS "${SDK_OPEN_HOST_SOURCE_ROOT}/src/module/CMakeLists.txt")
     message(FATAL_ERROR "Harmony real providers require SDK_OPEN_HOST_SOURCE_ROOT")
 endif()
+if(NOT SDK_OPEN_VERSION_FILE)
+    set(SDK_OPEN_VERSION_FILE "${SDK_OPEN_HOST_SOURCE_ROOT}/version/sdk-open/version.ini")
+endif()
+if(NOT EXISTS "${SDK_OPEN_VERSION_FILE}")
+    message(FATAL_ERROR
+        "Harmony SDK Open version source is missing: ${SDK_OPEN_VERSION_FILE}")
+endif()
 set(SDK_OPEN_REPO_ROOT "${SDK_OPEN_HOST_SOURCE_ROOT}")
 set(SDK_OPEN_HARMONY_HOST_BUILD ON)
 add_subdirectory("${SDK_OPEN_SOURCE_ROOT}" sdk_open_runtime)
@@ -87,7 +94,7 @@ foreach(_sdk_target utils_lib ofd_lib auth_lib auth_lib_private_ossl3)
     endif()
 endforeach()
 
-add_subdirectory("${SDK_OPEN_SOURCE_ROOT}/providers/private" sdk_harmony_providers)
+add_subdirectory("${SDK_OPEN_HOST_SOURCE_ROOT}/src/sdk_private/harmony" sdk_harmony_providers)
 add_library(sdkopen_harmony SHARED
     native/sdk_open_harmony_host.cpp
     native/sdk_open_harmony_napi.cpp
@@ -102,10 +109,10 @@ target_link_options(sdkopen_harmony PRIVATE "-Wl,--wrap=czocr_init_in_dev_stage"
 target_include_directories(sdkopen_harmony PRIVATE
     "${SDK_OPEN_SOURCE_DIR}/runtime"
     "${SDK_OPEN_SOURCE_DIR}/interfaces"
-    "${SDK_OPEN_SOURCE_ROOT}/providers/private"
-    "${SDK_OPEN_SOURCE_ROOT}/providers/private/auth"
-    "${SDK_OPEN_SOURCE_ROOT}/providers/private"
-    "${SDK_OPEN_SOURCE_ROOT}/providers/private/support"
+    "${SDK_OPEN_HOST_SOURCE_ROOT}/src/sdk_private"
+    "${SDK_OPEN_HOST_SOURCE_ROOT}/src/sdk_private/auth"
+    "${SDK_OPEN_HOST_SOURCE_ROOT}/src/sdk_private/providers"
+    "${SDK_OPEN_HOST_SOURCE_ROOT}/src/sdk_private/runtime"
     "${SDK_OPEN_HOST_SOURCE_ROOT}/src"
     "${SDK_OPEN_HOST_SOURCE_ROOT}/src/module"
     "${SDK_OPEN_HOST_SOURCE_ROOT}/src/module/devices"

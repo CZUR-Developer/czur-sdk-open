@@ -10,7 +10,7 @@ readonly HEADER_SPDX='// SPDX-License-Identifier: Apache-2.0'
 CPP_FILES=()
 while IFS= read -r file; do
   CPP_FILES+=("${file}")
-done < <(find interfaces providers runtime -type f ! -path 'providers/private/*' ! -path 'runtime/legacy/*' \
+done < <(find interfaces providers runtime -type f \
   \( -name '*.h' -o -name '*.hpp' -o -name '*.cc' -o -name '*.cpp' -o -name '*.cxx' \) | sort)
 
 if [[ ${#CPP_FILES[@]} -eq 0 ]]; then

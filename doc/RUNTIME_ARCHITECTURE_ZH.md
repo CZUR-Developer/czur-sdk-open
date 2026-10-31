@@ -2,7 +2,7 @@
 
 > 状态：目标架构设计
 >
-> 适用范围：`src/sdk_open/` 与 `src/sdk_open/runtime/legacy/`
+> 适用范围：`src/sdk_open/` 开源运行时与 Harmony 应用入口
 >
 > 本文档只描述最终目标架构、协议模型和目录边界。
 
@@ -10,16 +10,12 @@
 
 `sdk_open` 的目标形态是一个可独立运行、可独立开源的本地 SDK 运行时核心，同时也能被主仓内部入口复用。
 
-最终需要同时支持两个可执行入口：
+最终需要支持一个开源运行时入口：
 
 - `src/sdk_open/runtime/sdk_open_main.cpp`
   - 开源独立入口
   - 默认装配 mock providers
-- `src/sdk_open/runtime/legacy/sdk_main.cpp`
-  - 主仓内部入口
-  - 由仓库构建开关决定装配 mock providers 或 private providers
-
-两者共享同一套 `sdk_open` 核心库、相同的协议和相同的分层边界。
+主仓库的闭源 `src/sdk_private`、桌面 CI/CD 和发布入口不属于本子仓库。
 
 ## 2. 四层架构
 
@@ -257,7 +253,7 @@ wss://127.0.0.1:18091?session_token=ss-v2-xxxx&stream_id=stream-001
 
 ## 5. 目录边界
 
-`src/sdk_open` 是 SDK Open 的完整产品子工程边界，目录如下：
+`src/sdk_open` 只维护开源 SDK 和 Harmony 应用入口，目录如下：
 
 ```text
 src/sdk_open/
@@ -266,31 +262,24 @@ src/sdk_open/
   application/              会话、鉴权编排、业务路由
   facade/                   能力门面
   providers/
-    mock/                   保持原有实现和装配
-    private/                真实 Provider、auth、graphic、support
-    private_windows/        Windows 装配接口
-  runtime/                  运行时、入口与装配；legacy/ 保留 sdk_app 目标
+    mock/                   开源 mock provider
+    private_windows/        开源层 Windows 装配接口
+  runtime/                  运行时与开源入口
   platform/harmony/         AppScope、服务 HAP、托盘 HAP、native 桥接
-  bindings/                 C ABI 与 Java/JNA
-  tools/auth/               SDK 鉴权工具
-  cmake/                    根路径约定、Provider 源码清单、模型复制
-  scripts/                  构建、安装、打包、发布、探测
-  ci/                       SDK CI helper、构建与发布脚本及其测试
-  packaging/                Debian、Windows、macOS 安装配置
-  version/version.ini       SDK 版本源
-  test/                     公共契约与真实 Provider 测试
+  cmake/                    根路径约定和 Harmony 模型复制
+  scripts/harmony/          unsigned Harmony 开发构建与安装辅助
+  test/                     开源契约与 Harmony 生命周期测试
   frontend/                 管理页与 Demo 源码
   web/                      生成的网页资源
   doc/                      SDK 设计、平台、运维文档
 ```
 
-主工程保留共享算法、设备、文档模块、三方库及 CI 接入入口；SDK 专用代码不再放在
-`src/sdk_private`、根部 `sdk_open_harmony` 或主程序的 SDK process 目录。
+主工程保留闭源 provider、共享算法和设备模块，以及 CI/CD、签名、打包和发布入口。
+`src/sdk_open` 不携带这些实现，也不维护主仓版本文件。
 
 构建统一使用 `SDK_OPEN_SOURCE_ROOT`、`SDK_OPEN_HOST_SOURCE_ROOT`、
-`SDK_OPEN_THIRD_PARTY_ROOT`。真实 Provider 显式引用主工程共享模块；鸿蒙宿主复用
-同一份 Provider 源码清单，不改写 `CMAKE_SOURCE_DIR`，不向源码目录创建符号链接。
-完整迁移与验证说明见 [SDK_PROJECT_MIGRATION_ZH.md](SDK_PROJECT_MIGRATION_ZH.md)。
+`SDK_OPEN_THIRD_PARTY_ROOT`。Harmony 宿主从主仓库 `src/sdk_private/harmony` 装配闭源
+provider；主仓库 `version/sdk-open/version.ini` 是正式版本源。
 
 ## 6. 依赖边界
 
@@ -301,15 +290,14 @@ src/sdk_open/
 - `application` -> `facade` + `interfaces`
 - `facade` -> `interfaces`
 - `providers/mock` -> `interfaces`
-- `providers/private` -> `interfaces` + 主工程共享能力库
 
 禁止依赖方向：
 
 - `transport` -> `providers/mock`
-- `transport` -> `providers/private`
+- `transport` -> `interfaces`，由运行时在主仓库装配 provider
 - `application` -> 私有能力库
 - `facade` -> HTTP/WS server 实现
-- `transport`、`application`、`facade` -> 真实 Provider 实现头文件；仅运行时负责装配
+- `transport`、`application`、`facade` -> 主仓闭源 Provider 实现头文件
 
 ## 7. Provider 公共接口原则
 
@@ -352,18 +340,6 @@ src/sdk_open/
 - 启用 `BUILD_SDK_PRIVATE` 和 `SDK_OPEN_USE_PRIVATE_PROVIDER` 时链接真实 Provider
 - 公共接口与传输、应用、门面层仍不依赖真实 Provider 实现
 
-### 8.2 `sdk_app`
-
-定位：
-
-- 子工程 `runtime/legacy` 中保留的兼容可执行入口
-- 用于复用相同协议和核心库，但按构建开关装配内部 provider
-
-约束：
-
-- 可以按 `BUILD_SDK_PRIVATE` 装配 private providers
-- 不修改 `sdk_open` 的公共边界和开放协议
-
 ## 9. 最终目标
 
 最终 `sdk_open` 应满足以下条件：
@@ -373,5 +349,4 @@ src/sdk_open/
 - 具备明确的四层边界
 - command 与 video 协议职责清晰
 - 管理接口与业务接口完全分离
-- `sdk_app` 与 `sdk_open_app` 共享同一核心实现
 - 上层协议稳定，底层 provider 可替换

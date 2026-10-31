@@ -19,10 +19,27 @@ option(SDK_OPEN_ENABLE_HTTP_SERVER "Start sdk_open embedded admin/demo HTTP serv
 option(SDK_OPEN_USE_PREBUILT_WEB "Use prebuilt sdk_open/web assets without running pnpm" OFF)
 option(SDK_OPEN_ENABLE_TLS "Enable HTTPS/WSS listeners for sdk_open transport services" ON)
 
-set(SDK_OPEN_VERSION_FILE "${SDK_OPEN_SOURCE_ROOT}/version/version.ini")
+set(SDK_OPEN_VERSION_FILE "" CACHE FILEPATH
+    "External SDK Open version.ini supplied by the owning repository")
+if(NOT SDK_OPEN_VERSION_FILE AND SDK_OPEN_HOST_SOURCE_ROOT)
+    set(_sdk_open_host_version_file
+        "${SDK_OPEN_HOST_SOURCE_ROOT}/version/sdk-open/version.ini")
+    if(EXISTS "${_sdk_open_host_version_file}")
+        set(SDK_OPEN_VERSION_FILE "${_sdk_open_host_version_file}")
+    endif()
+    unset(_sdk_open_host_version_file)
+endif()
+if(NOT SDK_OPEN_VERSION_FILE AND EXISTS "${CMAKE_SOURCE_DIR}/version/sdk-open/version.ini")
+    set(SDK_OPEN_VERSION_FILE "${CMAKE_SOURCE_DIR}/version/sdk-open/version.ini")
+endif()
 
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${SDK_OPEN_VERSION_FILE}")
-file(READ "${SDK_OPEN_VERSION_FILE}" SDK_OPEN_VERSION_CONTENT)
+set(SDK_OPEN_VERSION_CONTENT "")
+if(SDK_OPEN_VERSION_FILE AND EXISTS "${SDK_OPEN_VERSION_FILE}")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${SDK_OPEN_VERSION_FILE}")
+    file(READ "${SDK_OPEN_VERSION_FILE}" SDK_OPEN_VERSION_CONTENT)
+else()
+    message(STATUS "SDK Open version source is not supplied; using generated defaults")
+endif()
 
 set(SDK_OPEN_VERSION "0.0.0")
 set(SDK_OPEN_BUILD "0")
@@ -1006,7 +1023,6 @@ elseif(BUILD_SDK_WEB)
     )
 endif()
 
-# SDK-specific targets are owned here, after the core targets have been declared.
-if(BUILD_SDK_PRIVATE AND NOT SDK_OPEN_HARMONY_HOST_BUILD)
-    add_subdirectory(providers/private)
-endif()
+# Closed provider targets are owned by the CapEditor repository. The public
+# submodule only declares the open runtime and mock provider targets; callers
+# that need real providers must add the main repository's sdk_private tree.

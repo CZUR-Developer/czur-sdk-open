@@ -14,13 +14,13 @@
 `ohos.permission.START_INVISIBLE_ABILITY`。真机安装仍需要与 `com.czur.opensdk` 匹配的
 证书和 profile。旧 `com.czur.sdkopen` 的 profile、应用沙箱和本地数据不会随包名迁移。
 
-该工程不参与 CapEditor 根 Hvigor 工程、桌面端 `build.sh` 或
-`src/sdk_open/scripts/package-sdkopen.sh` 的默认构建。
+该工程不参与 CapEditor 根 Hvigor 工程、桌面端 `build.sh` 或主仓库桌面 SDK Open
+打包流程的默认构建。主仓库正式入口为 `tools/harmony/build_sdk_open_app.sh`。
 
 ## 能力边界
 
 native runtime 在托盘进程内提供 admin、demo/asset HTTP 与 command/video WebSocket。
-Harmony 复用主程序 private provider 和 OHOS 底层库：
+Harmony 复用主仓库 `src/sdk_private` 中的闭源 provider 和 OHOS 底层库：
 
 - device 使用主仓 USB Host/C++ UVC 后端，预览保留原始 MJPEG；
 - graphic、recognition、auth、imageEnhance、OCR、OFD 使用现有真实 provider；

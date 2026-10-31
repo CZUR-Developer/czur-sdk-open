@@ -6,7 +6,7 @@
 
 - 主仓先快进到 `25267f363`，再通过 merge commit `f8b9c8f40` 合入摄像头分支 `fe2eab7f9`。
 - SDK 修复从子模块 `f08675b` 开始；三方库保持目标分支的 `c4f5f22`。
-- `platform/harmony` 负责 N-API、托盘 runtime 和 HAP；`providers/private` 负责真实设备接入；
+- `platform/harmony` 负责 N-API、托盘 runtime 和 HAP；`src/sdk_private` 负责真实设备接入；
   `transport` 负责现有视频协议；主仓 `src/module/devices` 继续负责 USB/UVC。
 - 不恢复迁出前的 `sdk_open_harmony` 或 `src/sdk_private`，主仓构建入口继续转发到子模块。
 

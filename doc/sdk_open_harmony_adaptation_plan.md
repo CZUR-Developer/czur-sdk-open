@@ -9,13 +9,13 @@
 ## 1. 结论先行
 
 当前仓库已新增独立的 `src/sdk_open/platform/harmony/` HarmonyOS 工程。它把
-`sdk_open_runtime`、真实 provider 组合和一个不含 `main()` 的 N-API host 编译进
+`sdk_open_runtime`、主仓库提供的真实 provider 组合和一个不含 `main()` 的 N-API host 编译进
 `libsdkopen_harmony.so`。工程只交付 `sdkopen_tray` entry HAP：
 `SdkOpenLauncherAbility` 注册托盘项，`ATTACH_TO_STATUS_BAR_ITEM` 模式的隐藏
 `SdkOpenTrayAbility` 持有 runtime、devices 和 USB Host 生命周期。
 
 该工程不加入仓库根 `build-profile.json5`，也不改变桌面端 `build.sh`、
-`src/sdk_open/scripts/package-sdkopen.sh` 和 `sdk_open_app` 的默认行为。
+`tools/harmony/build_sdk_open_app.sh` 和 `sdk_open_app` 的默认行为。
 
 现有 CapEditor 鸿蒙链路是：
 
@@ -42,7 +42,7 @@ DevEco/Hvigor
 1. 保留现有 command/video/HTTP/WS 协议和 application/facade 业务层。
 2. 将 `sdk_open_runtime` 编译成 `arm64-v8a` Harmony native library。
 3. 新增不含 `main()` 的 host，由隐藏托盘 Ability 的 N-API 调用 `start/stop`；状态通过 native 和 loopback HTTP 查询。
-4. 首期协议沿用 mock bundle 作为容器，但 Harmony runtime 实际替换为真实
+4. 首期协议沿用 mock bundle 作为容器，但主仓库 Harmony host 实际替换为真实
    device、auth、imageEnhance、OCR、OFD、graphic 和 recognition provider；device 使用
    USB Host/C++ UVC，桌面 SANE/TWAIN 不编入并明确返回 `ProviderUnavailable`。
 5. 工作目录、web root 和日志目录由 ArkTS `Context.filesDir` 注入，禁止依赖 `$HOME/.czur/sdk` 或 `/var/lib/czur/sdk-open`。
@@ -102,8 +102,8 @@ sdkopen_tray “关闭服务”
 
 | 时间 | 提交 | 已形成的能力 |
 | --- | --- | --- |
-| 2026-05-27 | `c00c143bc` | 新增 `src/sdk_open/scripts/package-sdkopen.sh`，形成 Linux Debian 打包入口。 |
-| 2026-05-27 | `6c5e12463` | 在 README 中固定 `build.sh --target sdk_open_app` 和 `src/sdk_open/scripts/package-sdkopen.sh` 用法。 |
+| 2026-05-27 | `c00c143bc` | 新增 `tools/harmony/build_sdk_open_app.sh`，形成 Linux Debian 打包入口。 |
+| 2026-05-27 | `6c5e12463` | 在 README 中固定 `build.sh --target sdk_open_app` 和 `tools/harmony/build_sdk_open_app.sh` 用法。 |
 | 2026-05-27 | `873b3b796`、`99672787f` | sdk_open 默认使用 OpenSSL 3，并通过 CMake 参数切换 TLS。 |
 | 2026-06-16～06-27 | `fd65ca23c` 等 | 形成 SDK Open package pipeline、版本文件、发布和 Linux arm64 打包流程。 |
 | 2026-06-18 | `d630d80a6` | 增加 Windows NSIS/service 打包流程。 |
@@ -119,10 +119,12 @@ sdkopen_tray “关闭服务”
   -DBUILD_SDK_PRIVATE=ON \
   -DSDK_OPEN_USE_PRIVATE_PROVIDER=ON
 
-./src/sdk_open/scripts/package-sdkopen.sh --distro uos
+./package-sdkopen.sh --distro uos
 ```
 
-`src/sdk_open/scripts/package-sdkopen.sh` 的默认前提是 Debian/桌面文件系统、可执行文件输出目录、systemd/安装脚本和桌面 provider。它不能作为鸿蒙 HAP 打包脚本直接复用。
+桌面 SDK Open 的打包和发布入口由主仓库维护。Harmony HAP/App 的正式入口是主仓库
+`tools/harmony/build_sdk_open_app.sh`；子仓库中的 `scripts/harmony/` 只提供 unsigned
+开发构建辅助，不能替代主仓库的签名、验签和归档流程。
 
 ### 2.2 鸿蒙工程和调试历史
 
@@ -380,7 +382,7 @@ SdkOpenLauncherAbility
    Harmony bundle 不创建这两个 provider，调用返回 `ProviderUnavailable`。
 3. 设备控制复用主仓 devices 与 Harmony USB Host/C++ UVC adapter；控制面走既有命令协议，
    预览走原始 MJPEG video WS，拍照和 still pair 走可靠任务结果，不把大图塞入 JSON。
-4. graphic 已直接复用 `src/sdk_open/providers/private/private_graphic_provider.cpp` 及其
+4. graphic 已直接复用 `src/sdk_private/providers/private_graphic_provider.cpp` 及其
    page/color/format/thumbnail processor；Harmony 适配层仅提供沙箱路径、日志和图像
    编解码兼容，不在 bridge 中重写算法。
 5. recognition 已复用主程序 ZXing provider；OCR/PDF/OFD 已按相同方式复用现有

@@ -1,9 +1,0 @@
-Package: sdk-open
-Version: 1.0.0
-Priority: optional
-Architecture: amd64
-Depends: ca-certificates
-Maintainer: CZUR <support@czur.com>
-Description: SDK Open Runtime
- SDK Open Runtime provides local HTTP and WebSocket services for
- device access, authorization, preview, and SDK integration testing.
