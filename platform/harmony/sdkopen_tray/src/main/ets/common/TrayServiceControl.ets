@@ -59,7 +59,7 @@ export interface ServiceState {
 // commands are delivered to the resident UIAbility in the tray's owner process.
 class TrayServiceControl {
   private context: common.UIAbilityContext | null = null;
-  private popupContext: common.UIExtensionContext | null = null;
+  private popupContext: common.UIExtensionContext | common.UIAbilityContext | null = null;
   private runtime: TrayRuntimeControl | null = null;
   private exiting: boolean = false;
   private state: ServiceState = { running: false, busy: false, message: '服务未启动' };
@@ -70,7 +70,9 @@ class TrayServiceControl {
     this.runtime = runtime;
   }
 
-  initializePopup(context: common.UIExtensionContext): void { this.popupContext = context; }
+  initializePopup(context: common.UIExtensionContext | common.UIAbilityContext): void {
+    this.popupContext = context;
+  }
 
   async openDemo(): Promise<void> {
     const context = this.popupContext;

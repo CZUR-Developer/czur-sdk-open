@@ -37,7 +37,6 @@
       {
         "name": "SdkOpenLauncherAbility",
         "launchType": "singleton",
-        "excludeFromMissions": true,
         "srcEntry": "./ets/entryability/SdkOpenTrayAbility.ets",
         "description": "$string:ability_desc",
         "icon": "$media:app_icon",

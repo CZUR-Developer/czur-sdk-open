@@ -1,8 +1,11 @@
+import { common } from '@kit.AbilityKit';
+import { window } from '@kit.ArkUI';
 import { ServiceState, trayServiceControl } from '../common/TrayServiceControl';
 
-@Entry
+@Entry({ useSharedStorage: true })
 @Component
 struct Index {
+  @LocalStorageProp('showWindowControls') private showWindowControls: boolean = false;
   @State private running: boolean = false;
   @State private busy: boolean = false;
   @State private message: string = '正在检查服务状态…';
@@ -24,8 +27,23 @@ struct Index {
     clearInterval(this.timer);
   }
 
+  private async minimizeLauncher(): Promise<void> {
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    try {
+      const mainWindow = await window.getLastWindow(context);
+      await mainWindow.minimize();
+    } catch (error) {
+      this.message = `收起窗口失败：${String(error)}`;
+    }
+  }
+
   build() {
     Column({ space: 16 }) {
+      if (this.showWindowControls) {
+        Text('CZUR Open SDK').fontSize(24).fontWeight(FontWeight.Medium)
+        Text('启动服务后可打开 Demo 或管理站点。收起窗口后，仍可从系统托盘控制服务。')
+          .fontSize(14).fontColor('#666666')
+      }
       Text(this.message).fontSize(16).fontColor(this.running ? '#16803c' : '#666666')
       Column({ space: 12 }) {
         Button('启动服务')
@@ -42,6 +60,10 @@ struct Index {
           .onClick(() => { trayServiceControl.openAdmin(); })
         Button('安装本机 HTTPS 证书').width('100%').enabled(!this.busy && this.running)
           .onClick(() => { trayServiceControl.installHttpsCertificate(); })
+        if (this.showWindowControls) {
+          Button('收起窗口').width('100%')
+            .onClick(() => { this.minimizeLauncher(); })
+        }
       }
       .width('100%')
     }

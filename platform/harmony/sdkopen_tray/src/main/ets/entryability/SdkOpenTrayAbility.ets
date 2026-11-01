@@ -7,11 +7,16 @@ import { window } from '@kit.ArkUI';
 import { trayServiceControl } from '../common/TrayServiceControl';
 import { sdkOpenRuntime } from '../services/SdkOpenRuntime';
 
+interface LauncherWindowState {
+  showWindowControls: boolean;
+}
+
 export default class SdkOpenTrayAbility extends UIAbility {
   private registered: boolean = false;
   private whiteIcon: image.PixelMap | null = null;
   private blackIcon: image.PixelMap | null = null;
   private resident: boolean = false;
+  private mainWindow: window.Window | null = null;
   private rightMenuListener = (event: emitter.EventData): void => {
     const code = event.data?.['menuCode'] as string;
     if (code === 'start' || code === 'stop') { trayServiceControl.execute(code); }
@@ -85,7 +90,8 @@ export default class SdkOpenTrayAbility extends UIAbility {
           // Reopening the launcher must leave the existing hidden resident intact.
           if ((error as BusinessError).code !== 16000068) { throw new Error(String(error)); }
         }
-        await this.context.terminateSelf();
+        // Keep the launcher in the foreground. The hidden resident owns the
+        // service, while the launcher remains a normal, user-visible window.
       }
       hilog.info(0, 'SdkOpenTray', 'SDK Open launcher attached to system tray');
     } catch (error) {
@@ -94,12 +100,48 @@ export default class SdkOpenTrayAbility extends UIAbility {
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
+    if (!this.resident) {
+      trayServiceControl.initializePopup(this.context);
+      this.mainWindow = windowStage.getMainWindowSync();
+      this.mainWindow.resize(520, 600).catch((error: Object): void => {
+        hilog.warn(0, 'SdkOpenTray', 'Cannot resize launcher window: %{public}s', String(error));
+      });
+      const launcherState: LauncherWindowState = { showWindowControls: true };
+      windowStage.loadContent('pages/Index', new LocalStorage(launcherState), (error) => {
+        if (error.code) {
+          hilog.error(0, 'SdkOpenTray', 'Failed to load launcher page: %{public}s', String(error));
+          return;
+        }
+        this.showLauncher();
+      });
+    }
     this.enterTray();
   }
 
+  private async showLauncher(): Promise<void> {
+    try {
+      if (this.mainWindow) {
+        if (this.mainWindow.getWindowStatus() === window.WindowStatusType.MINIMIZE) {
+          await this.mainWindow.restore();
+        }
+        await this.mainWindow.showWindow();
+      }
+    } catch (error) {
+      hilog.error(0, 'SdkOpenTray', 'Cannot show launcher window: %{public}s', String(error));
+    }
+  }
+
   onNewWant(want: Want): void {
-    this.enterTray();
+    if (this.resident) {
+      this.enterTray();
+    } else {
+      this.showLauncher();
+    }
     this.handleCommand(want);
+  }
+
+  onWindowStageDestroy(): void {
+    this.mainWindow = null;
   }
 
   private handleCommand(want: Want): void {

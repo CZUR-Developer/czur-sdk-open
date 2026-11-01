@@ -59,7 +59,10 @@ function load(file, stubs) {
   };
   const wrapper = vm.runInNewContext(
     `(function(require, module, exports) {${result.outputText}\n})`,
-    { console, setTimeout, clearTimeout, Promise, Uint8Array, ArrayBuffer, Error, String });
+    { console, setTimeout, clearTimeout, Promise, Uint8Array, ArrayBuffer, Error, String,
+      LocalStorage: class LocalStorage {
+        constructor(values) { Object.assign(this, values); }
+      } });
   wrapper(localRequire, module, module.exports);
   return module.exports;
 }
@@ -437,8 +440,14 @@ async function abilityScenario() {
   assert(coldWant, 'popup did not route a cold-start command to the resident ability');
 
   const events = [];
+  let trayRegistrationError = false;
+  let residentStartError = false;
   const context = {
     async hideAbility() { events.push('hide'); },
+    async startAbility(want, options) {
+      if (residentStartError) { throw new Error('resident unavailable'); }
+      events.push(`start:${want.abilityName}:${options.startupVisibility}`);
+    },
     resourceManager: { getRawFileContentSync() { return new Uint8Array(); } }
   };
   class UIAbility { constructor() { this.context = context; } }
@@ -447,6 +456,10 @@ async function abilityScenario() {
     async stop() { events.push('runtime.stop'); }
   };
   const control = {
+    initializePopup(value) {
+      assert.strictEqual(value, context);
+      events.push('control.initializePopup');
+    },
     initialize(value, injected) {
       assert.strictEqual(value, context);
       assert.strictEqual(injected, runtime);
@@ -468,34 +481,94 @@ async function abilityScenario() {
       statusBarManager: {
         on() { events.push('tray.on'); },
         off() { events.push('tray.off'); },
-        addToStatusBar() {}
+        addToStatusBar(context, options, callback) {
+          callback(trayRegistrationError ? new Error('tray unavailable') : undefined);
+        }
       }
     },
-    '@kit.ImageKit': { image: {} },
+    '@kit.ImageKit': { image: {
+      createImageSource() { return {
+        async createPixelMap() { return { release() {} }; },
+        release() {}
+      }; }
+    } },
     '@kit.PerformanceAnalysisKit': { hilog: { info() {}, warn() {}, error() {} } },
-    '@kit.ArkUI': { window: {} },
+    '@kit.ArkUI': { window: { WindowStatusType: { MINIMIZE: 'minimize' } } },
     '../common/TrayServiceControl': { trayServiceControl: control },
     '../services/SdkOpenRuntime': { sdkOpenRuntime: runtime }
   });
-  const ability = new exports.default();
-  ability.onCreate(coldWant);
-  ability.onWindowStageCreate({});
+  const residentWant = { abilityName: 'SdkOpenTrayAbility', parameters: { serviceCommand: 'start' } };
+  const resident = new exports.default();
+  resident.onCreate(residentWant);
+  resident.onWindowStageCreate({});
   await tick();
-  assert.deepStrictEqual(events, [
+  assert.deepStrictEqual(events.slice(0, 5), [
     'runtime.initialize', 'control.initialize', 'tray.on', 'execute:start', 'hide'
   ]);
-  ability.onDestroy();
+  resident.onDestroy();
   await tick();
   assert.deepStrictEqual(events.slice(-2), ['tray.off', 'runtime.stop']);
-  assert(!events.includes('stopForExit'),
-    'ordinary ability destruction must not make same-process restart final');
-
-  const rebuilt = new exports.default();
-  rebuilt.onCreate(coldWant);
+  const rebuiltResident = new exports.default();
+  rebuiltResident.onCreate(residentWant);
   await tick();
   assert.deepStrictEqual(events.slice(-4), [
     'runtime.initialize', 'control.initialize', 'tray.on', 'execute:start'
   ]);
+  assert(!events.includes('stopForExit'),
+    'ordinary resident destruction must not invoke final-exit cleanup');
+
+  events.length = 0;
+  trayRegistrationError = true;
+  residentStartError = true;
+  const failedLauncher = new exports.default();
+  failedLauncher.onCreate({ abilityName: 'SdkOpenLauncherAbility' });
+  const failedWindow = {
+    getWindowStatus() { return 'shown'; },
+    showWindow() { events.push('window.show.failed'); return Promise.resolve(); },
+    resize() { return Promise.resolve(); }
+  };
+  failedLauncher.onWindowStageCreate({
+    getMainWindowSync() { return failedWindow; },
+    loadContent(page, storage, callback) { callback({ code: 0 }); }
+  });
+  await tick();
+  assert(events.includes('window.show.failed'),
+    'launcher must remain foreground when tray registration/start fails');
+  assert(!events.includes('hide'), 'failed launcher must not hide itself');
+  trayRegistrationError = false;
+  residentStartError = false;
+  events.length = 0;
+  const ability = new exports.default();
+  ability.onCreate({ abilityName: 'SdkOpenLauncherAbility' });
+  let minimized = false;
+  const mainWindow = {
+    getWindowStatus() { return minimized ? 'minimize' : 'shown'; },
+    restore() { events.push('window.restore'); minimized = false; return Promise.resolve(); },
+    showWindow() { events.push('window.show'); return Promise.resolve(); },
+    resize() { events.push('window.resize'); return Promise.resolve(); }
+  };
+  ability.onWindowStageCreate({
+    getMainWindowSync() { return mainWindow; },
+    loadContent(page, storage, callback) {
+      assert.strictEqual(page, 'pages/Index');
+      assert.strictEqual(storage.showWindowControls, true);
+      events.push('window.loadContent');
+      callback({ code: 0 });
+    }
+  });
+  await tick();
+  assert.deepStrictEqual(events, [
+    'control.initializePopup', 'window.resize', 'window.loadContent', 'window.show',
+    'start:SdkOpenTrayAbility:1'
+  ]);
+  const showCount = events.filter((item) => item === 'window.show').length;
+  minimized = true;
+  ability.onNewWant({ abilityName: 'SdkOpenLauncherAbility' });
+  await tick();
+  assert.strictEqual(events.filter((item) => item === 'window.show').length, showCount + 1,
+    'relaunch must restore the foreground launcher window');
+  assert.deepStrictEqual(events.slice(-2), ['window.restore', 'window.show']);
+  assert(!events.includes('hide'), 'launcher must not hide itself');
 }
 
 function certificateAbilityScenario() {

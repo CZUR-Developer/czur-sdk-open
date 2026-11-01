@@ -3,7 +3,7 @@
 该目录是 `sdk_open` 的独立 HarmonyOS 2in1 工程。当前正式架构只有一个
 `sdkopen_tray` entry HAP，bundle name 为 `com.czur.opensdk`：
 
-- `SdkOpenLauncherAbility` 是外部启动入口，负责注册桌面状态栏图标；
+- `SdkOpenLauncherAbility` 是外部启动入口，显示前台服务控制窗口并注册桌面状态栏图标；
 - `SdkOpenTrayAbility` 以 `ATTACH_TO_STATUS_BAR_ITEM` 隐藏运行，持有 native runtime、
   USB Host 和设备生命周期；
 - `SdkOpenStatusBarAbility`（`statusBarView`）提供托盘弹窗，支持打开本机管理站点和 HTTP Demo；
@@ -111,8 +111,11 @@ src/sdk_open/scripts/harmony/run_sdk_open_app.sh \
   aa start -b com.czur.opensdk -m sdkopen_tray -a SdkOpenLauncherAbility
 ```
 
-启动入口只注册托盘项，不会自动启动 runtime。请在托盘右键菜单或左键弹窗中点击
-“启动服务”；隐藏的 `SdkOpenTrayAbility` 随后持有 runtime。运行日志应包含：
+启动入口显示服务控制窗口，并注册托盘项，不会自动启动 runtime。请在控制窗口、
+托盘右键菜单或左键弹窗中点击“启动服务”；隐藏的 `SdkOpenTrayAbility` 随后持有
+runtime。点击“收起窗口”只最小化前台窗口，仍可通过任务栏恢复或从系统托盘控制服务。
+再次从应用图标启动会恢复前台窗口。普通启动入口不会自动隐藏或结束，避免上架自检
+因没有前台窗口而报告 `The application is not in the foreground`。运行日志应包含：
 
 
 ```text
