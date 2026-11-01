@@ -11,12 +11,31 @@ interface LauncherWindowState {
   showWindowControls: boolean;
 }
 
+const LAUNCHER_WINDOW_WIDTH = 520;
+const LAUNCHER_WINDOW_HEIGHT = 800;
+const TRAY_QUICK_OPERATION_HEIGHT = 360;
+const LAUNCHER_WINDOW_POLICY_RETRY_DELAYS: number[] = [100, 500, 1000];
+
 export default class SdkOpenTrayAbility extends UIAbility {
   private registered: boolean = false;
   private whiteIcon: image.PixelMap | null = null;
   private blackIcon: image.PixelMap | null = null;
   private resident: boolean = false;
   private mainWindow: window.Window | null = null;
+  private launcherWindowPolicyGeneration: number = 0;
+  private launcherWindowStatusListener = (status: window.WindowStatusType): void => {
+    if (status !== window.WindowStatusType.MAXIMIZE || !this.mainWindow) {
+      return;
+    }
+    // Title-bar movement must stay enabled so the user can drag the window.
+    // If a platform still turns a double-click into maximize, immediately
+    // restore the fixed-size launcher instead of leaving it maximized.
+    this.mainWindow.restore().then(() => {
+      this.scheduleLauncherWindowPolicy('restore-after-maximize');
+    }).catch((error: Object): void => {
+      hilog.warn(0, 'SdkOpenTray', 'Cannot restore launcher after maximize: %{public}s', String(error));
+    });
+  };
   private rightMenuListener = (event: emitter.EventData): void => {
     const code = event.data?.['menuCode'] as string;
     if (code === 'start' || code === 'stop') { trayServiceControl.execute(code); }
@@ -52,7 +71,7 @@ export default class SdkOpenTrayAbility extends UIAbility {
       statusBarManager.addToStatusBar(this.context, {
         icons: { white, black },
         quickOperation: {
-          title: 'CZUR Open SDK', height: 420,
+          title: 'CZUR Open SDK', height: TRAY_QUICK_OPERATION_HEIGHT,
           moduleName: 'sdkopen_tray', abilityName: 'SdkOpenStatusBarAbility'
         },
         // Keep the system tray context menu limited to the same service lifecycle
@@ -103,19 +122,86 @@ export default class SdkOpenTrayAbility extends UIAbility {
     if (!this.resident) {
       trayServiceControl.initializePopup(this.context);
       this.mainWindow = windowStage.getMainWindowSync();
-      this.mainWindow.resize(520, 600).catch((error: Object): void => {
-        hilog.warn(0, 'SdkOpenTray', 'Cannot resize launcher window: %{public}s', String(error));
-      });
+      this.registerLauncherWindowStatusListener();
+      this.scheduleLauncherWindowPolicy('window-stage-create');
       const launcherState: LauncherWindowState = { showWindowControls: true };
       windowStage.loadContent('pages/Index', new LocalStorage(launcherState), (error) => {
         if (error.code) {
           hilog.error(0, 'SdkOpenTray', 'Failed to load launcher page: %{public}s', String(error));
           return;
         }
+        this.scheduleLauncherWindowPolicy('load-content');
         this.showLauncher();
       });
     }
     this.enterTray();
+  }
+
+  private registerLauncherWindowStatusListener(): void {
+    const mainWindow = this.mainWindow;
+    if (!mainWindow) {
+      return;
+    }
+    try {
+      mainWindow.on('windowStatusChange', this.launcherWindowStatusListener);
+    } catch (error) {
+      hilog.warn(0, 'SdkOpenTray', 'Cannot observe launcher window status: %{public}s', String(error));
+    }
+  }
+
+  private scheduleLauncherWindowPolicy(stage: string): void {
+    const generation = ++this.launcherWindowPolicyGeneration;
+    this.applyLauncherWindowPolicy(stage);
+    LAUNCHER_WINDOW_POLICY_RETRY_DELAYS.forEach((delay: number) => {
+      setTimeout(() => {
+        if (generation === this.launcherWindowPolicyGeneration) {
+          this.applyLauncherWindowPolicy(`${stage}+${delay}ms`);
+        }
+      }, delay);
+    });
+  }
+
+  private applyLauncherWindowPolicy(stage: string): void {
+    const mainWindow = this.mainWindow;
+    if (!mainWindow) {
+      return;
+    }
+
+    try {
+      // Harmony may create the title-bar decoration after loadContent. Apply
+      // this again during the retry window so the maximize button cannot
+      // reappear when the decoration is initialized late.
+      mainWindow.setWindowTitleButtonVisible(false, true, true);
+    } catch (error) {
+      hilog.warn(0, 'SdkOpenTray', 'Cannot configure launcher title buttons at %{public}s: %{public}s',
+        stage, String(error));
+    }
+    try {
+      // Keep title-bar movement enabled so the user can reposition the window.
+      // A maximize status is handled by launcherWindowStatusListener above.
+      mainWindow.setWindowTitleMoveEnabled(true);
+    } catch (error) {
+      hilog.warn(0, 'SdkOpenTray', 'Cannot enable launcher title movement at %{public}s: %{public}s',
+        stage, String(error));
+    }
+    try {
+      mainWindow.setResizeByDragEnabled(false).catch((error: Object): void => {
+        hilog.warn(0, 'SdkOpenTray', 'Cannot disable launcher resize at %{public}s: %{public}s',
+          stage, String(error));
+      });
+    } catch (error) {
+      hilog.warn(0, 'SdkOpenTray', 'Cannot disable launcher resize at %{public}s: %{public}s',
+        stage, String(error));
+    }
+    try {
+      mainWindow.resize(LAUNCHER_WINDOW_WIDTH, LAUNCHER_WINDOW_HEIGHT).catch((error: Object): void => {
+        hilog.warn(0, 'SdkOpenTray', 'Cannot resize launcher window at %{public}s: %{public}s',
+          stage, String(error));
+      });
+    } catch (error) {
+      hilog.warn(0, 'SdkOpenTray', 'Cannot resize launcher window at %{public}s: %{public}s',
+        stage, String(error));
+    }
   }
 
   private async showLauncher(): Promise<void> {
@@ -125,6 +211,7 @@ export default class SdkOpenTrayAbility extends UIAbility {
           await this.mainWindow.restore();
         }
         await this.mainWindow.showWindow();
+        this.scheduleLauncherWindowPolicy('show-launcher');
       }
     } catch (error) {
       hilog.error(0, 'SdkOpenTray', 'Cannot show launcher window: %{public}s', String(error));
@@ -140,7 +227,22 @@ export default class SdkOpenTrayAbility extends UIAbility {
     this.handleCommand(want);
   }
 
+  onForeground(): void {
+    if (!this.resident) {
+      this.scheduleLauncherWindowPolicy('foreground');
+    }
+  }
+
   onWindowStageDestroy(): void {
+    this.launcherWindowPolicyGeneration++;
+    const mainWindow = this.mainWindow;
+    if (mainWindow) {
+      try {
+        mainWindow.off('windowStatusChange', this.launcherWindowStatusListener);
+      } catch (error) {
+        hilog.warn(0, 'SdkOpenTray', 'Cannot stop observing launcher window status: %{public}s', String(error));
+      }
+    }
     this.mainWindow = null;
   }
 

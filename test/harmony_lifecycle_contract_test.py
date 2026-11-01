@@ -525,6 +525,9 @@ async function abilityScenario() {
   const failedWindow = {
     getWindowStatus() { return 'shown'; },
     showWindow() { events.push('window.show.failed'); return Promise.resolve(); },
+    setWindowTitleButtonVisible() { events.push('window.titleButtons'); },
+    setWindowTitleMoveEnabled() { events.push('window.titleMove'); },
+    setResizeByDragEnabled() { events.push('window.resizeDrag'); return Promise.resolve(); },
     resize() { return Promise.resolve(); }
   };
   failedLauncher.onWindowStageCreate({
@@ -545,7 +548,15 @@ async function abilityScenario() {
     getWindowStatus() { return minimized ? 'minimize' : 'shown'; },
     restore() { events.push('window.restore'); minimized = false; return Promise.resolve(); },
     showWindow() { events.push('window.show'); return Promise.resolve(); },
-    resize() { events.push('window.resize'); return Promise.resolve(); }
+    setWindowTitleButtonVisible(maximize, minimize, close) {
+      events.push(`window.titleButtons:${maximize}:${minimize}:${close}`);
+    },
+    setWindowTitleMoveEnabled(enabled) { events.push(`window.titleMove:${enabled}`); },
+    setResizeByDragEnabled(enabled) {
+      events.push(`window.resizeDrag:${enabled}`);
+      return Promise.resolve();
+    },
+    resize(width, height) { events.push(`window.resize:${width}:${height}`); return Promise.resolve(); }
   };
   ability.onWindowStageCreate({
     getMainWindowSync() { return mainWindow; },
@@ -558,7 +569,14 @@ async function abilityScenario() {
   });
   await tick();
   assert.deepStrictEqual(events, [
-    'control.initializePopup', 'window.resize', 'window.loadContent', 'window.show',
+    'control.initializePopup',
+    'window.titleButtons:false:true:true', 'window.titleMove:true',
+    'window.resizeDrag:false', 'window.resize:520:800',
+    'window.loadContent',
+    'window.titleButtons:false:true:true', 'window.titleMove:true',
+    'window.resizeDrag:false', 'window.resize:520:800', 'window.show',
+    'window.titleButtons:false:true:true', 'window.titleMove:true',
+    'window.resizeDrag:false', 'window.resize:520:800',
     'start:SdkOpenTrayAbility:1'
   ]);
   const showCount = events.filter((item) => item === 'window.show').length;
@@ -567,7 +585,10 @@ async function abilityScenario() {
   await tick();
   assert.strictEqual(events.filter((item) => item === 'window.show').length, showCount + 1,
     'relaunch must restore the foreground launcher window');
-  assert.deepStrictEqual(events.slice(-2), ['window.restore', 'window.show']);
+  const relaunchRestore = events.lastIndexOf('window.restore');
+  const relaunchShow = events.lastIndexOf('window.show');
+  assert(relaunchRestore >= 0 && relaunchShow > relaunchRestore,
+    'relaunch must restore before showing the launcher');
   assert(!events.includes('hide'), 'launcher must not hide itself');
 }
 
@@ -718,6 +739,26 @@ class HarmonyLifecycleContractTest(unittest.TestCase):
 
     def test_cold_popup_command_and_same_process_ability_rebuild(self) -> None:
         self.run_node("ability")
+
+    def test_launcher_and_tray_window_layout_contract(self) -> None:
+        ability = read("sdkopen_tray/src/main/ets/entryability/SdkOpenTrayAbility.ets")
+        page = read("sdkopen_tray/src/main/ets/pages/Index.ets")
+
+        self.assertIn("const LAUNCHER_WINDOW_WIDTH = 520;", ability)
+        self.assertIn("const LAUNCHER_WINDOW_HEIGHT = 800;", ability)
+        self.assertIn("const TRAY_QUICK_OPERATION_HEIGHT = 360;", ability)
+        self.assertIn("const LAUNCHER_WINDOW_POLICY_RETRY_DELAYS: number[] = [100, 500, 1000];", ability)
+        self.assertIn("setWindowTitleButtonVisible(false, true, true)", ability)
+        self.assertIn("setWindowTitleMoveEnabled(true)", ability)
+        self.assertIn("WindowStatusType.MAXIMIZE", ability)
+        self.assertIn("setResizeByDragEnabled(false)", ability)
+        self.assertIn("onForeground()", ability)
+        self.assertIn("title: 'CZUR Open SDK', height: TRAY_QUICK_OPERATION_HEIGHT", ability)
+
+        self.assertIn("const TRAY_CONTENT_WIDTH = 360;", page)
+        self.assertIn("this.showWindowControls ? '100%' : TRAY_CONTENT_WIDTH", page)
+        self.assertNotIn("minimizeLauncher", page)
+        self.assertNotIn("收起窗口", page)
 
     def test_certificate_installer_uses_a_visible_dedicated_ability(self) -> None:
         self.run_node("certificate-ability")
