@@ -6,6 +6,7 @@ ROOT_DIR="${SDK_OPEN_HOST_SOURCE_ROOT}"
 SDK_HOME="${DEVECO_SDK_HOME:-/Applications/DevEco-Studio.app/Contents/sdk}"
 HDC="${HDC:-${SDK_HOME}/default/openharmony/toolchains/hdc}"
 APP_PATH="${SDK_OPEN_HARMONY_APP:-${SDK_OPEN_SOURCE_ROOT}/platform/harmony/build/outputs/default/harmony-default-unsigned.app}"
+HAP_PATH="${SDK_OPEN_HARMONY_HAP:-}"
 TARGET="${SDK_OPEN_HARMONY_TARGET:-}"
 BUNDLE="${SDK_OPEN_HARMONY_BUNDLE:-com.czur.opensdk}"
 MODULE="${SDK_OPEN_HARMONY_MODULE:-sdkopen_tray}"
@@ -16,13 +17,16 @@ LAUNCH_TRAY=1
 
 usage() {
   cat <<USAGE
-Usage: $(basename "$0") [--app <signed.app>] [--target <device>] [--skip-install] [--no-launch] [--smoke]
+Usage: $(basename "$0") [--app <signed.app>] [--hap <signed.hap>] [--target <device>] [--skip-install] [--no-launch] [--smoke]
 
 Install the SDK Open HarmonyOS tray application. The single sdkopen_tray entry
 HAP owns the native runtime and USB Host lifecycle. By default the script opens
 the tray launcher. Launching the tray does not start the runtime: click Start
 Service in the tray menu or popup before using --smoke.
 The default build output is unsigned; pass a signed .app for normal devices.
+When an APP is supplied, pass its standalone signed HAP as well. Hvigor may
+assemble the APP with an embedded HAP that is not accepted by device bm; the
+standalone HAP is the device-install input.
 
 Environment:
   DEVECO_SDK_HOME       DevEco SDK root (default: ${SDK_HOME})
@@ -69,6 +73,11 @@ while [[ $# -gt 0 ]]; do
       APP_PATH="$2"
       shift 2
       ;;
+    --hap)
+      [[ $# -ge 2 ]] || fail "$1 requires a path"
+      HAP_PATH="$2"
+      shift 2
+      ;;
     --target)
       [[ $# -ge 2 ]] || fail "--target requires a device serial"
       TARGET="$2"
@@ -110,7 +119,13 @@ fi
 HDC_ARGS=(-t "${TARGET}")
 if [[ "${SKIP_INSTALL}" == "0" ]]; then
   [[ -f "${APP_PATH}" ]] || fail "application package not found: ${APP_PATH}"
-  command -v unzip >/dev/null 2>&1 || fail "unzip is required to unpack the .app"
+  if [[ -z "${HAP_PATH}" ]]; then
+    APP_DIR="$(cd "$(dirname "${APP_PATH}")" && pwd)"
+    APP_STEM="$(basename "${APP_PATH}" .app)"
+    HAP_PATH="${APP_DIR}/sdkopen_tray_${APP_STEM#*_}.hap"
+  fi
+  [[ -f "${HAP_PATH}" ]] || fail "signed HAP not found: ${HAP_PATH}; pass --hap explicitly"
+  [[ -r "${HAP_PATH}" ]] || fail "signed HAP is not readable: ${HAP_PATH}"
   PACKAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sdkopen-install.XXXXXXXX")"
   DEVICE_PACKAGE_DIR="/data/local/tmp/$(basename "${PACKAGE_DIR}")"
   cleanup_install() {
@@ -118,20 +133,19 @@ if [[ "${SKIP_INSTALL}" == "0" ]]; then
     hdc_cmd "${HDC_ARGS[@]}" shell "rm -rf ${DEVICE_PACKAGE_DIR}" >/dev/null 2>&1 || true
   }
   trap cleanup_install EXIT
-  # bm accepts a directory of HAPs, not the outer .app archive.
-  unzip -q -j "${APP_PATH}" '*.hap' -d "${PACKAGE_DIR}" || fail "cannot extract application HAPs"
-  HAP_FILES=("${PACKAGE_DIR}"/*.hap)
-  [[ -f "${HAP_FILES[0]}" ]] || fail "no HAP found in ${APP_PATH}"
+  # Install the standalone signed HAP. Extracting the HAP from the outer APP
+  # loses the HAP signing block produced by Hvigor and yields bm 9568320
+  # ("no signature file").
+  HAP_FILE="${PACKAGE_DIR}/$(basename "${HAP_PATH}")"
+  cp "${HAP_PATH}" "${HAP_FILE}" || fail "cannot stage signed HAP"
   hdc_cmd "${HDC_ARGS[@]}" shell "mkdir -p ${DEVICE_PACKAGE_DIR}" >/dev/null
-  for HAP_FILE in "${HAP_FILES[@]}"; do
-    TRANSFER_OUTPUT="$(SDK_OPEN_HARMONY_HDC_TIMEOUT="${SDK_OPEN_HARMONY_HDC_TIMEOUT:-300}" \
-      hdc_cmd "${HDC_ARGS[@]}" file send "${HAP_FILE}" \
-      "${DEVICE_PACKAGE_DIR}/$(basename "${HAP_FILE}")" 2>&1)" || fail "HAP transfer failed: ${TRANSFER_OUTPUT}"
-    [[ "${TRANSFER_OUTPUT}" == *'FileTransfer finish'* ]] || fail "HAP transfer failed: ${TRANSFER_OUTPUT}"
-  done
+  TRANSFER_OUTPUT="$(SDK_OPEN_HARMONY_HDC_TIMEOUT="${SDK_OPEN_HARMONY_HDC_TIMEOUT:-300}" \
+    hdc_cmd "${HDC_ARGS[@]}" file send "${HAP_FILE}" \
+    "${DEVICE_PACKAGE_DIR}/$(basename "${HAP_FILE}")" 2>&1)" || fail "HAP transfer failed: ${TRANSFER_OUTPUT}"
+  [[ "${TRANSFER_OUTPUT}" == *'FileTransfer finish'* ]] || fail "HAP transfer failed: ${TRANSFER_OUTPUT}"
   printf '[sdk-open-harmony] install %s on %s\n' "${APP_PATH}" "${TARGET}"
   INSTALL_OUTPUT="$(SDK_OPEN_HARMONY_HDC_TIMEOUT=120 hdc_cmd "${HDC_ARGS[@]}" shell \
-    "bm install -r -p ${DEVICE_PACKAGE_DIR}" 2>&1)" || \
+    "bm install -r -p ${DEVICE_PACKAGE_DIR}/$(basename "${HAP_FILE}")" 2>&1)" || \
     fail "hdc install command failed: ${INSTALL_OUTPUT}"
   printf '%s\n' "${INSTALL_OUTPUT}"
   # hdc may return exit code 0 even when the daemon reports an installation
