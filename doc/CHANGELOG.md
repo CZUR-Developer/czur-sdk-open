@@ -4,6 +4,14 @@
 
 All notable changes to the CZUR Open SDK are documented in this file.
 
+## [0.1.1] - 2026-11-05
+
+### Changed
+
+- Improved static barcode and QR code recognition on Windows and macOS, including Data Matrix and recognition of rotated, inverted, low-contrast, and colored-label images.
+- Improved detection of multiple barcodes in a single image, preserving identical content at different positions while removing duplicate detections of the same barcode.
+- Optimized static recognition efficiency by avoiding repeated decoding of identical image inputs and processing independent scan passes in parallel on Windows and macOS.
+
 ## [0.1.0] - 2026-10-23
 
 ### Fixed
