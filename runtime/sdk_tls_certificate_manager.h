@@ -52,6 +52,14 @@ public:
                                bool* rotated,
                                std::string* error_message);
 
+#if defined(__APPLE__)
+    // Synchronize only installer-managed credentials. Custom pairs are validated
+    // and preserved. Uses the same lock and recovery journal as leaf rotation.
+    static bool PrepareMacCredentials(const SdkTlsCertificatePaths& system,
+                                      const SdkTlsCertificatePaths& user,
+                                      std::string* error_message);
+#endif
+
     static SdkTlsCertificatePaths PathsFromConfig(const SdkTlsConfig& config);
 };
 

@@ -6,12 +6,20 @@
 
 #include <fstream>
 #include <iostream>
+#include <sstream>
 
 namespace {
 
 bool Exists(const std::string& path) {
     std::ifstream input(path.c_str(), std::ios::binary);
     return input.good();
+}
+
+std::string ReadFile(const std::string& path) {
+    std::ifstream input(path.c_str(), std::ios::binary);
+    std::ostringstream contents;
+    contents << input.rdbuf();
+    return contents.str();
 }
 
 } // namespace
@@ -43,11 +51,18 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    const std::string root_before = ReadFile(paths.root_certificate);
     bool rotated = false;
     policy.rotate_before_days = 400;
     if (!editor::sdk::SdkTlsCertificateManager::RotateIfNeeded(
             paths, policy, &rotated, &error) || !rotated) {
         std::cerr << "TLS rotation threshold did not rotate the managed leaf: " << error << std::endl;
+        return 1;
+    }
+
+    if (ReadFile(paths.root_certificate) != root_before ||
+        !editor::sdk::SdkTlsCertificateManager::Provision(paths, editor::sdk::SdkTlsRotationPolicy(), false, &error)) {
+        std::cerr << "rotation changed the CA or left an invalid pair: " << error << std::endl;
         return 1;
     }
 
@@ -62,10 +77,12 @@ int main(int argc, char* argv[]) {
     custom.state = editor::sdk::JoinPath(custom.tls_dir, "tls-state.json");
     if (!editor::sdk::EnsureDirectoryRecursive(custom.tls_dir)) return 1;
     {
-        std::ofstream certificate(custom.certificate_chain.c_str());
-        std::ofstream private_key(custom.private_key.c_str());
-        certificate << "customer certificate\n";
-        private_key << "customer private key\n";
+        std::ifstream source_certificate(paths.certificate_chain.c_str(), std::ios::binary);
+        std::ifstream source_key(paths.private_key.c_str(), std::ios::binary);
+        std::ofstream certificate(custom.certificate_chain.c_str(), std::ios::binary);
+        std::ofstream private_key(custom.private_key.c_str(), std::ios::binary);
+        certificate << source_certificate.rdbuf();
+        private_key << source_key.rdbuf();
     }
     if (!editor::sdk::SdkTlsCertificateManager::Provision(custom, policy, false, &error)) {
         std::cerr << "customer TLS pair was not preserved: " << error << std::endl;
@@ -78,6 +95,23 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+#if defined(__APPLE__)
+    // Explicit managed state cannot fall back to custom validation on damage.
+    const std::string root_key = ReadFile(paths.root_private_key);
+    {
+        std::ofstream broken(paths.root_private_key.c_str(), std::ios::binary | std::ios::trunc);
+        broken << ReadFile(custom.private_key);
+    }
+    if (editor::sdk::SdkTlsCertificateManager::Provision(paths, policy, false, &error) ||
+        editor::sdk::SdkTlsCertificateManager::RenewLeaf(paths, policy, &error)) {
+        std::cerr << "damaged managed CA was reported as ready" << std::endl;
+        return 1;
+    }
+    {
+        std::ofstream restore(paths.root_private_key.c_str(), std::ios::binary | std::ios::trunc);
+        restore << root_key;
+    }
+#endif
     std::cout << "PASS: TLS certificate provisioning and rotation" << std::endl;
     return 0;
 }
