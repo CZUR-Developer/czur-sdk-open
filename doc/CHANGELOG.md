@@ -4,6 +4,12 @@
 
 All notable changes to the CZUR Open SDK are documented in this file.
 
+## [0.1.2] - 2026-11-06
+### Fixed
+
+- Fixed macOS installation and upgrade failures caused by partially migrated TLS certificate/key pairs or unreadable installer-managed private keys. Managed credentials are now synchronized and recovered as one validated set, while valid customer-provided credentials remain unchanged.
+- Fixed SDK Open LaunchAgent startup after a fresh installation, upgrade, certificate rotation, or login on both Apple Silicon and Intel Macs. The 397-day leaf-certificate lifetime and 90-day renewal window remain unchanged.
+  
 ## [0.1.1] - 2026-11-05
 
 ### Changed
@@ -12,10 +18,6 @@ All notable changes to the CZUR Open SDK are documented in this file.
 - Improved detection of multiple barcodes in a single image, preserving identical content at different positions while removing duplicate detections of the same barcode.
 - Optimized static recognition efficiency by avoiding repeated decoding of identical image inputs and processing independent scan passes in parallel on Windows and macOS.
 
-### Fixed
-
-- Fixed macOS installation and upgrade failures caused by partially migrated TLS certificate/key pairs or unreadable installer-managed private keys. Managed credentials are now synchronized and recovered as one validated set, while valid customer-provided credentials remain unchanged.
-- Fixed SDK Open LaunchAgent startup after a fresh installation, upgrade, certificate rotation, or login on both Apple Silicon and Intel Macs. The 397-day leaf-certificate lifetime and 90-day renewal window remain unchanged.
 
 ## [0.1.0] - 2026-10-23
 
