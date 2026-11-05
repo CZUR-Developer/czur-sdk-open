@@ -464,13 +464,34 @@ OCR task query/cancel examples:
 
 Barcode detection example:
 
+Omitting `formats` or passing an empty array enables QR, Data Matrix, PDF417,
+Aztec, MaxiCode, Code39, Code93, Code128, Codabar, ITF, EAN8/13, UPCA/E, RSS14,
+and RSS Expanded. An explicit list restricts detection, for example `["datamatrix"]`.
+Existing aliases such as `data_matrix`, `qr_code`, and `code_128` remain accepted,
+case-insensitively. `detect_type` remains a legacy parameter alias.
+`upc_ean_extension` is an EAN/UPC modifier and cannot be read independently.
+
+Static detection uses the shared client/SDK module at the original resolution with
+bounded binarization passes. Windows/macOS use ZXing-C++ 3.1.1 and read multiple
+symbols per pass. Linux keeps the existing legacy decoder, reads one symbol per
+pass, tries rotation/inversion and binarization, and merges results. Linux does not
+guarantee full multi-symbol coverage or 20/20 detection of difficult samples; its
+Ubuntu image and compiler requirements remain unchanged.
+
+`detected` means at least one symbol was read; `count` equals the length of `barcodes`.
+Each entry retains the legacy `format` ID and `format_name`, decoded `text`, and
+`points` in original-image coordinates. The modern backend returns four corners;
+Linux retains native decoder points, including two-point positions for some linear
+codes. Results are ordered top to bottom and left to right within a row. Identical
+content at different positions remains separate. Enhanced decoding of large images
+takes additional processing time. Realtime recognition uses the existing capture pipeline.
+
 ```json
 {
   "request_id": "req-barcode-001",
   "method": "recognition.barcode_detect",
   "params": {
-    "input_upload_id": "img-1760000000-1",
-    "formats": ["qrcode", "pdf417", "code128"]
+    "input_upload_id": "img-1760000000-1"
   }
 }
 ```

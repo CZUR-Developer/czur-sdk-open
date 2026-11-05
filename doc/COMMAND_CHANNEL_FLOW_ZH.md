@@ -462,13 +462,27 @@ OCR 任务查询/取消示例：
 
 条码识别示例：
 
+不传 `formats` 或传空数组时，默认识别 QR、Data Matrix、PDF417、Aztec、MaxiCode、
+Code39、Code93、Code128、Codabar、ITF、EAN8/13、UPCA/E、RSS14 与 RSS Expanded。
+传入 `formats` 时仅识别选中的码制；例如 `["datamatrix"]`，也接受现有的
+`data_matrix`、`qr_code`、`code_128` 等别名及大小写变体。`detect_type` 仍作为旧参数别名。
+`upc_ean_extension` 需与 EAN/UPC 主码制组合使用，不能独立识别。
+
+静态识别使用客户端与 SDK 共用的公共模块，保留原始分辨率并执行有限的二值化增强。
+Windows/macOS 使用 ZXing-C++ 3.1.1，每轮读取多个码；Linux 保留现有旧引擎，
+每轮单码，增加旋转、反色及二值化重试，再合并各轮结果。Linux 不保证完整多码覆盖，
+也不保证复杂样图的 20/20 检出率，不要求升级现有 Ubuntu 镜像或编译器。
+响应的 `detected` 表示是否至少检测到一个码，`count` 等于 `barcodes` 数组长度。
+每项保留原有的 `format` 数值和 `format_name`，`text` 为解码文本，`points` 为原图坐标（新版为四角，Linux 旧引擎保留原生点集，部分一维码为两个点）。
+结果按从上到下、同一行从左到右排列；不同位置的相同内容保留为多个码。
+低对比度大图的增强识别需要更多处理时间。实时视频识别仍使用原有采集链路。
+
 ```json
 {
   "request_id": "req-barcode-001",
   "method": "recognition.barcode_detect",
   "params": {
-    "input_upload_id": "img-1760000000-1",
-    "formats": ["qrcode", "pdf417", "code128"]
+    "input_upload_id": "img-1760000000-1"
   }
 }
 ```
