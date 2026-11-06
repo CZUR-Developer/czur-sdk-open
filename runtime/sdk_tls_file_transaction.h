@@ -1,3 +1,6 @@
+// Copyright (c) 2026 CZUR Tech. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 #ifndef CZUR_SDK_OPEN_RUNTIME_SDK_TLS_FILE_TRANSACTION_H_
 #define CZUR_SDK_OPEN_RUNTIME_SDK_TLS_FILE_TRANSACTION_H_
 
