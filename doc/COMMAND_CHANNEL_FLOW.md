@@ -87,6 +87,25 @@ Unified response format:
 }
 ```
 
+### Unique device SN in `device.open`
+
+After a successful open, response `data` includes the optional string `device_sn` only when
+a device command returns a valid unique SN. This is neither the UVC enumeration/connection
+serial nor `device_id`; neither those identifiers nor cached values are used as a fallback.
+If reading is unsupported, fails, or returns invalid data, `device_sn` is omitted (not an empty
+string or `null`), without changing the original open result. `device.list` and `device.get`
+do not return this field. Clients must allow it to be absent.
+
+Partial `data` example with an illustrative SN; all other response fields remain unchanged:
+
+```json
+{
+  "device_id": "04fc:6333:01.00.00:b1d6",
+  "opened": true,
+  "device_sn": "AM3300123456789A"
+}
+```
+
 ## Event Shape
 
 Server-pushed events stay separate from request/response traffic:
@@ -391,11 +410,15 @@ For `selected_area`, pass frontend-scaled points in `params.selected_area.points
 
 OCR and recognition methods:
 
-- `ocr.extract_text`: runs lightweight OCR on one image and returns text blocks with image-space rectangles.
-- `ocr.recognize`: starts an asynchronous OCR export task. It accepts `input_upload_ids` or `input_files`, optional `output_path` or `output_dir`, `format`, and optional export parameters such as `encoding`, `paperSize`, `exportType`, `ocrPreference`, `quality`, and `exportFormat`. Supported export formats are `txt`, `pdf`, `docx`, `xlsx`, `ofd`, and `json`. `quality` remains the existing public parameter; for Linux PDF/OFD OCR export it controls image-layer export compression quality. OCR recognition still runs on the original uploaded/input images, not on compressed temporary export images, to avoid reducing recognition accuracy.
+- `ocr.extract_text`: runs lightweight OCR on one image and returns text blocks with image-space rectangles. The optional `language` parameter selects the CZOCR recognition language.
+- `ocr.recognize`: starts an asynchronous OCR export task. It accepts `input_upload_ids` or `input_files`, optional `output_path` or `output_dir`, `format`, `language`, and optional export parameters such as `encoding`, `paperSize`, `exportType`, `ocrPreference`, `quality`, and `exportFormat`. One language applies to every input image in the task. Supported export formats are `txt`, `pdf`, `docx`, `xlsx`, `ofd`, and `json`. `quality` remains the existing public parameter; for Linux PDF/OFD OCR export it controls image-layer export compression quality. OCR recognition still runs on the original uploaded/input images, not on compressed temporary export images, to avoid reducing recognition accuracy.
 - `ocr.get`: returns the current OCR task snapshot.
 - `ocr.cancel`: requests cancellation of one OCR task.
 - `recognition.barcode_detect`: detects barcode/QR content from one static image. Realtime barcode recognition belongs to the capture/video flow and is not started by this method.
+
+Both OCR methods accept one CZOCR language code in `params.language`. Omitting it is equivalent to `"auto"`. `auto` preserves the current engine default, which currently uses the Simplified Chinese (`ch`) model; it does not promise universal language detection. An explicitly empty value, a non-string value, an unknown code, or a currently disabled code returns `InvalidParams` instead of silently falling back.
+
+Supported codes are: `auto`, `ch`, `hu`, `en`, `rs_latin`, `fr`, `id`, `de`, `oc`, `japan`, `is`, `korean`, `lt`, `chinese_cht`, `mi`, `af`, `ms`, `it`, `nl`, `es`, `no`, `bs`, `pl`, `pt`, `sk`, `cs`, `sl`, `cy`, `sq`, `da`, `sv`, `et`, `sw`, `ga`, `tl`, `hr`, `tr`, `uz`, `la`, `ru`, `be`, `uk`, `th`, `el`, `ku`, `lv`, `mt`, `ro`, `fi`, `eu`, `gl`, `lb`, `rm`, `ca`, `qu`, `te`, `rs_cyrillic`, `bg`, `mn`, `ady`, `kbd`, `av`, `inh`, `ce`, `lki`, `lez`, `kk`, `ky`, `tg`, `mk`, `tt`, `ba`, `udm`, `kv`, `bua`, `xal`, `tyv`, `sah`, `kaa`, `ar`, `hi`, `mr`, `ne`, `bh`, `mai`, `bho`, `mah`, `new`, `gom`, and `ta`.
 
 OCR text extraction example:
 
@@ -404,7 +427,8 @@ OCR text extraction example:
   "request_id": "req-ocr-text-001",
   "method": "ocr.extract_text",
   "params": {
-    "input_upload_id": "img-1760000000-1"
+    "input_upload_id": "img-1760000000-1",
+    "language": "en"
   }
 }
 ```
@@ -419,6 +443,7 @@ OCR export example:
     "input_upload_ids": ["img-1760000000-1", "img-1760000000-2"],
     "output_path": "/tmp/demo.txt",
     "format": "txt",
+    "language": "en",
     "exportType": "multi-page",
     "encoding": "utf-8",
     "quality": 90
@@ -439,13 +464,34 @@ OCR task query/cancel examples:
 
 Barcode detection example:
 
+Omitting `formats` or passing an empty array enables QR, Data Matrix, PDF417,
+Aztec, MaxiCode, Code39, Code93, Code128, Codabar, ITF, EAN8/13, UPCA/E, RSS14,
+and RSS Expanded. An explicit list restricts detection, for example `["datamatrix"]`.
+Existing aliases such as `data_matrix`, `qr_code`, and `code_128` remain accepted,
+case-insensitively. `detect_type` remains a legacy parameter alias.
+`upc_ean_extension` is an EAN/UPC modifier and cannot be read independently.
+
+Static detection uses the shared client/SDK module at the original resolution with
+bounded binarization passes. Windows/macOS use ZXing-C++ 3.1.1 and read multiple
+symbols per pass. Linux keeps the existing legacy decoder, reads one symbol per
+pass, tries rotation/inversion and binarization, and merges results. Linux does not
+guarantee full multi-symbol coverage or 20/20 detection of difficult samples; its
+Ubuntu image and compiler requirements remain unchanged.
+
+`detected` means at least one symbol was read; `count` equals the length of `barcodes`.
+Each entry retains the legacy `format` ID and `format_name`, decoded `text`, and
+`points` in original-image coordinates. The modern backend returns four corners;
+Linux retains native decoder points, including two-point positions for some linear
+codes. Results are ordered top to bottom and left to right within a row. Identical
+content at different positions remains separate. Enhanced decoding of large images
+takes additional processing time. Realtime recognition uses the existing capture pipeline.
+
 ```json
 {
   "request_id": "req-barcode-001",
   "method": "recognition.barcode_detect",
   "params": {
-    "input_upload_id": "img-1760000000-1",
-    "formats": ["qrcode", "pdf417", "code128"]
+    "input_upload_id": "img-1760000000-1"
   }
 }
 ```

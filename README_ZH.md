@@ -15,7 +15,8 @@
 
 ## 平台支持
 
-SDK Open runtime 目标支持多平台。现阶段已实现 Linux 版本，后续会陆续支持 Windows 和 macOS。
+SDK Open runtime 及其本机 TLS 生命周期由官方 Linux、Windows 和 macOS 安装包统一支持。
+三个平台使用相同的叶证书有效期、自动轮换阈值和客户证书保留规则。
 
 ## Release 包
 
@@ -247,8 +248,8 @@ export SDK_ASSET_BASE_URL=https://sdk.example.com:18082
 
 ### 本机 runtime 默认 TLS
 
-Windows 和 Linux 的官方 SDK Open 安装包会携带一组仅供本机 runtime 使用的默认
-证书与私钥，并在安装时完成以下配置：
+官方 SDK Open 安装包不会携带可跨机器复用的根私钥或服务端私钥，而是在客户机器由
+签名后的 runtime 生成本机专属根 CA 和叶证书，并在安装时完成以下配置：
 
 - 启用 `HTTPS 18082`、`WSS 18090` 与 `WSS 18091`，继续保留原有明文端口；
 - 将 `sdk-runtime.localhost` 映射到 `127.0.0.1`，服务只监听回环地址；
@@ -256,14 +257,22 @@ Windows 和 Linux 的官方 SDK Open 安装包会携带一组仅供本机 runtim
   `https://sdk-runtime.localhost:18082` 时不会出现默认自签名证书错误；
 - 默认 asset URL 为 `https://sdk-runtime.localhost:18082`。
 
-默认文件位置如下，升级安装不会覆盖已由客户替换的服务端证书和私钥：
+默认文件位置如下。新安装会在本机生成根 CA 私钥和叶证书，并在叶证书剩余
+90 天时自动轮换；升级安装不会覆盖已由客户替换的服务端证书和私钥：
 
 - Windows：`C:\ProgramData\CZUR\sdk-open\tls\sdk-runtime.localhost.fullchain.pem` 和
   `C:\ProgramData\CZUR\sdk-open\tls\sdk-runtime.localhost.key.pem`；配置文件为
   `C:\ProgramData\CZUR\sdk-open\runtime.env`。
 - Linux：`/etc/czur/sdk-open/tls/sdk-runtime.localhost.fullchain.pem` 和
-  `/etc/czur/sdk-open/tls/sdk-runtime.localhost.key.pem`；配置文件为
+  `/etc/czur/sdk-open/tls/sdk-runtime.localhost.key.pem`；根 CA 私钥为同目录的
+  `local-runtime-root-ca.key.pem`，状态文件为 `tls-state.json`；配置文件为
   `/etc/czur/sdk-open/runtime.env`。
+- macOS：系统运行目录为 `/Library/CZUR/sdk-open/tls`；登录用户实际运行的
+  LaunchAgent 使用 `~/Library/Application Support/CZUR/sdk-open/tls` 中的受保护副本。
+
+证书轮换由 SDK Open 运行时在启动时和后台定时检查执行。Linux systemd、Windows
+服务和 macOS LaunchAgent 使用同一套轮换阈值与证书格式。客户自定义
+`SDK_TLS_CERT_FILE`/`SDK_TLS_KEY_FILE` 后，SDK 会保留客户证书并停止自动轮换。
 
 如需替换为客户自己的证书，请将证书链和私钥作为匹配的一对替换，并重启 `sdk-open`
 服务；如更改文件路径、域名或端口，再同步修改 `runtime.env`。私有 CA 的根证书必须

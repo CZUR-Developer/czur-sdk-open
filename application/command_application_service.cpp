@@ -21,6 +21,7 @@
 #include "image_enhance_workflow_store.h"
 #include "sdk_entitlement_policy.h"
 #include "sdk_logger.h"
+#include "sdk_ocr_language.h"
 
 namespace editor {
 namespace sdk {
@@ -689,6 +690,24 @@ SdkCropBorderOptions ParseCropBorderOptions(const Json& obj,
     return options;
 }
 
+SdkCropCenterOptions ParseCropCenterOptions(const Json& obj,
+                                            bool default_enabled = false,
+                                            int default_margin = 0) {
+    SdkCropCenterOptions options;
+    options.enabled = default_enabled;
+    options.margin = default_margin;
+    const Json crop_json = GetOptionalObjectField(obj, "crop_center");
+    if (!crop_json.empty()) {
+        options.enabled = GetOptionalBoolField(crop_json, "enabled", options.enabled);
+        options.margin = GetOptionalIntField(crop_json, "margin", options.margin);
+    }
+    options.margin = ClampCropMargin(options.margin);
+    if (!options.enabled) {
+        options.margin = 0;
+    }
+    return options;
+}
+
 SdkSinglePageOptions ParseSinglePageOptions(const Json& obj, const SdkSinglePageOptions& defaults) {
     SdkSinglePageOptions options = defaults;
     options.realtime_detect_rects =
@@ -739,6 +758,9 @@ SdkCurvedBookOptions ParseCurvedBookOptions(const Json& obj, const SdkCurvedBook
                                                  options.crop_border.enabled,
                                                  options.crop_border.width,
                                                  options.crop_border.height);
+    options.crop_center = ParseCropCenterOptions(obj,
+                                                 options.crop_center.enabled,
+                                                 options.crop_center.margin);
     options.auto_complete = GetOptionalBoolAnyField(obj, {"auto_complete", "autoComplete"}, options.auto_complete);
     if (options.finger_type != "without_sleeve") {
         options.finger_type = "with_sleeve";
@@ -3714,6 +3736,9 @@ Json CommandApplicationService::HandleDeviceOpen(const std::string& connection_i
     data["device_id"] = result.device.device_id.empty() ? open_request.device_id : result.device.device_id;
     data["opened"] = result.opened;
     data["provider"] = ProviderNameOrEmpty(provider_names_, "device");
+    if (!result.device_sn.empty()) {
+        data["device_sn"] = result.device_sn;
+    }
     if (result.opened) {
         RememberOpenedDevice(connection_id, open_request.device_id);
     }
@@ -4853,6 +4878,10 @@ Json CommandApplicationService::HandleOcrRecognize(const std::string& connection
     }
 
     SdkOcrRecognizeRequest ocr_request;
+    std::string language_error;
+    if (!ReadSdkOcrLanguage(request.params, &ocr_request.language, &language_error)) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, language_error);
+    }
     ocr_request.input_upload_ids = GetOptionalStringArrayField(request.params, "input_upload_ids");
     const std::string single_upload_id = GetOptionalStringField(request.params, "input_upload_id");
     if (!single_upload_id.empty()) {
@@ -4911,6 +4940,9 @@ Json CommandApplicationService::HandleOcrRecognize(const std::string& connection
             ext_params[it.key()] = it.value();
         }
     }
+    // The validated public field is authoritative. Nested extension objects
+    // cannot select an unvalidated language.
+    ext_params.erase("language");
     const std::vector<const char*> ext_keys = {"encoding", "paperSize", "exportType", "ocrPreference", "quality", "exportFormat"};
     for (std::vector<const char*>::const_iterator it = ext_keys.begin(); it != ext_keys.end(); ++it) {
         const auto json_it = request.params.find(*it);
@@ -5101,6 +5133,10 @@ Json CommandApplicationService::HandleOcrExtractText(const std::string& connecti
     }
 
     SdkOcrExtractTextRequest extract_request;
+    std::string language_error;
+    if (!ReadSdkOcrLanguage(request.params, &extract_request.language, &language_error)) {
+        return BuildWsResponse(request.request_id, SdkStatusCode::InvalidParams, language_error);
+    }
     extract_request.input_upload_id = GetOptionalStringField(request.params, "input_upload_id");
     extract_request.input_path = GetOptionalStringField(request.params, "input_path");
     if (!extract_request.input_upload_id.empty()) {

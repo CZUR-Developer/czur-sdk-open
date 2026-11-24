@@ -4,11 +4,47 @@
 
 All notable changes to the CZUR Open SDK are documented in this file.
 
-## [0.0.8]
+## [0.1.2] - 2026-11-06
+### Fixed
+
+- Fixed macOS installation and upgrade failures caused by partially migrated TLS certificate/key pairs or unreadable installer-managed private keys. Managed credentials are now synchronized and recovered as one validated set, while valid customer-provided credentials remain unchanged.
+- Fixed SDK Open LaunchAgent startup after a fresh installation, upgrade, certificate rotation, or login on both Apple Silicon and Intel Macs. The 397-day leaf-certificate lifetime and 90-day renewal window remain unchanged.
+  
+## [0.1.1] - 2026-11-05
 
 ### Changed
 
-- Optimized the capture pipeline to support asynchronous processing of the acquisition stream, decoupling image acquisition from subsequent processing.
+- Improved static barcode and QR code recognition on Windows and macOS, including Data Matrix and recognition of rotated, inverted, low-contrast, and colored-label images.
+- Improved detection of multiple barcodes in a single image, preserving identical content at different positions while removing duplicate detections of the same barcode.
+- Optimized static recognition efficiency by avoiding repeated decoding of identical image inputs and processing independent scan passes in parallel on Windows and macOS.
+
+
+## [0.1.0] - 2026-10-23
+
+### Fixed
+
+- Fixed an issue where frames could be dropped during photo capture in specific scenarios.
+
+## [0.0.9] - 2026-10-22
+
+### Added
+
+- `device.open` now returns the device serial number (SN) after successfully opening the device.
+- Added a rotation mechanism for the local TLS CA certificate.
+
+### Changed
+
+- Upgraded the CZOCR recognition model to support 89 languages.
+
+### Fixed
+
+- Fixed an issue where Safari on macOS rejected the CA certificate because its validity period was too long.
+
+## [0.0.8] - 2026-09-28
+
+### Changed
+
+- Optimized the capture pipeline to support asynchronous processing of capture streams.
 
 ## [0.0.7] - 2026-09-16
 

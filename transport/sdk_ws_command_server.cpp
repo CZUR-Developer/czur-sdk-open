@@ -427,6 +427,17 @@ void SdkWsCommandServer::Stop() {
     SDK_OPEN_LOG_INFO("[sdk_ws_command_server] stopped");
 }
 
+bool SdkWsCommandServer::ReloadTls() {
+    if (!tls_config_.enabled) {
+        return true;
+    }
+    if (!running_.load()) {
+        return Start();
+    }
+    Stop();
+    return Start();
+}
+
 SdkWsCommandServer::Stats SdkWsCommandServer::GetStats() const {
     Stats stats;
     if (!impl_) {

@@ -9,6 +9,7 @@
 #include <chrono>
 #include <utility>
 #include <cstdlib>
+#include <cstdio>
 #include <cerrno>
 #include <cstring>
 #include <vector>
@@ -37,6 +38,7 @@
 #include "sdk_config.h"
 #include "sdk_logger.h"
 #include "sdk_runtime_paths.h"
+#include "sdk_tls_certificate_manager.h"
 
 namespace {
 
@@ -141,89 +143,6 @@ bool SetDefaultEnvironmentValue(const char* name, const std::string& value) {
     return ::setenv(name, value.c_str(), 1) == 0;
 }
 
-bool CopyFileIfMissing(const std::string& source,
-                       const std::string& destination,
-                       mode_t mode) {
-    struct stat destination_stat;
-    if (::lstat(destination.c_str(), &destination_stat) == 0) {
-        if (!S_ISREG(destination_stat.st_mode)) {
-            errno = EINVAL;
-            return false;
-        }
-        return ::chmod(destination.c_str(), mode) == 0;
-    }
-    if (errno != ENOENT) {
-        return false;
-    }
-
-    const int source_fd = ::open(source.c_str(), O_RDONLY);
-    if (source_fd < 0) {
-        return false;
-    }
-
-    const int destination_fd = ::open(
-        destination.c_str(), O_WRONLY | O_CREAT | O_EXCL, mode);
-    if (destination_fd < 0) {
-        const int open_error = errno;
-        ::close(source_fd);
-        if (open_error == EEXIST) {
-            if (::lstat(destination.c_str(), &destination_stat) != 0 ||
-                !S_ISREG(destination_stat.st_mode)) {
-                errno = EINVAL;
-                return false;
-            }
-            return ::chmod(destination.c_str(), mode) == 0;
-        }
-        errno = open_error;
-        return false;
-    }
-
-    bool copied = true;
-    char buffer[16 * 1024];
-    while (copied) {
-        const ssize_t bytes_read = ::read(source_fd, buffer, sizeof(buffer));
-        if (bytes_read == 0) {
-            break;
-        }
-        if (bytes_read < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            copied = false;
-            break;
-        }
-
-        ssize_t written = 0;
-        while (written < bytes_read) {
-            const ssize_t result = ::write(
-                destination_fd, buffer + written,
-                static_cast<size_t>(bytes_read - written));
-            if (result < 0 && errno == EINTR) {
-                continue;
-            }
-            if (result <= 0) {
-                copied = false;
-                break;
-            }
-            written += result;
-        }
-    }
-
-    const int copy_error = errno;
-    if (::close(source_fd) != 0) {
-        copied = false;
-    }
-    if (::close(destination_fd) != 0) {
-        copied = false;
-    }
-    if (!copied) {
-        ::unlink(destination.c_str());
-        errno = copy_error;
-        return false;
-    }
-    return ::chmod(destination.c_str(), mode) == 0;
-}
-
 bool PrepareMacRuntimeEnvironment() {
     const char* home = std::getenv("HOME");
     if (home == nullptr || home[0] == '\0') {
@@ -264,25 +183,23 @@ bool PrepareMacRuntimeEnvironment() {
     }
 
     const std::string executable_dir = GetExecutableDir();
-    const std::string certificate_name = "sdk-runtime.localhost.fullchain.pem";
-    const std::string private_key_name = "sdk-runtime.localhost.key.pem";
-    const std::string packaged_tls_root =
-        editor::sdk::JoinPath(executable_dir, "tls");
-    const std::string certificate_path =
-        editor::sdk::JoinPath(tls_root, certificate_name);
-    const std::string private_key_path =
-        editor::sdk::JoinPath(tls_root, private_key_name);
-
-    if (!CopyFileIfMissing(
-            editor::sdk::JoinPath(packaged_tls_root, certificate_name),
-            certificate_path, 0644) ||
-        !CopyFileIfMissing(
-            editor::sdk::JoinPath(packaged_tls_root, private_key_name),
-            private_key_path, 0600)) {
-        std::cerr << "failed to initialize SDK Open TLS files: "
-                  << std::strerror(errno) << std::endl;
+    editor::sdk::SdkTlsConfig system_config;
+    system_config.certificate_chain_file = editor::sdk::JoinPath(
+        editor::sdk::JoinPath(executable_dir, "tls"), "sdk-runtime.localhost.fullchain.pem");
+    system_config.private_key_file = editor::sdk::JoinPath(
+        editor::sdk::JoinPath(executable_dir, "tls"), "sdk-runtime.localhost.key.pem");
+    editor::sdk::SdkTlsConfig user_config;
+    user_config.certificate_chain_file = editor::sdk::JoinPath(tls_root, "sdk-runtime.localhost.fullchain.pem");
+    user_config.private_key_file = editor::sdk::JoinPath(tls_root, "sdk-runtime.localhost.key.pem");
+    std::string tls_error;
+    if (!editor::sdk::SdkTlsCertificateManager::PrepareMacCredentials(
+            editor::sdk::SdkTlsCertificateManager::PathsFromConfig(system_config),
+            editor::sdk::SdkTlsCertificateManager::PathsFromConfig(user_config), &tls_error)) {
+        std::cerr << "failed to prepare SDK Open TLS: " << tls_error << std::endl;
         return false;
     }
+    const std::string& certificate_path = user_config.certificate_chain_file;
+    const std::string& private_key_path = user_config.private_key_file;
 
     if (!SetDefaultEnvironmentValue("CZUR_SDK_RUNTIME_DIR", state_root) ||
         !SetDefaultEnvironmentValue("SDK_OPEN_LOG_DIR", log_root) ||
@@ -553,6 +470,19 @@ std::unique_ptr<editor::sdk::SdkApp> CreateSdkOpenApp(
     editor::sdk::InitializeSdkOpenLogger();
     editor::sdk::SdkConfig config = LoadSdkOpenConfig(config_path, use_local_tls_asset_url);
 
+    if (config.tls.enabled) {
+        const editor::sdk::SdkTlsRotationPolicy policy;
+        const editor::sdk::SdkTlsCertificatePaths paths =
+            editor::sdk::SdkTlsCertificateManager::PathsFromConfig(config.tls);
+        bool rotated = false;
+        std::string tls_error;
+        if (!editor::sdk::SdkTlsCertificateManager::RotateIfNeeded(
+                paths, policy, &rotated, &tls_error)) {
+            SDK_OPEN_LOG_ERROR("[sdk_open_app] managed TLS certificate check failed: {}", tls_error);
+            return std::unique_ptr<editor::sdk::SdkApp>();
+        }
+    }
+
 #if defined(_WIN32)
     if (!config.twain_work_dir.empty() && _putenv_s("CZUR_TWAIN_WORK_DIR", config.twain_work_dir.c_str()) != 0) {
         SDK_OPEN_LOG_WARN("[sdk_open_app] failed to set CZUR_TWAIN_WORK_DIR");
@@ -578,6 +508,9 @@ std::unique_ptr<editor::sdk::SdkApp> CreateSdkOpenApp(
 #if defined(_WIN32)
 int RunSdkOpenAppUntilEvent(const std::string& config_path, HANDLE shutdown_event) {
     std::unique_ptr<editor::sdk::SdkApp> app = CreateSdkOpenApp(config_path);
+    if (!app) {
+        return 1;
+    }
     if (!app->Start()) {
         SDK_OPEN_LOG_ERROR("[sdk_open_app] failed to start");
         return 1;
@@ -653,6 +586,43 @@ int main(int argc, char* argv[]) {
     }
 #endif
     std::string config_path;
+    bool provision_tls = false;
+    bool renew_tls = false;
+    std::string provision_tls_dir;
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i] != nullptr ? argv[i] : "";
+        if (arg == "--provision-tls") {
+            provision_tls = true;
+        } else if (arg == "--renew-tls") {
+            renew_tls = true;
+        } else if (arg == "--provision-tls-dir" && i + 1 < argc) {
+            provision_tls_dir = argv[++i];
+        }
+    }
+    if (provision_tls || renew_tls) {
+        if (provision_tls_dir.empty()) {
+            std::cerr << "--provision-tls-dir is required with --provision-tls" << std::endl;
+            return 2;
+        }
+        editor::sdk::SdkTlsCertificatePaths paths;
+        paths.tls_dir = provision_tls_dir;
+        paths.root_certificate = editor::sdk::JoinPath(provision_tls_dir, "local-runtime-root-ca.crt");
+        paths.root_private_key = editor::sdk::JoinPath(provision_tls_dir, "local-runtime-root-ca.key.pem");
+        paths.certificate_chain = editor::sdk::JoinPath(provision_tls_dir, "sdk-runtime.localhost.fullchain.pem");
+        paths.private_key = editor::sdk::JoinPath(provision_tls_dir, "sdk-runtime.localhost.key.pem");
+        paths.state = editor::sdk::JoinPath(provision_tls_dir, "tls-state.json");
+        std::string error;
+        const bool success = renew_tls
+            ? editor::sdk::SdkTlsCertificateManager::RenewLeaf(
+                  paths, editor::sdk::SdkTlsRotationPolicy(), &error)
+            : editor::sdk::SdkTlsCertificateManager::Provision(
+                  paths, editor::sdk::SdkTlsRotationPolicy(), false, &error);
+        if (!success) {
+            std::cerr << "failed to provision SDK Open TLS: " << error << std::endl;
+            return 1;
+        }
+        return 0;
+    }
 #if defined(_WIN32)
     bool run_as_service = false;
     bool install_service = false;
@@ -713,6 +683,9 @@ int main(int argc, char* argv[]) {
 #endif
 
     std::unique_ptr<editor::sdk::SdkApp> app = CreateSdkOpenApp(config_path, run_as_launch_agent);
+    if (!app) {
+        return 1;
+    }
     if (!app->Start()) {
         SDK_OPEN_LOG_ERROR("[sdk_open_app] failed to start");
 #if defined(_WIN32)
@@ -768,6 +741,12 @@ int main(int argc, char* argv[]) {
 #endif
     SDK_OPEN_LOG_INFO("[sdk_open_app] shutdown requested, signal={}", signal_number);
     app->Stop();
+#endif
+
+#if defined(SDK_USE_PRIVATE_PROVIDER) && !defined(_WIN32)
+    // Cached CZOCR handlers must be destroyed before the dynamically loaded
+    // algorithm library tears down its process-global logging state.
+    editor::sdk::private_impl::ShutdownOcrRuntime();
 #endif
     return 0;
 }

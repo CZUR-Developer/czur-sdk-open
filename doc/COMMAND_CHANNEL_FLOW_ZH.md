@@ -87,6 +87,23 @@ wss://127.0.0.1:18090
 }
 ```
 
+### `device.open` 的设备唯一 SN
+
+成功打开设备且通过设备指令读取到有效唯一 SN 时，响应 `data` 额外包含可选字符串字段 `device_sn`。
+它不是 UVC 枚举/连接时的 SN，也不是 `device_id`；不会使用这些标识或历史缓存作为兜底。
+不支持读取、读取失败或结果无效时，省略 `device_sn`（不返回空字符串或 `null`），不影响原有打开结果。
+`device.list` 和 `device.get` 不返回此字段，客户端应允许该字段缺失。
+
+以下为 `data` 的局部示例，SN 仅为示意，其余响应字段保持不变：
+
+```json
+{
+  "device_id": "04fc:6333:01.00.00:b1d6",
+  "opened": true,
+  "device_sn": "AM3300123456789A"
+}
+```
+
 ## 事件模型
 
 服务端主动事件与请求响应分离：
@@ -391,11 +408,15 @@ Demo 站点通过资源服务的 `POST /api/uploads/files` 上传浏览器选择
 
 OCR 与识别方法：
 
-- `ocr.extract_text`：对单张图片做轻量 OCR，返回文字块和图片坐标系下的矩形。
-- `ocr.recognize`：提交异步 OCR 导出任务。支持 `input_upload_ids` 或 `input_files`、可选 `output_path` 或 `output_dir`、`format`，以及 `encoding`、`paperSize`、`exportType`、`ocrPreference`、`quality`、`exportFormat` 等导出参数。导出格式支持 `txt`、`pdf`、`docx`、`xlsx`、`ofd`、`json`。其中 `quality` 继续作为现有公开参数使用；在 Linux 版 PDF/OFD OCR 导出中，它控制双层 PDF/OFD 图片层的导出压缩质量。OCR 识别阶段仍使用原始上传/输入图片，不会先压缩后识别，避免降低识别率。
+- `ocr.extract_text`：对单张图片做轻量 OCR，返回文字块和图片坐标系下的矩形。可选的 `language` 参数用于选择 CZOCR 识别语言。
+- `ocr.recognize`：提交异步 OCR 导出任务。支持 `input_upload_ids` 或 `input_files`、可选 `output_path` 或 `output_dir`、`format`、`language`，以及 `encoding`、`paperSize`、`exportType`、`ocrPreference`、`quality`、`exportFormat` 等导出参数。同一任务的所有输入图片使用一种语言。导出格式支持 `txt`、`pdf`、`docx`、`xlsx`、`ofd`、`json`。其中 `quality` 继续作为现有公开参数使用；在 Linux 版 PDF/OFD OCR 导出中，它控制双层 PDF/OFD 图片层的导出压缩质量。OCR 识别阶段仍使用原始上传/输入图片，不会先压缩后识别，避免降低识别率。
 - `ocr.get`：查询 OCR 任务状态。
 - `ocr.cancel`：请求取消 OCR 任务。
 - `recognition.barcode_detect`：对静态图片做条码/二维码识别。实时条码识别归属采集/视频流，不由该方法启动。
+
+两个 OCR 方法都通过 `params.language` 接收一个 CZOCR 语言代码。省略该字段等同于 `"auto"`。`auto` 保持当前引擎默认值，现阶段实际使用简体中文（`ch`）模型，不承诺真正的全语种自动检测。显式传空值、非字符串、未知代码或当前暂缓上线的代码时返回 `InvalidParams`，不会静默回退。
+
+支持的代码为：`auto`、`ch`、`hu`、`en`、`rs_latin`、`fr`、`id`、`de`、`oc`、`japan`、`is`、`korean`、`lt`、`chinese_cht`、`mi`、`af`、`ms`、`it`、`nl`、`es`、`no`、`bs`、`pl`、`pt`、`sk`、`cs`、`sl`、`cy`、`sq`、`da`、`sv`、`et`、`sw`、`ga`、`tl`、`hr`、`tr`、`uz`、`la`、`ru`、`be`、`uk`、`th`、`el`、`ku`、`lv`、`mt`、`ro`、`fi`、`eu`、`gl`、`lb`、`rm`、`ca`、`qu`、`te`、`rs_cyrillic`、`bg`、`mn`、`ady`、`kbd`、`av`、`inh`、`ce`、`lki`、`lez`、`kk`、`ky`、`tg`、`mk`、`tt`、`ba`、`udm`、`kv`、`bua`、`xal`、`tyv`、`sah`、`kaa`、`ar`、`hi`、`mr`、`ne`、`bh`、`mai`、`bho`、`mah`、`new`、`gom`、`ta`。
 
 OCR 文字块提取示例：
 
@@ -404,7 +425,8 @@ OCR 文字块提取示例：
   "request_id": "req-ocr-text-001",
   "method": "ocr.extract_text",
   "params": {
-    "input_upload_id": "img-1760000000-1"
+    "input_upload_id": "img-1760000000-1",
+    "language": "en"
   }
 }
 ```
@@ -419,6 +441,7 @@ OCR 导出示例：
     "input_upload_ids": ["img-1760000000-1", "img-1760000000-2"],
     "output_path": "/tmp/demo.txt",
     "format": "txt",
+    "language": "en",
     "exportType": "multi-page",
     "encoding": "utf-8",
     "quality": 90
@@ -439,13 +462,27 @@ OCR 任务查询/取消示例：
 
 条码识别示例：
 
+不传 `formats` 或传空数组时，默认识别 QR、Data Matrix、PDF417、Aztec、MaxiCode、
+Code39、Code93、Code128、Codabar、ITF、EAN8/13、UPCA/E、RSS14 与 RSS Expanded。
+传入 `formats` 时仅识别选中的码制；例如 `["datamatrix"]`，也接受现有的
+`data_matrix`、`qr_code`、`code_128` 等别名及大小写变体。`detect_type` 仍作为旧参数别名。
+`upc_ean_extension` 需与 EAN/UPC 主码制组合使用，不能独立识别。
+
+静态识别使用客户端与 SDK 共用的公共模块，保留原始分辨率并执行有限的二值化增强。
+Windows/macOS 使用 ZXing-C++ 3.1.1，每轮读取多个码；Linux 保留现有旧引擎，
+每轮单码，增加旋转、反色及二值化重试，再合并各轮结果。Linux 不保证完整多码覆盖，
+也不保证复杂样图的 20/20 检出率，不要求升级现有 Ubuntu 镜像或编译器。
+响应的 `detected` 表示是否至少检测到一个码，`count` 等于 `barcodes` 数组长度。
+每项保留原有的 `format` 数值和 `format_name`，`text` 为解码文本，`points` 为原图坐标（新版为四角，Linux 旧引擎保留原生点集，部分一维码为两个点）。
+结果按从上到下、同一行从左到右排列；不同位置的相同内容保留为多个码。
+低对比度大图的增强识别需要更多处理时间。实时视频识别仍使用原有采集链路。
+
 ```json
 {
   "request_id": "req-barcode-001",
   "method": "recognition.barcode_detect",
   "params": {
-    "input_upload_id": "img-1760000000-1",
-    "formats": ["qrcode", "pdf417", "code128"]
+    "input_upload_id": "img-1760000000-1"
   }
 }
 ```

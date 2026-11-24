@@ -64,6 +64,7 @@ public:
     static bool ShouldServeSpaFallback(const std::string& path, const std::string& accept_header);
     bool Start();
     void Stop();
+    bool ReloadTls();
 
 private:
     struct Listener;

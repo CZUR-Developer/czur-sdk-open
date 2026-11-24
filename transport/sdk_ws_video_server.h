@@ -40,6 +40,7 @@ public:
     void SetConnectionAuthHandler(ConnectionAuthHandler handler);
     bool Start();
     void Stop();
+    bool ReloadTls();
     void PublishFrame(const SdkVideoFrame& frame);
     void CloseStream(const std::string& stream_id);
     Stats GetStats() const;
