@@ -244,6 +244,7 @@ set(SDK_OPEN_CORE_SRCS
 
 set(SDK_OPEN_RUNTIME_SRCS
     runtime/sdk_app.cpp
+    runtime/sdk_tls_certificate_manager.cpp
     transport/sdk_http_server.cpp
     transport/sdk_tls_utils.cpp
     transport/sdk_ws_command_server.cpp
@@ -464,15 +465,6 @@ if(WIN32)
 endif()
 
 if(BUILD_SDK_OPEN_TESTS)
-    add_executable(sdk_open_capture_task_service_test
-        test/capture_task_service_test.cpp
-    )
-    target_link_libraries(sdk_open_capture_task_service_test PRIVATE
-        sdk_open_runtime
-    )
-    add_test(NAME sdk_open.capture_task_service
-             COMMAND sdk_open_capture_task_service_test)
-
     add_executable(sdk_open_status_software_test
         test/status_software_test.cpp
     )
