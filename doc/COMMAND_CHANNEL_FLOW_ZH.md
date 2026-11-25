@@ -42,6 +42,7 @@ wss://127.0.0.1:18090
 - `system.*` 可直接调用
 - `auth.create_session` 校验 API Key 并签发连接绑定的 `session_token`
 - `auth.get_context` 返回当前 `auth_context`
+- `auth_context.region` 和管理接口 `/api/auth` 的 `sessions[].region` 透出 API Key 已解析区域（`cn` / `global`），创建、刷新和查询会话时保留。旧 API Key 缺少区域时由 codec 按 `cn` 兼容；旧 session token 或未提供区域的 Provider 返回空串，界面显示未设置，不按语言、IP 或设备推断区域。该字段仅供展示，不改变授权判断或服务地址。
 - `auth.activate_offline` 可把一个离线 API Key 从受限状态升级为本机解封状态
 - `auth.refresh_session` 用于轮换会话 token
 - 业务方法默认复用当前连接绑定的会话
@@ -156,6 +157,7 @@ wss://127.0.0.1:18090
       "licensed_account_type_code": 1,
       "auth_scene": "plugin",
       "license_mode": "offline_api_key",
+      "region": "cn",
       "host_auth_mode": "activation_required",
       "entitlement_state": "offline_trial",
       "commercial_authorized": false,

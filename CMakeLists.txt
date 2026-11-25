@@ -474,6 +474,19 @@ if(BUILD_SDK_OPEN_TESTS)
     add_test(NAME sdk_open.status_software
              COMMAND sdk_open_status_software_test)
 
+    add_executable(sdk_open_auth_region_contract_test
+        test/auth_region_contract_test.cpp
+    )
+    target_include_directories(sdk_open_auth_region_contract_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/providers/mock"
+    )
+    target_link_libraries(sdk_open_auth_region_contract_test PRIVATE
+        sdk_open_runtime
+        sdk_mock_providers
+    )
+    add_test(NAME sdk_open.auth_region_contract
+             COMMAND sdk_open_auth_region_contract_test)
+
     add_executable(sdk_open_ocr_language_contract_test
         test/ocr_language_contract_test.cpp
     )

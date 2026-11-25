@@ -42,6 +42,8 @@ struct AuthContext {
     int licensed_account_type_code = -1;
     std::string auth_scene;
     std::string license_mode;
+    // Metadata from the verified API Key; empty when the provider has no region.
+    std::string region;
     std::string host_auth_mode;
     std::string entitlement_state;
     bool commercial_authorized = false;
