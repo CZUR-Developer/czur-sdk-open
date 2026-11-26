@@ -25,7 +25,7 @@
             </span>
           </div>
 
-          <dl class="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <dl class="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
             <div class="rounded-2xl bg-slate-50 px-4 py-3">
               <dt class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">API Key</dt>
               <dd class="mt-2 break-all font-mono text-sm text-slate-900">{{ session.maskedToken || '-' }}</dd>
@@ -41,6 +41,10 @@
             <div class="rounded-2xl bg-slate-50 px-4 py-3">
               <dt class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Device scope</dt>
               <dd class="mt-2 font-mono text-sm text-slate-900">{{ session.deviceScopeCount }}</dd>
+            </div>
+            <div class="rounded-2xl bg-slate-50 px-4 py-3">
+              <dt class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{{ t('auth.apiKeyRegion') }}</dt>
+              <dd class="mt-2 font-mono text-sm text-slate-900">{{ session.region || '-' }}</dd>
             </div>
           </dl>
 

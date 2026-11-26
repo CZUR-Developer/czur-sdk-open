@@ -36,6 +36,7 @@ export interface AdminAuthSession {
   maskedToken: string;
   maskedSessionToken: string;
   licenseMode: string;
+  region?: string;
   hostAuthMode: string;
   accountType: string;
   accountTypeCode?: number;

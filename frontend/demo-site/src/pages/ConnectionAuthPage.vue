@@ -140,6 +140,7 @@ const authContextItems = computed(() => {
       { label: t('labels.accountType'), value: t('common.notSet') },
       { label: t('labels.licenseMode'), value: t('common.notSet') },
       { label: t('labels.deviceScope'), value: t('common.notSet') },
+      { label: t('labels.apiKeyRegion'), value: t('common.notSet') },
       { label: t('labels.expiresAt'), value: t('common.notSet') },
       { label: t('labels.capabilities'), value: t('common.notSet'), fullWidth: true },
     ];
@@ -157,6 +158,7 @@ const authContextItems = computed(() => {
     { label: t('labels.accountType'), value: authContext.account_type ?? t('common.notSet') },
     { label: t('labels.licenseMode'), value: authContext.license_mode ?? t('common.notSet') },
     { label: t('labels.deviceScope'), value: deviceScope || t('common.notSet') },
+    { label: t('labels.apiKeyRegion'), value: authContext.region || t('common.notSet'), monospace: true },
     {
       label: t('labels.expiresAt'),
       value: typeof authContext.expires_at === 'number' && authContext.expires_at > 0 ? String(authContext.expires_at) : '0',
