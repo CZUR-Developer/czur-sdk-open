@@ -112,6 +112,7 @@ int main() {
     try {
         editor::sdk::TestSessionRegion("cn");
         editor::sdk::TestSessionRegion("global");
+        editor::sdk::TestSessionRegion("default");
         // Providers without parsed metadata must not invent an issuance region.
         editor::sdk::TestSessionRegion("");
         std::cout << "sdk_open_auth_region_contract_test passed" << std::endl;
