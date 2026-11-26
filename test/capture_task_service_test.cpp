@@ -747,6 +747,13 @@ void TestFifoRateLimitHardGrabAndSummary() {
     }
     hardgrab.raw_capture.original_path = hardgrab_path;
     hardgrab.raw_capture.output_path = hardgrab_path;
+#ifdef _WIN32
+    // The Windows provider may return the same file with forward slashes after
+    // crossing the DLL boundary. Staging must not truncate that file.
+    hardgrab.raw_capture.output_path = hardgrab_path;
+    std::replace(hardgrab.raw_capture.output_path.begin(),
+                 hardgrab.raw_capture.output_path.end(), '\\', '/');
+#endif
     hardgrab.raw_capture.size = 22;
     const CaptureTaskStartResult hardgrab_task = ReserveAndStart(&service, hardgrab);
     Require(WaitForTerminal(&service, "connection-a", hardgrab_task.task.task_id), "hardgrab task should finish");
