@@ -98,6 +98,28 @@ bool CopyFileBinary(const std::string& input_path, const std::string& output_pat
     return output.good();
 }
 
+bool EquivalentFilePath(const std::string& left, const std::string& right) {
+    if (left == right) return true;
+#ifdef _WIN32
+    if (left.empty() || right.empty()) return false;
+    std::string normalized_left = left;
+    std::string normalized_right = right;
+    for (std::size_t i = 0; i < normalized_left.size(); ++i) {
+        if (normalized_left[i] == '\\') normalized_left[i] = '/';
+        normalized_left[i] = static_cast<char>(std::tolower(
+            static_cast<unsigned char>(normalized_left[i])));
+    }
+    for (std::size_t i = 0; i < normalized_right.size(); ++i) {
+        if (normalized_right[i] == '\\') normalized_right[i] = '/';
+        normalized_right[i] = static_cast<char>(std::tolower(
+            static_cast<unsigned char>(normalized_right[i])));
+    }
+    return normalized_left == normalized_right;
+#else
+    return false;
+#endif
+}
+
 std::string SanitizeAssetToken(const std::string& value, const std::string& fallback) {
     std::string token;
     for (std::string::const_iterator it = value.begin(); it != value.end(); ++it) {
@@ -196,14 +218,15 @@ public:
                 pipeline_result_.status = "failed";
                 return CStatus(pipeline_result_.message);
             }
-            if (source_path != original_path_ && !CopyFileBinary(source_path, original_path_)) {
+            if (!EquivalentFilePath(source_path, original_path_) &&
+                !CopyFileBinary(source_path, original_path_)) {
                 FinishStage("capture_raw", "failed", ProviderName(providers_device), "failed to stage captured original", {}, {});
                 pipeline_result_.code = ToCode(SdkStatusCode::ProviderCallFailed);
                 pipeline_result_.message = "failed to stage captured original";
                 pipeline_result_.status = "failed";
                 return CStatus(pipeline_result_.message);
             }
-            if (source_path == original_path_ && !FileExists(original_path_)) {
+            if (EquivalentFilePath(source_path, original_path_) && !FileExists(original_path_)) {
                 FinishStage("capture_raw", "failed", ProviderName(providers_device), "captured original does not exist", {}, {});
                 pipeline_result_.code = ToCode(SdkStatusCode::CaptureFailed);
                 pipeline_result_.message = "captured original does not exist";
@@ -213,7 +236,8 @@ public:
             laser_path_.clear();
             if (!result.laser_path.empty()) {
                 laser_path_ = JoinPath(output_dir_, "laser.jpg");
-                if (result.laser_path != laser_path_ && !CopyFileBinary(result.laser_path, laser_path_)) {
+                if (!EquivalentFilePath(result.laser_path, laser_path_) &&
+                    !CopyFileBinary(result.laser_path, laser_path_)) {
                     FinishStage("capture_raw", "failed", ProviderName(providers_device), "failed to stage captured laser", {}, {});
                     pipeline_result_.code = ToCode(SdkStatusCode::ProviderCallFailed);
                     pipeline_result_.message = "failed to stage captured laser";
@@ -434,6 +458,16 @@ public:
         return result;
     }
 
+    CStatus CheckCancelled() {
+        if (request_.should_cancel && request_.should_cancel()) {
+            pipeline_result_.code = ToCode(SdkStatusCode::Ok);
+            pipeline_result_.message = "cancelled";
+            pipeline_result_.status = "cancelled";
+            return CStatus("cancelled");
+        }
+        return CStatus();
+    }
+
 private:
     enum ProviderKind {
         providers_device,
@@ -540,6 +574,8 @@ private:
     }
 
     CStatus ApplyColorModeForOutput(ProcessedOutput& output, bool single) {
+        const CStatus cancelled = CheckCancelled();
+        if (cancelled.isErr()) return cancelled;
         const std::string stage_name = single ? "color_mode" : ("color_mode_" + output.output_id);
         StartStage(stage_name);
 
@@ -563,6 +599,8 @@ private:
     }
 
     CStatus FormatConvertForOutput(ProcessedOutput& output, bool single) {
+        const CStatus cancelled = CheckCancelled();
+        if (cancelled.isErr()) return cancelled;
         const std::string stage_name = single ? "format_convert" : ("format_convert_" + output.output_id);
         StartStage(stage_name);
 
@@ -650,6 +688,8 @@ private:
     }
 
     CStatus GenerateThumbnail(const ThumbnailSpec& spec) {
+        const CStatus cancelled = CheckCancelled();
+        if (cancelled.isErr()) return cancelled;
         if (!spec.enabled) {
             return CStatus();
         }
@@ -738,22 +778,37 @@ CapturePipelineService::CapturePipelineService(const ProviderBundle& providers)
 CapturePipelineResult CapturePipelineService::Run(const CapturePipelineRequest& request,
                                                   CaptureStageCallback stage_callback) const {
     CapturePipelineContext context(request, device_facade_, graphic_facade_, providers_, stage_callback);
-    CStatus status = context.CaptureRaw();
+    CStatus status = context.CheckCancelled();
+    if (!status.isErr()) {
+        status = context.CaptureRaw();
+    }
+    if (!status.isErr()) {
+        status = context.CheckCancelled();
+    }
     if (!status.isErr()) {
         status = context.RunThumbnail(ThumbnailTarget::Original);
+    }
+    if (!status.isErr()) {
+        status = context.CheckCancelled();
     }
     if (!status.isErr()) {
         status = context.PageProcess();
     }
     if (!status.isErr()) {
+        status = context.CheckCancelled();
+    }
+    if (!status.isErr()) {
         status = context.ProcessOutputWorkflow();
+    }
+    if (!status.isErr()) {
+        status = context.CheckCancelled();
     }
     if (!status.isErr()) {
         status = context.FinalizeResult();
     }
 
     CapturePipelineResult result = context.Result();
-    if (status.isErr() && result.status != "failed") {
+    if (status.isErr() && result.status != "failed" && result.status != "cancelled") {
         result.status = "failed";
         result.code = ToCode(SdkStatusCode::ProviderCallFailed);
         result.message = status.getInfo();

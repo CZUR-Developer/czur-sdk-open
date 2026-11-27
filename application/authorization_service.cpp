@@ -159,6 +159,7 @@ void CopyAuthContextFields(const AuthContext& source, AuthContext* target) {
     target->licensed_account_type_code = source.licensed_account_type_code;
     target->auth_scene.assign(source.auth_scene.c_str(), source.auth_scene.size());
     target->license_mode.assign(source.license_mode.c_str(), source.license_mode.size());
+    target->region.assign(source.region.c_str(), source.region.size());
     target->host_auth_mode.assign(source.host_auth_mode.c_str(), source.host_auth_mode.size());
     target->entitlement_state.assign(source.entitlement_state.c_str(), source.entitlement_state.size());
     target->commercial_authorized = source.commercial_authorized;
@@ -267,6 +268,7 @@ Json AuthContextDataToJson(const AuthContext& auth_context) {
         {"licensed_account_type_code", auth_context.licensed_account_type_code},
         {"auth_scene", auth_context.auth_scene},
         {"license_mode", auth_context.license_mode},
+        {"region", auth_context.region},
         {"host_auth_mode", auth_context.host_auth_mode},
         {"entitlement_state", auth_context.entitlement_state},
         {"commercial_authorized", auth_context.commercial_authorized},
@@ -304,6 +306,7 @@ AuthContext AuthContextFromJson(const Json& value) {
         IntField(value, "licensed_account_type_code", AccountTypeCode(context.licensed_account_type));
     context.auth_scene = StringField(value, "auth_scene");
     context.license_mode = StringField(value, "license_mode");
+    context.region = StringField(value, "region");
     context.host_auth_mode = StringField(value, "host_auth_mode");
     context.entitlement_state = StringField(value, "entitlement_state");
     context.commercial_authorized = BoolField(value, "commercial_authorized", false);

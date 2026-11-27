@@ -26,6 +26,7 @@ interface AuthContextPayload {
   account_type_code?: number;
   auth_scene?: string;
   license_mode?: string;
+  region?: string;
   device_scope?: DeviceGrant[];
   expires_at?: number;
   capabilities?: string[];

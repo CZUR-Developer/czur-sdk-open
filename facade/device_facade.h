@@ -31,6 +31,13 @@ public:
 
     DeviceListResult ListDevices(const AuthContext& auth_context) const;
     DeviceGetResult GetDevice(const AuthContext& auth_context, const std::string& device_id) const;
+    // Scope-only preflight for in-process cleanup; never opens/queries resolutions.
+    DeviceGetResult CheckDeviceAccess(const AuthContext& auth_context, const std::string& device_id) const;
+    // Normalize advertised output sizes before task admission. Unsupported devices
+    // ignore target sizing; invalid advertised choices retain the Open diagnostics.
+    int ApplyCaptureOutputCapabilities(const AuthContext& auth_context,
+                                       SdkCaptureProfile* profile,
+                                       std::string* message) const;
     SdkDeviceOpenResult OpenDevice(const AuthContext& auth_context, const SdkDeviceOpenRequest& request) const;
     SdkDeviceCloseResult CloseDevice(const AuthContext& auth_context, const SdkDeviceCloseRequest& request) const;
     void CaptureStill(const AuthContext& auth_context, const SdkCaptureRequest& request, SdkCaptureCallback callback) const;

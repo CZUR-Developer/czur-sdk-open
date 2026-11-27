@@ -218,21 +218,17 @@ if(NOT WIN32)
     target_link_libraries(sdk_open_cgraph PUBLIC pthread)
 endif()
 
-set(SDK_OPEN_RUNTIME_SRCS
-    runtime/sdk_app.cpp
+set(SDK_OPEN_CORE_SRCS
     runtime/sdk_json_utils.cpp
     runtime/sdk_config.cpp
-    runtime/sdk_tls_certificate_manager.cpp
-    transport/sdk_http_server.cpp
-    transport/sdk_tls_utils.cpp
-    transport/sdk_ws_command_server.cpp
-    transport/sdk_ws_video_server.cpp
     application/admin_application_service.cpp
     application/authorization_service.cpp
     application/capture_pipeline_service.cpp
     application/capture_task_service.cpp
     application/command_application_service.cpp
     application/image_enhance_task_service.cpp
+    application/image_enhance_quota.cpp
+    application/image_enhance_workflow_store.cpp
     application/runtime_record_service.cpp
     application/runtime_config_service.cpp
     application/video_session_service.cpp
@@ -244,6 +240,15 @@ set(SDK_OPEN_RUNTIME_SRCS
     facade/sane_facade.cpp
     facade/storage_facade.cpp
     facade/twain_facade.cpp
+)
+
+set(SDK_OPEN_RUNTIME_SRCS
+    runtime/sdk_app.cpp
+    runtime/sdk_tls_certificate_manager.cpp
+    transport/sdk_http_server.cpp
+    transport/sdk_tls_utils.cpp
+    transport/sdk_ws_command_server.cpp
+    transport/sdk_ws_video_server.cpp
 )
 
 add_library(sdk_open_logging STATIC
@@ -265,6 +270,35 @@ target_link_libraries(sdk_open_logging PUBLIC
 if(NOT WIN32)
     target_link_libraries(sdk_open_logging PUBLIC pthread)
 endif()
+
+add_library(sdk_open_core STATIC ${SDK_OPEN_CORE_SRCS})
+target_include_directories(sdk_open_core PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/runtime"
+    "${SDK_OPEN_GENERATED_INCLUDE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/application"
+    "${CMAKE_CURRENT_SOURCE_DIR}/facade"
+    "${CMAKE_CURRENT_SOURCE_DIR}/interfaces"
+)
+target_link_libraries(sdk_open_core PUBLIC
+    sdk_open_interfaces
+    sdk_open_entitlement_policy
+    sdk_open_cgraph
+    sdk_open_logging
+    sdk_open_third_party
+)
+if(SDK_OPEN_USE_PRIVATE_PROVIDER)
+    target_compile_definitions(sdk_open_core PRIVATE SDK_USE_PRIVATE_PROVIDER)
+endif()
+if(MSVC)
+    target_compile_options(sdk_open_core PRIVATE
+        "/FI${CMAKE_CURRENT_SOURCE_DIR}/runtime/sdk_windows_compat.h"
+    )
+endif()
+if(NOT WIN32)
+    target_link_libraries(sdk_open_core PUBLIC pthread)
+endif()
+
+if(BUILD_SDK_OPEN)
 
 add_library(sdk_open_runtime STATIC ${SDK_OPEN_RUNTIME_SRCS})
 target_include_directories(sdk_open_runtime PUBLIC
@@ -289,11 +323,7 @@ target_compile_definitions(sdk_open_runtime PUBLIC
     SDK_OPEN_ENABLE_HTTP_SERVER=$<IF:$<BOOL:${SDK_OPEN_ENABLE_HTTP_SERVER}>,1,0>
 )
 target_link_libraries(sdk_open_runtime PUBLIC
-    sdk_open_interfaces
-    sdk_open_entitlement_policy
-    sdk_open_cgraph
-    sdk_open_logging
-    sdk_open_third_party
+    sdk_open_core
     sdk_open_tls_deps
 )
 if(SDK_OPEN_USE_PRIVATE_PROVIDER)
@@ -306,6 +336,11 @@ endif()
 if(NOT WIN32)
     target_link_libraries(sdk_open_runtime PUBLIC pthread)
 endif()
+set_target_properties(sdk_open_runtime PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+)
+
+endif() # BUILD_SDK_OPEN runtime target
 
 add_library(sdk_mock_providers STATIC
     providers/mock/mock_provider_factory.cpp
@@ -324,11 +359,77 @@ set_target_properties(
     sdk_open_entitlement_policy
     sdk_open_cgraph
     sdk_open_logging
-    sdk_open_runtime
+    sdk_open_core
     sdk_mock_providers
     PROPERTIES
         POSITION_INDEPENDENT_CODE ON
 )
+
+if(BUILD_SDK_OPEN_TESTS)
+    add_executable(sdk_open_image_entitlement_policy_test
+        test/image_entitlement_policy_test.cpp
+    )
+    target_link_libraries(sdk_open_image_entitlement_policy_test PRIVATE
+        sdk_open_entitlement_policy
+    )
+    add_test(NAME sdk_open.image_entitlement_policy
+             COMMAND sdk_open_image_entitlement_policy_test)
+
+    if(UNIX AND NOT APPLE)
+        add_executable(sdk_open_image_enhance_task_lifecycle_test
+            test/image_enhance_task_lifecycle_test.cpp
+        )
+        target_link_libraries(sdk_open_image_enhance_task_lifecycle_test PRIVATE
+            sdk_open_core ${CMAKE_DL_LIBS}
+        )
+        add_test(NAME sdk_open.image_enhance_task_lifecycle
+                 COMMAND sdk_open_image_enhance_task_lifecycle_test)
+        set_tests_properties(sdk_open.image_enhance_task_lifecycle PROPERTIES TIMEOUT 30)
+    endif()
+
+    add_executable(sdk_open_image_enhance_quota_test
+        test/image_enhance_quota_test.cpp
+    )
+    target_link_libraries(sdk_open_image_enhance_quota_test PRIVATE
+        sdk_open_core
+    )
+    add_test(NAME sdk_open.image_enhance_quota
+             COMMAND sdk_open_image_enhance_quota_test)
+
+    add_executable(sdk_open_capture_task_service_test
+        test/capture_task_service_test.cpp
+    )
+    target_link_libraries(sdk_open_capture_task_service_test PRIVATE
+        sdk_open_core
+    )
+    add_test(NAME sdk_open.capture_task_service
+             COMMAND sdk_open_capture_task_service_test)
+
+    if(UNIX AND NOT APPLE)
+        add_executable(sdk_open_image_enhance_workflow_store_test
+            test/image_enhance_workflow_store_test.cpp
+        )
+        target_link_libraries(sdk_open_image_enhance_workflow_store_test PRIVATE
+            sdk_open_core
+        )
+        add_test(NAME sdk_open.image_enhance_workflow_store
+                 COMMAND sdk_open_image_enhance_workflow_store_test)
+        set_tests_properties(sdk_open.image_enhance_workflow_store PROPERTIES TIMEOUT 30)
+    endif()
+
+    add_executable(sdk_open_core_runtime_paths_test
+        test/core_runtime_paths_test.cpp
+    )
+    target_link_libraries(sdk_open_core_runtime_paths_test PRIVATE
+        sdk_open_logging
+    )
+    add_test(NAME sdk_open.core_runtime_paths.default
+             COMMAND sdk_open_core_runtime_paths_test default)
+    add_test(NAME sdk_open.core_runtime_paths.explicit
+             COMMAND sdk_open_core_runtime_paths_test explicit)
+endif()
+
+if(BUILD_SDK_OPEN)
 
 add_executable(sdk_open_app
     runtime/sdk_open_main.cpp
@@ -364,15 +465,6 @@ if(WIN32)
 endif()
 
 if(BUILD_SDK_OPEN_TESTS)
-    add_executable(sdk_open_capture_task_service_test
-        test/capture_task_service_test.cpp
-    )
-    target_link_libraries(sdk_open_capture_task_service_test PRIVATE
-        sdk_open_runtime
-    )
-    add_test(NAME sdk_open.capture_task_service
-             COMMAND sdk_open_capture_task_service_test)
-
     add_executable(sdk_open_status_software_test
         test/status_software_test.cpp
     )
@@ -381,6 +473,19 @@ if(BUILD_SDK_OPEN_TESTS)
     )
     add_test(NAME sdk_open.status_software
              COMMAND sdk_open_status_software_test)
+
+    add_executable(sdk_open_auth_region_contract_test
+        test/auth_region_contract_test.cpp
+    )
+    target_include_directories(sdk_open_auth_region_contract_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/providers/mock"
+    )
+    target_link_libraries(sdk_open_auth_region_contract_test PRIVATE
+        sdk_open_runtime
+        sdk_mock_providers
+    )
+    add_test(NAME sdk_open.auth_region_contract
+             COMMAND sdk_open_auth_region_contract_test)
 
     add_executable(sdk_open_ocr_language_contract_test
         test/ocr_language_contract_test.cpp
@@ -959,3 +1064,5 @@ elseif(BUILD_SDK_WEB)
         COMMENT "Copy sdk web assets into sdk_open_app runtime directory"
     )
 endif()
+
+endif() # BUILD_SDK_OPEN
