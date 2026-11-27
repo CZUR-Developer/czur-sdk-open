@@ -4,6 +4,17 @@
 
 All notable changes to the CZUR Open SDK are documented in this file.
 
+## [0.1.3] - 2026-11-26
+
+### Added
+
+- Added `region` metadata to API Key generation and parsing, preserving the value through the auth context, session lifecycle, Demo site, and Admin site's recent auth events. Legacy API Keys without a declared region are reported as `default`.
+
+### Fixed
+
+- Fixed OCR runtime compatibility issues on Linux ARM builds.
+- Fixed other known issues to improve SDK Open runtime stability and package usability.
+
 ## [0.1.2] - 2026-11-06
 ### Fixed
 

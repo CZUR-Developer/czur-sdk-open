@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <ctime>
 #include <exception>
 #include <fstream>
@@ -91,6 +92,31 @@ bool CopyFileBinary(const std::string& input_path, const std::string& output_pat
 bool FileExists(const std::string& path) {
     struct stat st;
     return !path.empty() && ::stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+}
+
+// Provider and task service may cross a Windows DLL boundary where the same
+// path is returned once with '\\' and once with '/'. Never copy a file onto
+// itself: opening the destination with truncation would destroy the capture.
+bool EquivalentFilePath(const std::string& left, const std::string& right) {
+    if (left == right) return true;
+#ifdef _WIN32
+    if (left.empty() || right.empty()) return false;
+    std::string normalized_left = left;
+    std::string normalized_right = right;
+    for (std::size_t i = 0; i < normalized_left.size(); ++i) {
+        if (normalized_left[i] == '\\') normalized_left[i] = '/';
+        normalized_left[i] = static_cast<char>(std::tolower(
+            static_cast<unsigned char>(normalized_left[i])));
+    }
+    for (std::size_t i = 0; i < normalized_right.size(); ++i) {
+        if (normalized_right[i] == '\\') normalized_right[i] = '/';
+        normalized_right[i] = static_cast<char>(std::tolower(
+            static_cast<unsigned char>(normalized_right[i])));
+    }
+    return normalized_left == normalized_right;
+#else
+    return false;
+#endif
 }
 
 } // namespace
@@ -815,7 +841,8 @@ bool CaptureTaskService::StageCapturedRaw(const std::string& task_id,
     const bool source_exists = !source_path.empty() && FileExists(source_path);
     bool original_persisted = false;
     if (source_exists) {
-        original_persisted = source_path == original_path || CopyFileBinary(source_path, original_path);
+        original_persisted = EquivalentFilePath(source_path, original_path) ||
+            CopyFileBinary(source_path, original_path);
     }
     if (!original_persisted || !FileExists(original_path)) {
         SDK_OPEN_LOG_ERROR(
@@ -843,8 +870,9 @@ bool CaptureTaskService::StageCapturedRaw(const std::string& task_id,
         return true;
     }
     const std::string laser_path = JoinPath(raw_dir, "laser.jpg");
-    if ((raw_capture->laser_path != laser_path && !CopyFileBinary(raw_capture->laser_path, laser_path)) ||
-        (raw_capture->laser_path == laser_path && !FileExists(laser_path))) {
+    if ((!EquivalentFilePath(raw_capture->laser_path, laser_path) &&
+         !CopyFileBinary(raw_capture->laser_path, laser_path)) ||
+        (EquivalentFilePath(raw_capture->laser_path, laser_path) && !FileExists(laser_path))) {
         if (error != NULL) {
             *error = "failed to persist captured laser image";
         }
